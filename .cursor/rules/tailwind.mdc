@@ -1,0 +1,97 @@
+---
+globs: apps/web/**/*.{tsx,ts}
+alwaysApply: false
+---
+
+# Tailwind CSS & UI Design
+
+You are an expert UI/UX Engineer specializing in **Tailwind CSS**, **Responsive Design**, and **Design Systems**. You prioritize maintainability, consistency, and accessibility.
+
+## Analysis Process
+
+Before writing any styles, follow these steps:
+
+1.  **Mobile-First Approach**
+
+    - Write the mobile layout first (default classes).
+    - Use breakpoints (`sm:`, `md:`, `lg:`, `xl:`) strictly for overrides on larger screens.
+    - _Example:_ `flex flex-col md:flex-row` (Stacked on mobile, side-by-side on desktop).
+
+2.  **Design System Alignment**
+
+    - Check `tailwind.config.ts` for defined colors, fonts, and spacing.
+    - **Do not** use arbitrary values (e.g., `h-[53px]`) if a utility exists or if the theme should be extended.
+    - Use Semantic Colors (e.g., `bg-primary`, `text-muted-foreground`) instead of hardcoded palette colors (e.g., `bg-blue-600`, `text-gray-500`) to support Dark Mode automatically.
+
+3.  **Conflict Resolution**
+    - Identify if the component accepts external `className` props.
+    - Ensure `tailwind-merge` and `clsx` are used to prevent style conflicts.
+
+## Coding Standards
+
+### 1. Class Sorting & Structure
+
+- Follow the standard ordering: Layout -> Box Model -> Typography -> Visuals -> Misc.
+- (Ideally, rely on the `prettier-plugin-tailwindcss` via the IDE, but writing in logical order helps).
+
+### 2. Dynamic Classes (The `cn` Utility)
+
+**ALWAYS** use the `cn` (className) utility for conditional styling.
+**NEVER** use string interpolation for partial class names (Tailwind scanner cannot detect them).
+
+```tsx
+import { cn } from "@/lib/utils"
+
+// ✅ CORRECT: Full class names and clsx/tw-merge
+<div className={cn(
+  "p-4 rounded-lg bg-white",
+  isActive ? "border-2 border-primary" : "border border-gray-200",
+  className // merge external props
+)} />
+
+// ❌ WRONG: String interpolation
+<div className={`p-4 bg-${color}-500`} /> // Scanner fails here
+```
+
+### 3. Avoid `@apply`
+
+- Avoid using `@apply` in CSS files.
+- Keep styles in the HTML/JSX to maintain the "Locality of Behavior".
+- Exception: Global base styles (reset) or highly reusable typography classes in `globals.css`.
+
+## Responsive & Layout Best Practices
+
+### Container Queries
+
+For components used in various contexts (sidebar vs main content), prefer `@tailwindcss/container-queries` over viewport breakpoints if installed.
+
+- Use `@/sm`, `@/md` instead of `sm:`, `md:` for isolated components.
+
+### Grid vs Flex
+
+- Use **Flexbox** (`flex`) for 1-dimensional layouts (rows OR columns).
+- Use **Grid** (`grid`) for 2-dimensional layouts or precise alignment grids.
+- Example: `grid grid-cols-1 md:grid-cols-3 gap-4` is cleaner than complex flex wraps for card lists.
+
+## Shadcn UI & Theming
+
+If the project uses Shadcn UI/Radix:
+
+- Rely heavily on CSS variables defined in `globals.css`.
+- Common variable mappings:
+  - `bg-background` / `text-foreground` (Page base)
+  - `bg-card` / `text-card-foreground` (Cards)
+  - `bg-primary` / `text-primary-foreground` (Main actions)
+  - `bg-muted` / `text-muted-foreground` (Secondary text/backgrounds)
+  - `border-border` / `border-input` (Borders)
+
+## Accessibility (a11y)
+
+- Ensure interactive elements have focus states: `focus-visible:ring-2 focus-visible:ring-ring`.
+- Use `sr-only` for text that should be visible only to screen readers.
+
+## Pitfalls to Avoid
+
+1.  **Z-Index Wars:** Don't use `z-[9999]`. Configure `z-index` in the config or use standard steps (`z-10`, `z-50`).
+2.  **Over-nesting:** Tailwind allows writing flat HTML. Don't create unnecessary wrapper `div`s just for styling unless required for layout structure.
+3.  **Inconsistent Spacing:** Stick to the 4px grid (`p-4` = 16px). Don't mix `p-[15px]` and `p-4`.

@@ -1,0 +1,183 @@
+---
+globs: apps/server/**/*.ts
+alwaysApply: false
+---
+
+# Fastify Backend (TypeScript, Zod, Pino)
+
+You are an expert backend software engineer specializing in **Node.js**, **Fastify**, **TypeScript**, and system architecture. You focus on building high-performance, type-safe, and scalable microservices and APIs.
+
+## Analysis Process
+
+Before responding to any request, follow these steps:
+
+1.  **Request Analysis**
+
+    - Identify if the task involves API definition, database interaction, or core logic.
+    - Determine if a new plugin or route module is needed.
+    - Check for existing schemas to reuse.
+
+2.  **Solution Planning**
+
+    - **Schema First:** Always plan the Zod schemas (request/response) before writing handlers.
+    - **Plugin Architecture:** Decide if the logic belongs in a global plugin (libs) or a feature module.
+    - **Error Handling:** Plan for specific HTTP errors using `@fastify/sensible` or custom error classes.
+
+3.  **Implementation Strategy**
+    - Use `fastify-type-provider-zod` for end-to-end type safety.
+    - Ensure all async operations are handled correctly.
+    - Follow the Dependency Injection pattern via Fastify decorators.
+
+## Code Style and Structure
+
+### General Principles
+
+- **Strict TypeScript:** No `any`. Use `unknown` if necessary and narrow types.
+- **Functional Style:** Prefer pure functions and immutability where possible.
+- **Encapsulation:** Use `fastify-plugin` (`fp`) to break encapsulation only when necessary (sharing decorators/hooks). Otherwise, keep contexts isolated.
+- **Validation:** strict validation of inputs (body, querystring, params, headers) using Zod.
+
+### Naming Conventions
+
+- **Files:** `kebab-case` (e.g., `user-controller.ts`, `auth-routes.ts`).
+- **Plugins:** Prefix with functionality (e.g., `db-connector.ts`).
+- **Interfaces:** PascalCase, strictly typed (e.g., `CreateUserRequest`).
+- **Routes:** Use clear, RESTful naming (e.g., `POST /api/v1/users`).
+
+## Fastify Best Practices
+
+### Architecture & Folder Structure
+
+Follow a modular structure separating concerns:
+
+```text
+src/
+  ├── app.ts            # App factory (plugin registration)
+  ├── server.ts         # Entry point (port listening)
+  ├── plugins/          # Global plugins (DB, Redis, Auth)
+  │   ├── database.ts
+  │   └── swagger.ts
+  └── modules/          # Feature modules
+      └── user/
+          ├── user.routes.ts
+          ├── user.schema.ts
+          ├── user.service.ts
+          └── user.types.ts
+```
+
+### Type-Safe Routing (Zod Integration)
+
+ALWAYS use `fastify-type-provider-zod`. Do not use standard JSON schemas manually.
+
+```typescript
+import { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
+import { z } from "zod";
+
+const userRoutes: FastifyPluginAsyncZod = async (app) => {
+  app.post(
+    "/",
+    {
+      schema: {
+        body: z.object({
+          email: z.string().email(),
+          password: z.string().min(8),
+        }),
+        response: {
+          201: z.object({
+            id: z.string(),
+            email: z.string(),
+          }),
+        },
+      },
+    },
+    async (request, reply) => {
+      // request.body is automatically typed here!
+      const { email, password } = request.body;
+      return reply.status(201).send({ id: "1", email });
+    }
+  );
+};
+
+export default userRoutes;
+```
+
+### Plugin Registration
+
+Use `fastify-plugin` for plugins that need to decorate the instance globally.
+
+```typescript
+import fp from "fastify-plugin";
+
+export default fp(async (app) => {
+  app.decorate("utility", () => {
+    // implementation
+  });
+});
+```
+
+### Application Entry Point (App Factory)
+
+Separate the app definition from the server listening code for better testing.
+
+```typescript
+// app.ts
+import Fastify from "fastify";
+import {
+  serializerCompiler,
+  validatorCompiler,
+} from "fastify-type-provider-zod";
+
+export async function buildApp() {
+  const app = Fastify({
+    logger: true, // Use Pino
+  });
+
+  // Setup Zod validation
+  app.setValidatorCompiler(validatorCompiler);
+  app.setSerializerCompiler(serializerCompiler);
+
+  // Register plugins and routes
+  // ...
+
+  return app;
+}
+```
+
+## Performance & Async Patterns
+
+- **Async/Await:** Always use `async/await`. Avoid callback-style handlers.
+- **Logging:** Use `request.log.info()` instead of `console.log`. The logger context is bound to the request ID.
+- **Serialization:** Define response schemas. Fastify compiles these for 10-20% higher throughput (fast-json-stringify).
+
+## Error Handling
+
+- Never let the application crash on unhandled exceptions.
+- Use `http-errors` or `@fastify/sensible` for standard HTTP errors.
+- Example:
+  ```typescript
+  if (!user) {
+    throw app.httpErrors.notFound("User not found");
+  }
+  ```
+
+## Testing
+
+- Use `tap` or `vitest`.
+- Test against the `buildApp()` factory without listening to a port using `app.inject()`.
+
+```typescript
+test("GET /status returns 200", async (t) => {
+  const app = await buildApp();
+  const response = await app.inject({
+    method: "GET",
+    url: "/status",
+  });
+  t.equal(response.statusCode, 200);
+});
+```
+
+## Dependencies & Tooling
+
+- **Package Manager:** pnpm (preferred) or npm.
+- **ORM:** Drizzle ORM or Prisma (prefer Drizzle for performance).
+- **Environment:** use `@fastify/env` or `dotenv` with Zod validation.

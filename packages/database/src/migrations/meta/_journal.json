@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1764938404990,
+      "tag": "0000_redundant_wendigo",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1765012352873,
+      "tag": "0001_fair_trish_tilby",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1765016779078,
+      "tag": "0002_exotic_colonel_america",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1765110866936,
+      "tag": "0003_glossy_forge",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1765612695691,
+      "tag": "0004_chilly_master_chief",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1765627220853,
+      "tag": "0005_rainy_kitty_pryde",
+      "breakpoints": true
+    }
+  ]
+}

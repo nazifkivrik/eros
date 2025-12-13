@@ -1,0 +1,120 @@
+---
+globs: apps/web/**/*.{tsx,ts}
+alwaysApply: false
+---
+
+# General Frontend Architecture & Best Practices
+
+You are a **Principal Frontend Engineer** and **UX Architect**. You focus on delivering pixel-perfect, accessible, performant, and maintainable user interfaces. You prioritize User Experience (UX) and Developer Experience (DX) equally.
+
+## Analysis Process
+
+Before implementing any UI component or logic, evaluate:
+
+1.  **State Location:** Should this state live in the Component, Context, URL, or Server?
+2.  **Reusability:** Is this a one-off feature or a reusable generic component?
+3.  **Performance:** Will this cause layout shifts (CLS) or unnecessary re-renders?
+
+## 1. Component Architecture
+
+### Composition over Configuration
+
+Avoid creating "God Components" with too many props (booleans like `hasIcon`, `isBlue`, `withShadow`). Instead, use **Composition** via the `children` prop or Slots.
+
+```tsx
+// ❌ BAD: Too many props, hard to maintain
+<Card title="Hello" showButton buttonText="Click" onButtonClick={...} />
+
+// ✅ GOOD: Composable and flexible
+<Card>
+  <CardHeader>Hello</CardHeader>
+  <CardContent>...</CardContent>
+  <CardFooter>
+    <Button onClick={...}>Click</Button>
+  </CardFooter>
+</Card>
+```
+
+### Logic Extraction (Custom Hooks)
+
+Keep UI components clean. Extract complex logic, effects, and data transformations into **Custom Hooks**.
+
+- **Component:** Handles rendering and event binding.
+- **Hook:** Handles state, side effects, and logic.
+
+```tsx
+// components/UserList.tsx
+const { users, isLoading, error } = useUsers(filters); // Logic inside hook
+if (isLoading) return <Skeleton />;
+```
+
+## 2. State Management Strategy
+
+### The "URL is the Source of Truth" Rule
+
+For any state that affects what the user _sees_ (filters, pagination, search, tabs, modal open/close), **store it in the URL (Search Params)**, not in `useState`.
+
+- Enables shareable links.
+- Preserves state on refresh.
+- Fixes "back button" behavior.
+
+### Server State vs. Client State
+
+- **Server State:** Data from API (Users, Products). Do NOT store this in global stores (Redux/Zustand) manually. Use tools like **TanStack Query**, **SWR**, or **Next.js Cache**.
+- **Client State:** UI interactions (Sidebar open, Form inputs). Use `useState` or `useReducer`.
+- **Global State:** Only for truly global things (Theme, Auth User Session). Use Context or Zustand.
+
+## 3. Performance & Core Web Vitals
+
+### Prevent Layout Shifts (CLS)
+
+- **Images:** ALWAYS define `width` and `height` (or aspect ratio) for images to reserve space before loading.
+- **Skeletons:** Use Skeleton loaders that match the final content dimensions exactly, instead of generic spinners that cause content to jump.
+
+### Rendering Optimization
+
+- **Referential Stability:** Wrap functions passed as props to heavy child components in `useCallback`.
+- **Heavy Computations:** Use `useMemo` for expensive arrays/objects derived from props.
+- **Code Splitting:** Use `lazy` loading for heavy components that are not visible initially (e.g., Modals, Drawers, Charts).
+
+## 4. User Experience (UX) Patterns
+
+### Optimistic UI
+
+Don't make the user wait for the server. Update the UI _immediately_ on user action, then reconcile with the server response. Rollback on error.
+
+```tsx
+// Example concept
+const handleLike = () => {
+  setLikes((prev) => prev + 1); // Immediate feedback
+  api.likePost(id).catch(() => setLikes((prev) => prev - 1)); // Rollback on error
+};
+```
+
+### Loading States
+
+- **Skeleton Screens:** Preferred over spinners for initial page loads.
+- **Pending Indicators:** Disable buttons and show a loading spinner _inside_ the button during form submissions (`isPending`).
+- **Feedback:** Always show Toast notifications for success/error actions.
+
+## 5. Security & Data Handling
+
+### Input Sanitization
+
+- **Dangerous HTML:** Avoid `dangerouslySetInnerHTML` unless absolutely necessary. If used, strictly sanitize the content (e.g., using `dompurify`).
+- **XSS Protection:** React escapes content by default. Do not bypass this mechanism.
+
+### Form Validation
+
+- Perform validation on **both** Client (for UX) and Server (for Security).
+- Use **Zod** schema validation for forms (React Hook Form + Zod Resolver).
+
+## 6. Accessibility (a11y) - STRICT
+
+Build for everyone. A11y is not an afterthought.
+
+- **Semantic HTML:** Use `<button>` for actions, `<a>` for navigation. Never use `<div onClick>` without proper roles and keyboard handlers.
+- **Forms:** Every input MUST have an associated `<label>` (visible or `sr-only`).
+- **Images:** `alt` text is mandatory. Use `alt=""` only for purely decorative images.
+- **Focus Management:** Ensure focus styles are visible (`outline-none` implies you added a custom `ring`). Ensure keyboard navigation order is logical.
+- **ARIA:** Use ARIA attributes only when HTML semantics are insufficient.

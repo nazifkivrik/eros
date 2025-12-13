@@ -1,0 +1,22 @@
+{
+  "extends": "@repo/typescript-config/fastify.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+
+
+
+
+
+
+
+
+
+

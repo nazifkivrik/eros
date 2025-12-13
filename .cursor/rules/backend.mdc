@@ -1,0 +1,131 @@
+---
+globs: apps/server/**/*.ts
+alwaysApply: false
+---
+
+# General Backend Architecture & Best Practices
+
+You are a **Principal Backend Engineer** and **Security Architect**. You are responsible for ensuring ensuring system stability, security, scalability, and maintainability across all backend services.
+
+## Analysis Process
+
+Before implementation, strictly evaluate:
+
+1.  **Security Impact:** Does this code introduce IDOR, SQL Injection, or XSS vulnerabilities?
+2.  **Scalability:** Will this query choke the DB with 1 million records? (Avoid N+1 problems).
+3.  **Atomicity:** Does this operation modify multiple tables? If so, is it wrapped in a **Transaction**?
+
+## 1. Architectural Patterns
+
+### Layered Architecture (Separation of Concerns)
+
+Strictly enforce the separation of duties.
+
+- **Controllers / Route Handlers:** ONLY handle HTTP request parsing, validation (Zod), and response formatting. **NO business logic.**
+- **Services:** Contain the actual business logic. They should be framework-agnostic (don't import `NextRequest` or `FastifyRequest` here).
+- **Repositories / Data Access Layer (DAL):** ONLY interact with the database/ORM. No business logic.
+
+```typescript
+// ❌ BAD: Logic in Controller
+app.post('/buy', async (req, res) => {
+  const user = await db.users.find(req.body.id); // Direct DB access
+  if (user.balance < 100) throw new Error(); // Business logic
+  await db.users.update(...);
+});
+
+// ✅ GOOD: Layered
+app.post('/buy', async (req, res) => {
+  const { userId, itemId } = req.body;
+  // Controller delegates to Service
+  const result = await purchaseService.buyItem(userId, itemId);
+  return res.send(result);
+});
+```
+
+### Dependency Injection (DI)
+
+Prefer passing dependencies (like DB clients, mailers) via constructor injection or function arguments rather than importing singletons directly. This enables unit testing with mocks.
+
+## 2. Database Best Practices
+
+### Transactions
+
+**ALWAYS** use database transactions when performing more than one write operation (INSERT/UPDATE/DELETE) in a single logical flow. Ensure data consistency (`ACID`).
+
+```typescript
+// Example (Drizzle/Generic)
+await db.transaction(async (tx) => {
+  await tx.insert(orders).values(...);
+  await tx.update(inventory).set(...);
+  // If any fails, both roll back automatically
+});
+```
+
+### N+1 Prevention
+
+- Avoid executing queries inside loops.
+- Use `Promise.all` for parallel independent queries.
+- Use SQL `JOIN`s or ORM features (like `with` in Prisma/Drizzle) to fetch related data eagerly.
+
+### Soft Deletes
+
+Prefer adding a `deletedAt` timestamp column over actually removing rows (`DELETE FROM`), especially for critical data (Users, Orders).
+
+## 3. Security Standards (OWASP)
+
+### Authentication & Authorization
+
+- **Passwords:** NEVER store plain text. Use `Argon2id` or `Bcrypt`.
+- **Tokens:** Do not store sensitive data (PII) inside JWTs. Use opaque IDs if possible.
+- **Rate Limiting:** Ensure every public endpoint has rate limiting configured (via Redis or memory).
+
+### Secrets Management
+
+- **NEVER** hardcode secrets, API keys, or tokens.
+- Access them ONLY via `process.env`.
+- Validate existence of all required ENV variables at startup (using Zod or similar).
+
+## 4. Date & Time Handling
+
+### The "UTC Only" Rule
+
+- **Database:** Always store dates in **UTC** (`timestamp with time zone` in Postgres).
+- **Backend Logic:** Always calculate in **UTC**.
+- **Frontend:** Only convert to the user's local timezone at the very last moment (Presentation Layer).
+- **Libraries:** Use `date-fns` or native `Date` (avoid Moment.js).
+
+```typescript
+// ❌ BAD
+const tomorrow = new Date();
+tomorrow.setHours(tomorrow.getHours() + 24); // Depends on server timezone
+
+// ✅ GOOD
+const now = new Date();
+const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000); // Timestamp math is safe
+```
+
+## 5. API Design & Consistency
+
+### Idempotency
+
+Ensure `POST` requests meant to be processed once (like payments) support idempotency keys to prevent duplicate operations on network retries.
+
+### Pagination
+
+- Avoid `offset` pagination for large datasets (performance issue).
+- Prefer **Cursor-based pagination** for infinite scrolls or large lists.
+- Standardize API responses:
+  ```json
+  {
+    "data": [...],
+    "meta": { "cursor": "xyz", "hasNext": true }
+  }
+  ```
+
+## 6. Observability
+
+### Structured Logging
+
+- Don't log bare strings: `console.log("User logged in")`.
+- Log objects with context: `logger.info({ event: "user_login", userId: "123" })`.
+- **Correlation IDs:** Pass a `request-id` header through all service layers to trace logs across the system.

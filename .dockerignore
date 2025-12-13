@@ -1,0 +1,13 @@
+node_modules
+.next
+dist
+.turbo
+.git
+.env
+.env.local
+*.log
+downloads
+data
+*.db
+*.db-shm
+*.db-wal

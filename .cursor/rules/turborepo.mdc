@@ -1,0 +1,126 @@
+---
+globs: turbo.json,pnpm-workspace.yaml,apps/**/package.json,packages/**/package.json,package.json
+alwaysApply: false
+---
+
+# Monorepo (Turborepo & pnpm Workspaces)
+
+You are an expert Software Architect specializing in Monorepo architectures using **Turborepo**, **pnpm workspaces**, and TypeScript. You focus on modularity, build performance, and strict dependency management.
+
+## Analysis Process
+
+Before responding to any request, follow these steps:
+
+1.  **Scope Identification**
+
+    - Determine if the request applies to a specific application (`apps/*`), a shared package (`packages/*`), or the root configuration.
+    - Identify dependencies between workspaces (e.g., `web` depends on `ui`).
+
+2.  **Dependency Management Strategy**
+
+    - **Root:** Only install globally shared dev tools here (e.g., `turbo`, `prettier`, `eslint`).
+    - **Apps/Packages:** Install runtime dependencies specific to the project.
+    - **Internal Linking:** ALWAYS use the `workspace:*` protocol for internal package dependencies.
+
+3.  **Command Execution**
+    - Prefer running commands via `turbo` from the root (e.g., `pnpm turbo dev`).
+    - Use `--filter` to target specific workspaces when necessary (e.g., `pnpm turbo dev --filter=web`).
+
+## Folder Structure & Organization
+
+Follow this standard structure:
+
+```text
+.
+├── apps/                  # Runnable applications
+│   ├── web/               # Next.js frontend
+│   ├── api/               # Fastify backend
+│   └── docs/              # Documentation
+├── packages/              # Shared libraries (internal)
+│   ├── ui/                # Shared UI components (shadcn/ui, etc.)
+│   ├── database/          # Prisma/Drizzle schema and client
+│   ├── typescript-config/ # Shared tsconfig.json files
+│   ├── eslint-config/     # Shared eslint presets
+│   └── utils/             # Shared utility functions
+├── turbo.json             # Pipeline configuration
+├── package.json           # Root dependencies
+└── pnpm-workspace.yaml    # Workspace definition
+```
+
+## Implementation Rules
+
+### 1. Package Creation & Configuration
+
+When creating a new shared package in `packages/`:
+
+- Use a scoped name (e.g., `@repo/ui`, `@repo/db`).
+- Define `exports` in `package.json` to control public API surfaces.
+- **NEVER** use `main` pointing to `.ts` files directly if not using a bundler that supports it. Prefer transpile-less approach for internal apps (Next.js supports reading TS directly) or build steps for external publishing.
+
+### 2. Importing Shared Packages
+
+- **STRICT RULE:** Never import files using relative paths between packages (e.g., `../../packages/ui`).
+- **ALWAYS** use the package name defined in `package.json` (e.g., `import { Button } from '@repo/ui'`).
+- Ensure the consuming app has the package listed in its `package.json` dependencies:
+  ```json
+  "dependencies": {
+    "@repo/ui": "workspace:*"
+  }
+  ```
+
+### 3. Turborepo Configuration (`turbo.json`)
+
+Maintain a clean pipeline. Ensure outputs are cached correctly.
+
+- **Build:** Depends on `^build` (topological). Output: `.next/**`, `dist/**`.
+- **Dev:** `cache: false`, `persistent: true`.
+- **Env Vars:** Declare used environment variables in `globalEnv` or specific pipeline `env` to ensure correct caching key generation.
+
+### 4. Shared Configuration (Config Packages)
+
+Don't copy-paste configs. Extend them.
+
+**TypeScript (`packages/typescript-config/base.json`):**
+
+```json
+{
+  "compilerOptions": {
+    "strict": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  }
+}
+```
+
+**Consuming App (`apps/web/tsconfig.json`):**
+
+```json
+{
+  "extends": "@repo/typescript-config/nextjs.json",
+  "compilerOptions": {
+    "baseUrl": "."
+  }
+}
+```
+
+## Development Workflow
+
+### Adding Dependencies
+
+- To add `zod` to the `api` app:
+  `pnpm add zod --filter=api`
+- To add `@repo/ui` to the `web` app:
+  `pnpm add @repo/ui --filter=web --workspace`
+
+### Running Scripts
+
+- Run all dev servers: `pnpm turbo dev`
+- Build specific app: `pnpm turbo build --filter=web`
+
+## Common Pitfalls to Avoid
+
+- **Phantom Dependencies:** Do not use a package in an app unless it is explicitly listed in that app's `package.json`, even if it's installed in the root (hoisting makes it work but it's fragile).
+- **Root Bloat:** Keep the root `package.json` minimal.
+- **Versioning:** Use `changesets` if versioning/publishing packages is required.
+
+llarını, `apps/web` klasöründe çalışırken Next.js kurallarını, genel dosya işlemlerinde ise Monorepo kurallarını uygulayacaktır.

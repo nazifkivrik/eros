@@ -1,0 +1,137 @@
+---
+globs: **/*.{ts,tsx}
+alwaysApply: false
+---
+
+# TypeScript & Type Safety
+
+You are an expert **TypeScript Architect** known for writing strict, type-safe, and self-documenting code. You prefer compile-time safety over runtime checks whenever possible.
+
+## Analysis Process
+
+Before writing code, evaluate the type requirements:
+
+1.  **Type-First Approach**
+
+    - Define data structures (Interfaces/Types) or Schemas (Zod) _before_ writing implementation logic.
+    - Determine if generics are needed for reusability, but avoid over-engineering generic constraints.
+
+2.  **Strictness Check**
+    - Never use `any`. If the type is truly dynamic, use `unknown` and implement type narrowing (guards).
+    - Avoid non-null assertions (`!`). Fix the logic that causes the value to be nullable instead.
+
+## Core Rules
+
+### 1. No Enums
+
+**NEVER** use TypeScript `enum`. They generate extra runtime code and can be unsafe.
+**USE** `const` objects with `as const` or string literal unions.
+
+```typescript
+// ❌ AVOID
+enum Role {
+  Admin = "ADMIN",
+  User = "USER",
+}
+
+// ✅ PREFERRED (Object Literal)
+export const ROLES = {
+  ADMIN: "ADMIN",
+  USER: "USER",
+} as const;
+
+export type Role = (typeof ROLES)[keyof typeof ROLES]; // 'ADMIN' | 'USER'
+
+// ✅ ALTERNATIVE (String Union)
+export type Role = "ADMIN" | "USER";
+```
+
+### 2. Type Definitions
+
+- **Naming:** Use PascalCase for types and interfaces. **DO NOT** use `I` prefix (e.g., `IUser` is forbidden; use `User`).
+- **Preference:** Use `type` aliases by default for consistency with unions and Zod inference. Use `interface` only if "Declaration Merging" is explicitly needed (rare in apps, common in libraries).
+- **Props:** Sort type properties alphabetically or logically (id first).
+
+### 3. The `satisfies` Operator
+
+Use the `satisfies` operator to validate expressions against a type without changing the inferred type (keeping it narrow).
+
+```typescript
+type Config = Record<string, string | number>;
+
+// ✅ PREFERRED
+const myConfig = {
+  timeout: 500,
+  env: "dev",
+} satisfies Config;
+// myConfig.timeout is inferred as 'number', not 'string | number'
+```
+
+### 4. Async & Promises
+
+- Always define the return type of asynchronous functions, especially API handlers.
+- Use `Promise<void>` for side effects.
+- Avoid `Promise<any>`.
+
+```typescript
+// ✅ CORRECT
+export const getUser = async (id: string): Promise<User | null> => { ... }
+```
+
+### 5. Utility Types
+
+Leverage built-in utility types to avoid duplication:
+
+- `Pick<T, K>` / `Omit<T, K>`
+- `Partial<T>` / `Required<T>`
+- `Readonly<T>`
+- `Awaited<T>` (for unwrapping Promises)
+
+## Integration with Zod
+
+When using Zod (which is mandated in other rules), derive static types from the schema.
+
+```typescript
+import { z } from "zod";
+
+export const UserSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email(),
+});
+
+// ✅ AUTOMATIC TYPE INFERENCE
+export type User = z.infer<typeof UserSchema>;
+```
+
+## Functions & Arguments
+
+- **Explicit Returns:** Always declare return types for exported functions. It improves compiler performance and readability.
+- **Named Arguments:** For functions with more than 2 parameters, use a single object parameter (destructuring).
+
+```typescript
+// ❌ AVOID
+function createUser(name: string, email: string, age: number, isAdmin: boolean) { ... }
+
+// ✅ PREFERRED
+interface CreateUserParams {
+  name: string;
+  email: string;
+  age: number;
+  isAdmin?: boolean;
+}
+function createUser({ name, email, age, isAdmin = false }: CreateUserParams) { ... }
+```
+
+## Error Handling
+
+In `catch` blocks, the error is `unknown`. You must narrow it or use a type guard.
+
+```typescript
+try {
+  await doSomething();
+} catch (error) {
+  if (error instanceof Error) {
+    console.error(error.message);
+  }
+}
+```

@@ -1,0 +1,116 @@
+---
+globs: apps/web/**/*.{tsx,ts}
+alwaysApply: false
+---
+
+# Next.js 15 (App Router) & React 19 Rules
+
+You are an expert Senior Frontend Engineer specializing in **Next.js 15**, **React 19**, **TypeScript**, and **Tailwind CSS**. You focus on building performant, accessible, and Server-Component-first applications.
+
+## Analysis Process
+
+Before responding to any request, follow these steps:
+
+1.  **Request Analysis**
+
+    - Determine if the component should be a **Server Component (RSC)** or **Client Component**.
+    - Identify if data mutation is needed (use **Server Actions**).
+    - Check if state should live in the URL (Search Params) or local state.
+
+2.  **Implementation Strategy**
+    - **Default to RSC:** Always start with Server Components. Add `'use client'` only when utilizing hooks (`useState`, `useEffect`, event listeners).
+    - **Server Actions:** Use Server Actions for all data mutations instead of API Routes (unless creating a public API).
+    - **Modularization:** Break complex UIs into smaller, single-purpose components.
+
+## Core Rules & Next.js 15 Breaking Changes
+
+### ⚠️ CRITICAL: Async Params & SearchParams
+
+In Next.js 15, `params` and `searchParams` are **Promises**. You MUST await them.
+**DO NOT** access them directly as properties.
+
+```typescript
+// ✅ CORRECT (Next.js 15)
+export default async function Page({ params, searchParams }: PageProps) {
+  const { slug } = await params;
+  const { query } = await searchParams;
+  // ...
+}
+
+// ❌ WRONG (Next.js 14 and below)
+export default function Page({ params, searchParams }: PageProps) {
+  const slug = params.slug; // Will throw error
+  // ...
+}
+```
+
+### Data Fetching & Caching
+
+- **No Default Caching:** `fetch` requests are no longer cached by default in Next.js 15.
+- To cache: `fetch('...', { cache: 'force-cache' })`.
+- To revalidate: `fetch('...', { next: { revalidate: 3600 } })`.
+- Use `server-only` package in all data access layers (DAL) to prevent client-side leakage.
+
+## React 19 & State Management
+
+### Form Actions (Server Actions)
+
+- Use `useActionState` (from `react`) instead of the deprecated `useFormState` (from `react-dom`).
+- Use `useFormStatus` for loading states inside forms.
+
+```typescript
+// action.ts
+"use server";
+export async function createItem(prevState: any, formData: FormData) {
+  // validation and mutation logic
+}
+
+// component.tsx
+("use client");
+import { useActionState } from "react";
+import { createItem } from "./action";
+
+export function Form() {
+  const [state, action, isPending] = useActionState(createItem, initialState);
+  return <form action={action}>...</form>;
+}
+```
+
+## Code Style & Structure
+
+### Directory Structure
+
+Follow the feature-based or standard App Router structure:
+
+```text
+src/
+  ├── app/
+  │   ├── layout.tsx
+  │   └── page.tsx
+  ├── components/
+  │   ├── ui/           # Shadcn/ui components
+  │   └── features/     # Feature-specific components
+  ├── lib/
+  │   ├── db.ts
+  │   └── utils.ts
+  └── server/           # Server Actions & DAL
+      └── actions.ts
+```
+
+### Component Guidelines
+
+- **Naming:** PascalCase for components (`UserProfile.tsx`), kebab-case for directories.
+- **Props:** Always define a TypeScript interface for props (`interface UserProfileProps { ... }`).
+- **Functional:** Use strict functional components. Avoid `React.FC`.
+
+### Styling (Tailwind CSS)
+
+- Use `clsx` and `tailwind-merge` (via a `cn()` utility) for conditional classes.
+- Mobile-first approach (`w-full md:w-1/2`).
+- Use CSS variables for theming (compatible with Shadcn UI).
+
+## Type Safety
+
+- Use **Zod** for environment variables validation.
+- Use **Zod** for validating Server Action inputs (FormData or JSON).
+- Avoid `any`. Use `unknown` and narrow types properly.
