@@ -1,30 +1,17 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { performers } from "@repo/database";
 import { nanoid } from "nanoid";
-
-const ImageSchema = z.object({
-  url: z.string(),
-  width: z.number().optional(),
-  height: z.number().optional(),
-});
-
-const PerformerResponseSchema = z.object({
-  id: z.string(),
-  stashdbId: z.string().nullable(),
-  name: z.string(),
-  aliases: z.array(z.string()),
-  disambiguation: z.string().nullable(),
-  gender: z.string().nullable(),
-  birthdate: z.string().nullable(),
-  deathDate: z.string().nullable(),
-  careerStartDate: z.string().nullable(),
-  careerEndDate: z.string().nullable(),
-  images: z.array(ImageSchema),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
+import {
+  PerformerResponseSchema,
+  PerformerParamsSchema,
+  PerformerListQuerySchema,
+  CreatePerformerSchema,
+  UpdatePerformerSchema,
+  PerformerListResponseSchema,
+  SuccessResponseSchema,
+  ErrorResponseSchema,
+} from "./performers.schema.js";
 
 const performersRoutes: FastifyPluginAsyncZod = async (app) => {
   // List performers
@@ -32,15 +19,9 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
     "/",
     {
       schema: {
-        querystring: z.object({
-          limit: z.coerce.number().min(1).max(100).default(20),
-          offset: z.coerce.number().min(0).default(0),
-        }),
+        querystring: PerformerListQuerySchema,
         response: {
-          200: z.object({
-            data: z.array(PerformerResponseSchema),
-            total: z.number(),
-          }),
+          200: PerformerListResponseSchema,
         },
       },
     },
@@ -69,14 +50,10 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
+        params: PerformerParamsSchema,
         response: {
           200: PerformerResponseSchema,
-          404: z.object({
-            error: z.string(),
-          }),
+          404: ErrorResponseSchema,
         },
       },
     },
@@ -100,18 +77,7 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
     "/",
     {
       schema: {
-        body: z.object({
-          stashdbId: z.string().optional(),
-          name: z.string(),
-          aliases: z.array(z.string()).default([]),
-          disambiguation: z.string().optional(),
-          gender: z.string().optional(),
-          birthdate: z.string().optional(),
-          deathDate: z.string().optional(),
-          careerStartDate: z.string().optional(),
-          careerEndDate: z.string().optional(),
-          images: z.array(ImageSchema).default([]),
-        }),
+        body: CreatePerformerSchema,
         response: {
           201: PerformerResponseSchema,
         },
@@ -150,25 +116,11 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
-        body: z.object({
-          name: z.string().optional(),
-          aliases: z.array(z.string()).optional(),
-          disambiguation: z.string().optional(),
-          gender: z.string().optional(),
-          birthdate: z.string().optional(),
-          deathDate: z.string().optional(),
-          careerStartDate: z.string().optional(),
-          careerEndDate: z.string().optional(),
-          images: z.array(ImageSchema).optional(),
-        }),
+        params: PerformerParamsSchema,
+        body: UpdatePerformerSchema,
         response: {
           200: PerformerResponseSchema,
-          404: z.object({
-            error: z.string(),
-          }),
+          404: ErrorResponseSchema,
         },
       },
     },
@@ -207,16 +159,10 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
+        params: PerformerParamsSchema,
         response: {
-          200: z.object({
-            success: z.boolean(),
-          }),
-          404: z.object({
-            error: z.string(),
-          }),
+          200: SuccessResponseSchema,
+          404: ErrorResponseSchema,
         },
       },
     },

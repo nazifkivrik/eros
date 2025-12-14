@@ -1,10 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
+import { queryKeys } from "@/lib/query-keys";
 
 export function useSettings() {
   return useQuery({
-    queryKey: ["settings"],
+    queryKey: queryKeys.settings.all,
     queryFn: () => apiClient.getSettings(),
   });
 }
@@ -15,7 +16,7 @@ export function useUpdateSettings() {
   return useMutation({
     mutationFn: apiClient.updateSettings.bind(apiClient),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.all });
       toast.success("Settings saved successfully");
     },
     onError: () => {

@@ -63,7 +63,7 @@ export async function qbittorrentCleanupJob(app: FastifyInstance) {
     for (const torrent of torrentsToRemove) {
       try {
         // Remove from qBittorrent (keep files on disk)
-        await app.qbittorrent.removeTorrents([torrent.qbitHash!], false);
+        await app.qbittorrent.removeTorrent(torrent.qbitHash!, false);
 
         // Clear qbitHash from database
         await app.db
@@ -78,10 +78,10 @@ export async function qbittorrentCleanupJob(app: FastifyInstance) {
           "Removed old torrent from qBittorrent"
         );
 
-        logsService.info({
-          event: "torrent_cleaned_up",
-          message: `Removed old completed torrent from qBittorrent: ${torrent.sceneId}`,
-          details: {
+        await logsService.info(
+          "torrent",
+          `Removed old completed torrent from qBittorrent: ${torrent.sceneId}`,
+          {
             sceneId: torrent.sceneId,
             qbitHash: torrent.qbitHash,
             completedAt: torrent.completedAt,
@@ -90,8 +90,8 @@ export async function qbittorrentCleanupJob(app: FastifyInstance) {
                 (1000 * 60 * 60 * 24)
             ),
           },
-          sceneId: torrent.sceneId,
-        });
+          { sceneId: torrent.sceneId }
+        );
       } catch (error) {
         failedCount++;
         app.log.error(

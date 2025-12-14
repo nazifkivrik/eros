@@ -1,19 +1,11 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { z } from "zod";
 import { getJobProgressService } from "../../services/job-progress.service.js";
-
-const JobNameSchema = z.enum([
-  "subscription-search",
-  "metadata-refresh",
-  "torrent-monitor",
-  "cleanup",
-  "metadata-discovery",
-]);
-
-const JobSchema = z.object({
-  name: z.string(),
-  enabled: z.boolean(),
-});
+import {
+  JobNameParamsSchema,
+  JobsListResponseSchema,
+  TriggerJobResponseSchema,
+  ErrorResponseSchema,
+} from "./jobs.schema.js";
 
 const jobsRoutes: FastifyPluginAsyncZod = async (app) => {
   // Get all jobs
@@ -22,9 +14,7 @@ const jobsRoutes: FastifyPluginAsyncZod = async (app) => {
     {
       schema: {
         response: {
-          200: z.object({
-            jobs: z.array(JobSchema),
-          }),
+          200: JobsListResponseSchema,
         },
       },
     },
@@ -39,17 +29,10 @@ const jobsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:jobName/trigger",
     {
       schema: {
-        params: z.object({
-          jobName: JobNameSchema,
-        }),
+        params: JobNameParamsSchema,
         response: {
-          200: z.object({
-            success: z.boolean(),
-            message: z.string(),
-          }),
-          400: z.object({
-            error: z.string(),
-          }),
+          200: TriggerJobResponseSchema,
+          400: ErrorResponseSchema,
         },
       },
     },

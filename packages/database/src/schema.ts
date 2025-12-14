@@ -124,7 +124,7 @@ export const qualityProfiles = sqliteTable("quality_profiles", {
 // Subscriptions Table
 export const subscriptions = sqliteTable("subscriptions", {
   id: text("id").primaryKey(),
-  entityType: text("entity_type").notNull(), // 'performer' | 'studio' | 'scene'
+  entityType: text("entity_type").$type<"performer" | "studio" | "scene">().notNull(),
   entityId: text("entity_id").notNull(),
   qualityProfileId: text("quality_profile_id")
     .notNull()
@@ -265,8 +265,8 @@ export const appSettings = sqliteTable("app_settings", {
 // Logs Table
 export const logs = sqliteTable("logs", {
   id: text("id").primaryKey(),
-  level: text("level").notNull(), // 'error' | 'warning' | 'info' | 'debug'
-  eventType: text("event_type").notNull(), // 'torrent' | 'subscription' | 'download' | 'metadata' | 'system'
+  level: text("level").$type<"error" | "warning" | "info" | "debug">().notNull(),
+  eventType: text("event_type").$type<"torrent" | "subscription" | "download" | "metadata" | "system" | "missing-scenes">().notNull(),
   message: text("message").notNull(),
   details: text("details", { mode: "json" }).$type<Record<string, unknown>>(),
   sceneId: text("scene_id").references(() => scenes.id, { onDelete: "set null" }),

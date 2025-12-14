@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
+import type { SubscriptionSettings } from "@repo/shared-types";
 import {
   Dialog,
   DialogContent,
@@ -34,13 +35,6 @@ interface SubscribeDialogProps {
   } | null;
   onClose: () => void;
   onConfirm: (settings: SubscriptionSettings) => void;
-}
-
-interface SubscriptionSettings {
-  qualityProfileId: string;
-  autoDownload: boolean;
-  includeMetadataMissing: boolean;
-  includeAliases: boolean;
 }
 
 export function SubscribeDialog({

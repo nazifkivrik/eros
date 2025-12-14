@@ -4,19 +4,7 @@
  */
 
 import { EventEmitter } from "events";
-
-export interface JobProgressEvent {
-  jobName: string;
-  status: "started" | "progress" | "completed" | "failed";
-  message: string;
-  progress?: {
-    current: number;
-    total: number;
-    percentage: number;
-  };
-  data?: Record<string, any>;
-  timestamp: string;
-}
+import type { JobProgressEvent } from "@repo/shared-types";
 
 export class JobProgressService extends EventEmitter {
   private static instance: JobProgressService;

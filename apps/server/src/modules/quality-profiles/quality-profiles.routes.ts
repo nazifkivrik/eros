@@ -3,34 +3,14 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { qualityProfiles } from "@repo/database";
 import { nanoid } from "nanoid";
-
-const QualityItemSchema = z.object({
-  quality: z.enum([
-    "2160p",
-    "1080p",
-    "720p",
-    "480p",
-    "any", // any quality
-  ]),
-  source: z.enum([
-    "bluray",
-    "webdl",
-    "webrip",
-    "hdtv",
-    "dvd",
-    "any", // any source
-  ]),
-  minSeeders: z.union([z.number().min(0), z.literal("any")]).default(0), // can be "any" or a number
-  maxSize: z.number().min(0).default(0), // in GB, 0 means unlimited
-});
-
-const QualityProfileResponseSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  items: z.array(QualityItemSchema),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
+import {
+  QualityProfileResponseSchema,
+  QualityProfileParamsSchema,
+  CreateQualityProfileSchema,
+  UpdateQualityProfileSchema,
+  QualityProfileListResponseSchema,
+  ErrorResponseSchema,
+} from "./quality-profiles.schema.js";
 
 const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
   // List quality profiles
@@ -39,9 +19,7 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
     {
       schema: {
         response: {
-          200: z.object({
-            data: z.array(QualityProfileResponseSchema),
-          }),
+          200: QualityProfileListResponseSchema,
         },
       },
     },
@@ -56,14 +34,10 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
+        params: QualityProfileParamsSchema,
         response: {
           200: QualityProfileResponseSchema,
-          404: z.object({
-            error: z.string(),
-          }),
+          404: ErrorResponseSchema,
         },
       },
     },
@@ -87,15 +61,10 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
     "/",
     {
       schema: {
-        body: z.object({
-          name: z.string().min(1),
-          items: z.array(QualityItemSchema).min(1),
-        }),
+        body: CreateQualityProfileSchema,
         response: {
           201: QualityProfileResponseSchema,
-          400: z.object({
-            error: z.string(),
-          }),
+          400: ErrorResponseSchema,
         },
       },
     },
@@ -137,21 +106,12 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
-        body: z.object({
-          name: z.string().min(1),
-          items: z.array(QualityItemSchema).min(1),
-        }),
+        params: QualityProfileParamsSchema,
+        body: UpdateQualityProfileSchema,
         response: {
           200: QualityProfileResponseSchema,
-          400: z.object({
-            error: z.string(),
-          }),
-          404: z.object({
-            error: z.string(),
-          }),
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
         },
       },
     },
@@ -204,16 +164,12 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
+        params: QualityProfileParamsSchema,
         response: {
           200: z.object({
             success: z.boolean(),
           }),
-          404: z.object({
-            error: z.string(),
-          }),
+          404: ErrorResponseSchema,
         },
       },
     },

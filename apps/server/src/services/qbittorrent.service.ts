@@ -24,6 +24,7 @@ interface QBTorrentInfo {
 
 interface QBTorrentProperties {
   save_path: string;
+  content_path: string;
   creation_date: number;
   piece_size: number;
   comment: string;

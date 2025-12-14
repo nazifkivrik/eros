@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useStudioDetails } from "@/hooks/useSearch";
 import { useCheckSubscription } from "@/hooks/useSubscriptions";
 import {
@@ -9,19 +8,12 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-  CarouselNext,
-  CarouselPrevious,
-} from "@/components/ui/carousel";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Building2, Check } from "lucide-react";
+import { ImageCarousel } from "./ImageCarousel";
+import { SubscriptionFooter } from "./SubscriptionFooter";
 
 interface StudioDetailDialogProps {
   studioId: string | null;
@@ -68,33 +60,11 @@ export function StudioDetailDialog({
           <>
 
             <div className="space-y-6">
-              {/* Images Carousel */}
-              {studio.images && studio.images.length > 0 && (
-                <Carousel className="w-full">
-                  <CarouselContent>
-                    {studio.images.map((img: any, idx: number) => (
-                      <CarouselItem key={idx}>
-                        <div className="relative aspect-video w-full overflow-hidden rounded-lg">
-                          <Image
-                            src={img.url}
-                            alt={`${studio.name} - Image ${idx + 1}`}
-                            fill
-                            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 70vw"
-                            className="object-cover"
-                            unoptimized
-                          />
-                        </div>
-                      </CarouselItem>
-                    ))}
-                  </CarouselContent>
-                  {studio.images.length > 1 && (
-                    <>
-                      <CarouselPrevious className="left-2" />
-                      <CarouselNext className="right-2" />
-                    </>
-                  )}
-                </Carousel>
-              )}
+              <ImageCarousel
+                images={studio.images || []}
+                alt={studio.name}
+                aspectRatio="video"
+              />
 
               {/* Info */}
               <div className="space-y-3">
@@ -134,25 +104,12 @@ export function StudioDetailDialog({
               </div>
             </div>
 
-            <DialogFooter>
-              <Button variant="outline" onClick={onClose}>
-                Close
-              </Button>
-              {!subscriptionStatus?.isSubscribed && (
-                <Button onClick={() => onSubscribe(studio)}>
-                  Subscribe
-                </Button>
-              )}
-              {subscriptionStatus?.isSubscribed && subscriptionStatus.subscription && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Check className="h-4 w-4 text-green-600" />
-                  <span>
-                    Subscribed with {subscriptionStatus.subscription.qualityProfile?.name || 'profile'}
-                    {subscriptionStatus.subscription.autoDownload && ' - Auto Download'}
-                  </span>
-                </div>
-              )}
-            </DialogFooter>
+            <SubscriptionFooter
+              isSubscribed={subscriptionStatus?.isSubscribed || false}
+              subscription={subscriptionStatus?.subscription}
+              onClose={onClose}
+              onSubscribe={() => onSubscribe(studio)}
+            />
           </>
         ) : (
           <div className="text-center py-8 text-muted-foreground">

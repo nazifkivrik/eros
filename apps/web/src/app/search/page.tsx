@@ -15,12 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 
-interface SubscriptionSettings {
-  qualityProfileId: string;
-  autoDownload: boolean;
-  includeMetadataMissing: boolean;
-  includeAliases: boolean;
-}
+import type { SubscriptionSettings } from "@repo/shared-types";
 
 export default function SearchPage() {
   const [query, setQuery] = useState("");

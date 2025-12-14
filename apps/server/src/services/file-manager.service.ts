@@ -29,6 +29,8 @@ export type SceneMetadata = {
 export class FileManagerService {
   private downloadPath: string;
   private scenesPath: string;
+  // Used for future implementation of incomplete downloads handling
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private incompletePath: string;
 
   constructor(
@@ -378,14 +380,69 @@ export class FileManagerService {
       }
     }
 
-    // TODO: Implement orphaned files detection (files on disk not in DB)
-    // This would require scanning the entire scenes directory
+    // Detect orphaned files (files on disk not in DB)
     const orphanedFiles: Array<{ path: string }> = [];
+
+    try {
+      // Check if scenes directory exists
+      await access(this.scenesPath, constants.F_OK);
+
+      // Scan the scenes directory recursively
+      const filesOnDisk = await this.scanDirectory(this.scenesPath);
+
+      // Build a Set of known file paths for quick lookup
+      const knownPaths = new Set(allSceneFiles.map(sf => sf.filePath));
+
+      // Filter video files that aren't in the database
+      const videoExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg'];
+
+      for (const filePath of filesOnDisk) {
+        const ext = extname(filePath).toLowerCase();
+
+        // Only check video files
+        if (videoExtensions.includes(ext)) {
+          if (!knownPaths.has(filePath)) {
+            orphanedFiles.push({ path: filePath });
+          }
+        }
+      }
+    } catch (error) {
+      // If scenes directory doesn't exist or can't be accessed, just log and continue
+      console.error(`Failed to scan scenes directory ${this.scenesPath}:`, error);
+    }
 
     return {
       missingScenes,
       orphanedFiles,
     };
+  }
+
+  /**
+   * Recursively scan a directory and return all file paths
+   */
+  private async scanDirectory(dirPath: string): Promise<string[]> {
+    const filePaths: string[] = [];
+
+    try {
+      const entries = await readdir(dirPath, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = join(dirPath, entry.name);
+
+        if (entry.isDirectory()) {
+          // Recursively scan subdirectories
+          const subFiles = await this.scanDirectory(fullPath);
+          filePaths.push(...subFiles);
+        } else if (entry.isFile()) {
+          // Add file to list
+          filePaths.push(fullPath);
+        }
+      }
+    } catch (error) {
+      console.error(`Failed to scan directory ${dirPath}:`, error);
+    }
+
+    return filePaths;
   }
 
   /**

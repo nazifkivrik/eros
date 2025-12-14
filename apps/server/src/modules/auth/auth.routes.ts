@@ -1,5 +1,11 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { z } from "zod";
+import {
+  LoginSchema,
+  LoginResponseSchema,
+  LogoutResponseSchema,
+  StatusResponseSchema,
+  ErrorResponseSchema,
+} from "./auth.schema.js";
 
 const authRoutes: FastifyPluginAsyncZod = async (app) => {
   // Login
@@ -7,17 +13,10 @@ const authRoutes: FastifyPluginAsyncZod = async (app) => {
     "/login",
     {
       schema: {
-        body: z.object({
-          password: z.string().min(1),
-        }),
+        body: LoginSchema,
         response: {
-          200: z.object({
-            success: z.boolean(),
-            message: z.string(),
-          }),
-          401: z.object({
-            error: z.string(),
-          }),
+          200: LoginResponseSchema,
+          401: ErrorResponseSchema,
         },
       },
     },
@@ -44,10 +43,7 @@ const authRoutes: FastifyPluginAsyncZod = async (app) => {
     {
       schema: {
         response: {
-          200: z.object({
-            success: z.boolean(),
-            message: z.string(),
-          }),
+          200: LogoutResponseSchema,
         },
       },
     },
@@ -63,10 +59,7 @@ const authRoutes: FastifyPluginAsyncZod = async (app) => {
     {
       schema: {
         response: {
-          200: z.object({
-            authenticated: z.boolean(),
-            userId: z.string().nullable(),
-          }),
+          200: StatusResponseSchema,
         },
       },
     },

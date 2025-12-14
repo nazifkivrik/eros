@@ -1,63 +1,16 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { z } from "zod";
 import { createStashDBService } from "../../services/stashdb.service.js";
-
-const ImageSchema = z.object({
-  url: z.string(),
-  width: z.number().optional(),
-  height: z.number().optional(),
-});
-
-const PerformerSchema = z.object({
-  id: z.string(),
-  stashdbId: z.string(),
-  name: z.string(),
-  aliases: z.array(z.string()),
-  disambiguation: z.string().nullable(),
-  gender: z.string().nullable(),
-  birthdate: z.string().nullable(),
-  deathDate: z.string().nullable(),
-  careerStartDate: z.string().nullable(),
-  careerEndDate: z.string().nullable(),
-  images: z.array(ImageSchema),
-});
-
-const StudioSchema = z.object({
-  id: z.string(),
-  stashdbId: z.string(),
-  name: z.string(),
-  aliases: z.array(z.string()),
-  parentStudioId: z.string().nullable(),
-  images: z.array(ImageSchema),
-  url: z.string().nullable(),
-});
-
-const SceneSchema = z.object({
-  id: z.string(),
-  stashdbId: z.string(),
-  title: z.string(),
-  date: z.string().nullable(),
-  details: z.string().nullable(),
-  duration: z.number().nullable(),
-  director: z.string().nullable(),
-  code: z.string().nullable(),
-  urls: z.array(z.string()),
-  images: z.array(ImageSchema),
-  performers: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      disambiguation: z.string().nullable(),
-    })
-  ),
-  studio: z
-    .object({
-      id: z.string(),
-      name: z.string(),
-    })
-    .nullable(),
-  tags: z.array(z.string()),
-});
+import {
+  PerformerSchema,
+  StudioSchema,
+  SceneSchema,
+  SearchQuerySchema,
+  EntityIdParamsSchema,
+  SearchAllResponseSchema,
+  PerformersSearchResponseSchema,
+  StudiosSearchResponseSchema,
+  ScenesSearchResponseSchema,
+} from "./search.schema.js";
 
 const searchRoutes: FastifyPluginAsyncZod = async (app) => {
   const stashdbService = createStashDBService({
@@ -70,23 +23,16 @@ const searchRoutes: FastifyPluginAsyncZod = async (app) => {
     "/",
     {
       schema: {
-        body: z.object({
-          query: z.string().min(1),
-          limit: z.number().min(1).max(100).default(20),
-        }),
+        body: SearchQuerySchema,
         response: {
-          200: z.object({
-            performers: z.array(PerformerSchema),
-            studios: z.array(StudioSchema),
-            scenes: z.array(SceneSchema),
-          }),
+          200: SearchAllResponseSchema,
         },
       },
     },
-    async (request, reply) => {
+    async (request) => {
       const { query, limit } = request.body;
 
-      try {
+      try{
         const [performers, studios, scenes] = await Promise.all([
           stashdbService.searchPerformers(query, limit).catch((err) => {
             app.log.error({ err, query }, "Failed to search performers");
@@ -109,9 +55,9 @@ const searchRoutes: FastifyPluginAsyncZod = async (app) => {
         };
       } catch (error) {
         app.log.error({ error, query }, "Search failed");
-        return reply.code(500).send({
-          error: error instanceof Error ? error.message : "Search failed",
-        });
+        throw app.httpErrors.internalServerError(
+          error instanceof Error ? error.message : "Search failed"
+        );
       }
     }
   );
@@ -121,14 +67,9 @@ const searchRoutes: FastifyPluginAsyncZod = async (app) => {
     "/performers",
     {
       schema: {
-        body: z.object({
-          query: z.string().min(1),
-          limit: z.number().min(1).max(100).default(20),
-        }),
+        body: SearchQuerySchema,
         response: {
-          200: z.object({
-            results: z.array(PerformerSchema),
-          }),
+          200: PerformersSearchResponseSchema,
         },
       },
     },
@@ -144,14 +85,9 @@ const searchRoutes: FastifyPluginAsyncZod = async (app) => {
     "/studios",
     {
       schema: {
-        body: z.object({
-          query: z.string().min(1),
-          limit: z.number().min(1).max(100).default(20),
-        }),
+        body: SearchQuerySchema,
         response: {
-          200: z.object({
-            results: z.array(StudioSchema),
-          }),
+          200: StudiosSearchResponseSchema,
         },
       },
     },
@@ -167,14 +103,9 @@ const searchRoutes: FastifyPluginAsyncZod = async (app) => {
     "/scenes",
     {
       schema: {
-        body: z.object({
-          query: z.string().min(1),
-          limit: z.number().min(1).max(100).default(20),
-        }),
+        body: SearchQuerySchema,
         response: {
-          200: z.object({
-            results: z.array(SceneSchema),
-          }),
+          200: ScenesSearchResponseSchema,
         },
       },
     },
@@ -190,9 +121,7 @@ const searchRoutes: FastifyPluginAsyncZod = async (app) => {
     "/performers/:id",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
+        params: EntityIdParamsSchema,
         response: {
           200: PerformerSchema,
         },
@@ -209,9 +138,7 @@ const searchRoutes: FastifyPluginAsyncZod = async (app) => {
     "/studios/:id",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
+        params: EntityIdParamsSchema,
         response: {
           200: StudioSchema,
         },
@@ -228,9 +155,7 @@ const searchRoutes: FastifyPluginAsyncZod = async (app) => {
     "/scenes/:id",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
+        params: EntityIdParamsSchema,
         response: {
           200: SceneSchema,
         },

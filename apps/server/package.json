@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "lint": "eslint .",
-    "clean": "rm -rf dist .turbo node_modules"
+    "clean": "rm -rf dist .turbo node_modules",
+    "migrate:settings": "tsx scripts/migrate-settings.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
@@ -19,6 +20,7 @@
     "@repo/database": "workspace:*",
     "@repo/shared-types": "workspace:*",
     "@xenova/transformers": "^2.17.2",
+    "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.37.0",
     "fastify": "^5.2.0",

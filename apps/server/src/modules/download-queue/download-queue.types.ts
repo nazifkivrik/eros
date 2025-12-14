@@ -1,10 +1,8 @@
-export type DownloadStatus =
-  | "queued"
-  | "downloading"
-  | "completed"
-  | "failed"
-  | "paused";
+import type { DownloadStatus } from "@repo/shared-types";
 
+// Note: DownloadQueueItem here differs slightly from shared-types version
+// This version uses 'quality: string' while shared version uses 'quality: Quality'
+// Keeping this for backend-specific use
 export type DownloadQueueItem = {
   id: string;
   sceneId: string;
@@ -43,3 +41,6 @@ export type UpdateQueueItemParams = {
   torrentHash?: string;
   completedAt?: string;
 };
+
+// Re-export DownloadStatus for convenience
+export type { DownloadStatus };

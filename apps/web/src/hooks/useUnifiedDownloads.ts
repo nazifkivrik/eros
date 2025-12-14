@@ -1,4 +1,9 @@
+"use client";
+
 import { useQuery } from "@tanstack/react-query";
+import { apiClient } from "@/lib/api-client";
+import { queryKeys } from "@/lib/query-keys";
+import { useMutationWithToast } from "./useMutationWithToast";
 
 export type UnifiedDownloadStatus =
   | "queued"
@@ -35,7 +40,7 @@ interface UnifiedDownloadsResponse {
 
 export function useUnifiedDownloads() {
   return useQuery<UnifiedDownloadsResponse>({
-    queryKey: ["unified-downloads"],
+    queryKey: queryKeys.downloads.unified,
     queryFn: async () => {
       const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
       const res = await fetch(`${baseUrl}/download-queue/unified`);
@@ -46,5 +51,40 @@ export function useUnifiedDownloads() {
     },
     refetchInterval: 5000, // Refresh every 5 seconds for real-time updates
     staleTime: 3000, // Consider data stale after 3 seconds
+  });
+}
+
+export function useDownloadQueue() {
+  return useQuery({
+    queryKey: queryKeys.downloads.queue,
+    queryFn: () => apiClient.getDownloadQueue(),
+    refetchInterval: 5000, // Poll every 5 seconds for real-time updates
+  });
+}
+
+export function usePauseDownload() {
+  return useMutationWithToast({
+    mutationFn: (id: string) => apiClient.pauseDownload(id),
+    successMessage: "Download paused",
+    invalidateKeys: [queryKeys.downloads.queue, queryKeys.downloads.unified],
+    errorMessage: "Failed to pause download",
+  });
+}
+
+export function useResumeDownload() {
+  return useMutationWithToast({
+    mutationFn: (id: string) => apiClient.resumeDownload(id),
+    successMessage: "Download resumed",
+    invalidateKeys: [queryKeys.downloads.queue, queryKeys.downloads.unified],
+    errorMessage: "Failed to resume download",
+  });
+}
+
+export function useRemoveDownload() {
+  return useMutationWithToast({
+    mutationFn: (id: string) => apiClient.removeDownload(id),
+    successMessage: "Download removed",
+    invalidateKeys: [queryKeys.downloads.queue, queryKeys.downloads.unified],
+    errorMessage: "Failed to remove download",
   });
 }

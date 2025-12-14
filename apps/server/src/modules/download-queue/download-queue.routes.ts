@@ -355,7 +355,7 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
         },
       },
     },
-    async (request) => {
+    async () => {
       // Get all download queue items
       const queueItems = await app.db.query.downloadQueue.findMany({
         with: {

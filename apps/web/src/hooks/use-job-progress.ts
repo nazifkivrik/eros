@@ -1,19 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-
-export interface JobProgressEvent {
-  jobName: string;
-  status: "started" | "progress" | "completed" | "failed";
-  message: string;
-  progress?: {
-    current: number;
-    total: number;
-    percentage: number;
-  };
-  data?: Record<string, any>;
-  timestamp: string;
-}
+import type { JobProgressEvent } from "@repo/shared-types";
 
 interface UseJobProgressOptions {
   /**

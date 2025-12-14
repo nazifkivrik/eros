@@ -74,16 +74,16 @@ export async function qbittorrentSyncJob(app: FastifyInstance) {
               paused: false,
             });
 
-            logsService.info({
-              event: "torrent_readded",
-              message: `Re-added manually removed torrent for scene: ${removed.sceneId}`,
-              details: {
+            await logsService.info(
+              "torrent",
+              `Re-added manually removed torrent for scene: ${removed.sceneId}`,
+              {
                 sceneId: removed.sceneId,
                 qbitHash: removed.qbitHash,
                 torrentHash: removed.torrentHash,
               },
-              sceneId: removed.sceneId,
-            });
+              { sceneId: removed.sceneId }
+            );
           } catch (error) {
             app.log.error(
               { error, sceneId: removed.sceneId },
@@ -117,16 +117,16 @@ export async function qbittorrentSyncJob(app: FastifyInstance) {
             });
           }
 
-          logsService.info({
-            event: "torrent_cancelled",
-            message: `Cancelled manually removed torrent for scene: ${removed.sceneId}`,
-            details: {
+          await logsService.info(
+            "torrent",
+            `Cancelled manually removed torrent for scene: ${removed.sceneId}`,
+            {
               sceneId: removed.sceneId,
               qbitHash: removed.qbitHash,
               reason: "manual_removal",
             },
-            sceneId: removed.sceneId,
-          });
+            { sceneId: removed.sceneId }
+          );
         }
       } catch (error) {
         app.log.error(

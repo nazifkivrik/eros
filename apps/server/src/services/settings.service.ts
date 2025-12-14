@@ -7,84 +7,7 @@ import { eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { appSettings } from "@repo/database";
 import type * as schema from "@repo/database";
-
-interface AppSettings {
-  general: {
-    appName: string;
-    downloadPath: string;
-    scenesPath: string;
-    incompletePath: string;
-    enableNotifications: boolean;
-    minIndexersForMetadataLess: number;
-    groupingThreshold: number; // Threshold for merging truncated scene titles (0.0-1.0)
-  };
-  fileManagement: {
-    deleteFilesOnRemove: boolean; // Re-download scene when files are manually deleted from filesystem
-    deleteTorrentOnRemove: boolean; // Re-add torrent when manually removed from qBittorrent
-    removeFromQbitAfterDays: number;
-    renameOnMetadata: boolean;
-  };
-  stashdb: {
-    apiUrl: string;
-    apiKey: string;
-    enabled: boolean;
-  };
-  prowlarr: {
-    apiUrl: string;
-    apiKey: string;
-    enabled: boolean;
-  };
-  qbittorrent: {
-    url: string;
-    username: string;
-    password: string;
-    enabled: boolean;
-  };
-  ai: {
-    enabled: boolean; // Enable AI-powered scene matching with local embeddings
-    model: string; // Local embedding model (e.g., "Xenova/all-MiniLM-L6-v2")
-    threshold: number; // Cosine similarity threshold for AI matching (0.0-1.0)
-  };
-}
-
-const DEFAULT_SETTINGS: AppSettings = {
-  general: {
-    appName: "Eros",
-    downloadPath: "/downloads",
-    scenesPath: "/scenes",
-    incompletePath: "/incomplete",
-    enableNotifications: true,
-    minIndexersForMetadataLess: 2,
-    groupingThreshold: 0.7, // 70% match required for truncated title merging
-  },
-  fileManagement: {
-    deleteFilesOnRemove: false, // Don't re-download by default
-    deleteTorrentOnRemove: false, // Don't re-add by default (will unsubscribe)
-    removeFromQbitAfterDays: 7,
-    renameOnMetadata: true,
-  },
-  stashdb: {
-    apiUrl: "https://stashdb.org/graphql",
-    apiKey: "",
-    enabled: false,
-  },
-  prowlarr: {
-    apiUrl: "",
-    apiKey: "",
-    enabled: false,
-  },
-  qbittorrent: {
-    url: "",
-    username: "",
-    password: "",
-    enabled: false,
-  },
-  ai: {
-    enabled: false,
-    model: "Xenova/all-MiniLM-L6-v2", // Local sentence transformer model
-    threshold: 0.75, // 75% cosine similarity for AI matching
-  },
-};
+import { DEFAULT_SETTINGS, type AppSettings } from "@repo/shared-types";
 
 export class SettingsService {
   constructor(private db: BetterSQLite3Database<typeof schema>) {}
@@ -98,7 +21,34 @@ export class SettingsService {
     });
 
     if (setting) {
-      return setting.value as AppSettings;
+      // Merge with defaults to ensure all required fields exist
+      const savedSettings = setting.value as Partial<AppSettings>;
+      return {
+        general: {
+          ...DEFAULT_SETTINGS.general,
+          ...(savedSettings.general || {}),
+        },
+        fileManagement: {
+          ...DEFAULT_SETTINGS.fileManagement,
+          ...(savedSettings.fileManagement || {}),
+        },
+        stashdb: {
+          ...DEFAULT_SETTINGS.stashdb,
+          ...(savedSettings.stashdb || {}),
+        },
+        prowlarr: {
+          ...DEFAULT_SETTINGS.prowlarr,
+          ...(savedSettings.prowlarr || {}),
+        },
+        qbittorrent: {
+          ...DEFAULT_SETTINGS.qbittorrent,
+          ...(savedSettings.qbittorrent || {}),
+        },
+        ai: {
+          ...DEFAULT_SETTINGS.ai,
+          ...(savedSettings.ai || {}),
+        },
+      };
     }
 
     // Return defaults if not found
@@ -196,7 +146,7 @@ export class SettingsService {
         };
       }
 
-      const data = await response.json();
+      const data = await response.json() as { errors?: Array<{ message: string }> };
 
       if (data.errors) {
         return {
@@ -308,8 +258,7 @@ export class SettingsService {
 }
 
 // Export factory function
-export function createSettingsService(
-  db: BetterSQLite3Database<typeof schema>
-) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createSettingsService(db: any) {
   return new SettingsService(db);
 }

@@ -1,73 +1,48 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import { toast } from "sonner";
+import { queryKeys } from "@/lib/query-keys";
+import { useMutationWithToast } from "./useMutationWithToast";
 
 export function useTorrents() {
   return useQuery({
-    queryKey: ["torrents"],
+    queryKey: queryKeys.torrents.all,
     queryFn: () => apiClient.getTorrents(),
     refetchInterval: 5000, // Poll every 5 seconds for real-time updates
   });
 }
 
 export function usePauseTorrent() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
+  return useMutationWithToast({
     mutationFn: (hash: string) => apiClient.pauseTorrent(hash),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["torrents"] });
-      queryClient.invalidateQueries({ queryKey: ["downloadQueue"] });
-      queryClient.invalidateQueries({ queryKey: ["unified-downloads"] });
-      toast.success("Torrent paused");
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || "Failed to pause torrent");
-    },
+    successMessage: "Torrent paused",
+    invalidateKeys: [queryKeys.torrents.all, queryKeys.downloads.queue, queryKeys.downloads.unified],
+    errorMessage: "Failed to pause torrent",
   });
 }
 
 export function useResumeTorrent() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
+  return useMutationWithToast({
     mutationFn: (hash: string) => apiClient.resumeTorrent(hash),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["torrents"] });
-      queryClient.invalidateQueries({ queryKey: ["downloadQueue"] });
-      queryClient.invalidateQueries({ queryKey: ["unified-downloads"] });
-      toast.success("Torrent resumed");
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || "Failed to resume torrent");
-    },
+    successMessage: "Torrent resumed",
+    invalidateKeys: [queryKeys.torrents.all, queryKeys.downloads.queue, queryKeys.downloads.unified],
+    errorMessage: "Failed to resume torrent",
   });
 }
 
 export function useRemoveTorrent() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
+  return useMutationWithToast({
     mutationFn: ({ hash, deleteFiles }: { hash: string; deleteFiles?: boolean }) =>
       apiClient.removeTorrent(hash, deleteFiles),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["torrents"] });
-      queryClient.invalidateQueries({ queryKey: ["downloadQueue"] });
-      queryClient.invalidateQueries({ queryKey: ["unified-downloads"] });
-      toast.success("Torrent removed");
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || "Failed to remove torrent");
-    },
+    successMessage: "Torrent removed",
+    invalidateKeys: [queryKeys.torrents.all, queryKeys.downloads.queue, queryKeys.downloads.unified],
+    errorMessage: "Failed to remove torrent",
   });
 }
 
 export function useSetTorrentPriority() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
+  return useMutationWithToast({
     mutationFn: ({
       hash,
       priority,
@@ -75,13 +50,8 @@ export function useSetTorrentPriority() {
       hash: string;
       priority: "top" | "bottom" | "increase" | "decrease";
     }) => apiClient.setTorrentPriority(hash, priority),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["torrents"] });
-      queryClient.invalidateQueries({ queryKey: ["unified-downloads"] });
-      toast.success("Priority updated");
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || "Failed to update priority");
-    },
+    successMessage: "Priority updated",
+    invalidateKeys: [queryKeys.torrents.all, queryKeys.downloads.unified],
+    errorMessage: "Failed to update priority",
   });
 }

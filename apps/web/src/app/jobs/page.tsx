@@ -45,7 +45,7 @@ const JOB_INFO = {
 export default function JobsPage() {
   const { data: jobs, isLoading } = useJobs();
   const triggerJob = useTriggerJob();
-  const { latestEvent, isConnected, getLatestJobEvent, isJobRunning } = useJobProgress();
+  const { isConnected, getLatestJobEvent, isJobRunning } = useJobProgress();
 
   const handleTrigger = (jobName: string) => {
     triggerJob.mutate(jobName);

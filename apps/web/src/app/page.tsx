@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Play, Clock, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
-import { useDownloadQueue } from "@/hooks/useDownloadQueue";
+import { useDownloadQueue } from "@/hooks/useUnifiedDownloads";
 import { useTorrents } from "@/hooks/useTorrents";
 import { useJobs } from "@/hooks/useJobs";
 import { useSettings } from "@/hooks/useSettings";
@@ -25,10 +25,10 @@ export default function HomePage() {
 
   const activeTorrents = torrents?.torrents?.length || 0;
 
-  const getServiceStatus = (service: string) => {
+  const getServiceStatus = (service: keyof typeof settings) => {
     if (!settings) return { status: "Not Configured", variant: "secondary" as const };
 
-    const serviceConfig = settings[service];
+    const serviceConfig = settings[service] as any;
     if (!serviceConfig) return { status: "Not Configured", variant: "secondary" as const };
 
     if (serviceConfig.enabled && serviceConfig.apiUrl) {
@@ -119,7 +119,7 @@ export default function HomePage() {
                     </div>
                   ))}
                 </div>
-              ) : downloads?.items?.length > 0 ? (
+              ) : (downloads?.items?.length ?? 0) > 0 ? (
                 <div className="space-y-4">
                   {downloads.items.slice(0, 5).map((item: any) => (
                     <div key={item.id} className="space-y-2">

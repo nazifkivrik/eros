@@ -1,11 +1,11 @@
-import { pipeline, Pipeline } from "@xenova/transformers";
+import { pipeline, type FeatureExtractionPipeline } from "@xenova/transformers";
 
 /**
  * AI Matching Service
  * Uses transformer models for semantic similarity matching
  */
 export class AIMatchingService {
-  private model: Pipeline | null = null;
+  private model: FeatureExtractionPipeline | null = null;
   private isInitialized = false;
   private initializationPromise: Promise<void> | null = null;
 

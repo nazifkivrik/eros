@@ -30,11 +30,11 @@ export class TorrentCompletionService {
       });
 
       if (!queueItem) {
-        this.logger.warn({
-          event: "torrent_completion_failed",
-          message: `No download queue item found for qBit hash: ${qbitHash}`,
-          details: { qbitHash },
-        });
+        await this.logger.warning(
+          "torrent",
+          `No download queue item found for qBit hash: ${qbitHash}`,
+          { qbitHash }
+        );
         return;
       }
 
@@ -42,12 +42,12 @@ export class TorrentCompletionService {
       const torrentInfo = await this.qbittorrent.getTorrentProperties(qbitHash);
 
       if (!torrentInfo) {
-        this.logger.error({
-          event: "torrent_completion_failed",
-          message: `Failed to get torrent info from qBittorrent for hash: ${qbitHash}`,
-          details: { qbitHash, sceneId: queueItem.sceneId },
-          sceneId: queueItem.sceneId,
-        });
+        await this.logger.error(
+          "torrent",
+          `Failed to get torrent info from qBittorrent for hash: ${qbitHash}`,
+          { qbitHash, sceneId: queueItem.sceneId },
+          { sceneId: queueItem.sceneId }
+        );
         return;
       }
 
@@ -55,25 +55,25 @@ export class TorrentCompletionService {
       const sourcePath = torrentInfo.save_path || torrentInfo.content_path;
 
       if (!sourcePath) {
-        this.logger.error({
-          event: "torrent_completion_failed",
-          message: "No save path found in torrent info",
-          details: { qbitHash, sceneId: queueItem.sceneId },
-          sceneId: queueItem.sceneId,
-        });
+        await this.logger.error(
+          "torrent",
+          "No save path found in torrent info",
+          { qbitHash, sceneId: queueItem.sceneId },
+          { sceneId: queueItem.sceneId }
+        );
         return;
       }
 
-      this.logger.info({
-        event: "torrent_completed",
-        message: `Processing completed torrent for scene: ${queueItem.sceneId}`,
-        details: {
+      await this.logger.info(
+        "torrent",
+        `Processing completed torrent for scene: ${queueItem.sceneId}`,
+        {
           qbitHash,
           sceneId: queueItem.sceneId,
           sourcePath,
         },
-        sceneId: queueItem.sceneId,
-      });
+        { sceneId: queueItem.sceneId }
+      );
 
       // 4. Move files to scenes folder and generate metadata
       const moveResult = await this.fileManager.moveCompletedTorrent(
@@ -81,17 +81,17 @@ export class TorrentCompletionService {
         sourcePath
       );
 
-      this.logger.info({
-        event: "torrent_files_moved",
-        message: `Files moved to: ${moveResult.destinationPath}`,
-        details: {
+      await this.logger.info(
+        "torrent",
+        `Files moved to: ${moveResult.destinationPath}`,
+        {
           sceneId: queueItem.sceneId,
           destinationPath: moveResult.destinationPath,
           nfoGenerated: !!moveResult.nfoPath,
           posterDownloaded: !!moveResult.posterPath,
         },
-        sceneId: queueItem.sceneId,
-      });
+        { sceneId: queueItem.sceneId }
+      );
 
       // 5. Update sceneFiles table with new paths
       // First, check if scene file record exists
@@ -137,25 +137,25 @@ export class TorrentCompletionService {
         })
         .where(eq(downloadQueue.id, queueItem.id));
 
-      this.logger.info({
-        event: "torrent_completion_success",
-        message: `Successfully processed completed torrent for scene: ${queueItem.sceneId}`,
-        details: {
+      await this.logger.info(
+        "torrent",
+        `Successfully processed completed torrent for scene: ${queueItem.sceneId}`,
+        {
           sceneId: queueItem.sceneId,
           qbitHash,
           destinationPath: moveResult.destinationPath,
         },
-        sceneId: queueItem.sceneId,
-      });
+        { sceneId: queueItem.sceneId }
+      );
     } catch (error) {
-      this.logger.error({
-        event: "torrent_completion_error",
-        message: `Error processing completed torrent: ${error instanceof Error ? error.message : String(error)}`,
-        details: {
+      await this.logger.error(
+        "torrent",
+        `Error processing completed torrent: ${error instanceof Error ? error.message : String(error)}`,
+        {
           qbitHash,
           error: error instanceof Error ? error.stack : String(error),
-        },
-      });
+        }
+      );
       throw error;
     }
   }

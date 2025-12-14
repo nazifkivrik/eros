@@ -3,10 +3,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
+import { queryKeys } from "@/lib/query-keys";
+import type { LogLevel, EventType } from "@repo/shared-types";
 
 interface LogFilters {
-  level?: "error" | "warning" | "info" | "debug";
-  eventType?: "torrent" | "subscription" | "download" | "metadata" | "system";
+  level?: LogLevel;
+  eventType?: EventType;
   sceneId?: string;
   performerId?: string;
   studioId?: string;
@@ -38,7 +40,7 @@ export function useCleanupLogs() {
   return useMutation({
     mutationFn: (daysToKeep: number) => apiClient.cleanupLogs(daysToKeep),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["logs"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.logs.all });
       toast.success(`Deleted ${data.deletedCount} old log entries`);
     },
     onError: (error: Error) => {

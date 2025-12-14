@@ -274,6 +274,10 @@ export class StashDBService {
     return this.mapStudio(data.findStudio);
   }
 
+  async getSceneById(id: string) {
+    return this.getSceneDetails(id);
+  }
+
   async getSceneDetails(id: string) {
     const query = `
       query FindScene($id: ID!) {
@@ -322,6 +326,10 @@ export class StashDBService {
     const data = await this.client.request<FindSceneResponse>(query, { id });
 
     return this.mapScene(data.findScene);
+  }
+
+  async request<T = unknown>(query: string, variables?: Record<string, unknown>): Promise<T> {
+    return this.client.request<T>(query, variables);
   }
 
   async testConnection(): Promise<boolean> {

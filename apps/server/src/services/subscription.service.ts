@@ -828,7 +828,7 @@ export class SubscriptionService {
   ): Promise<Subscription | null> {
     const subscription = await this.db.query.subscriptions.findFirst({
       where: and(
-        eq(subscriptions.entityType, entityType),
+        eq(subscriptions.entityType, entityType as "performer" | "studio" | "scene"),
         eq(subscriptions.entityId, entityId)
       ),
     });
@@ -911,7 +911,7 @@ export class SubscriptionService {
    */
   async getSubscriptionsByType(entityType: string): Promise<Subscription[]> {
     return await this.db.query.subscriptions.findMany({
-      where: eq(subscriptions.entityType, entityType),
+      where: eq(subscriptions.entityType, entityType as "performer" | "studio" | "scene"),
     });
   }
 
@@ -924,12 +924,14 @@ export class SubscriptionService {
   ): Promise<Subscription> {
     const now = new Date().toISOString();
 
+    const updateData: any = {
+      ...updates,
+      updatedAt: now,
+    };
+
     await this.db
       .update(subscriptions)
-      .set({
-        ...updates,
-        updatedAt: now,
-      })
+      .set(updateData)
       .where(eq(subscriptions.id, id));
 
     const updated = await this.db.query.subscriptions.findFirst({
@@ -1077,7 +1079,7 @@ export class SubscriptionService {
       .delete(subscriptions)
       .where(
         and(
-          eq(subscriptions.entityType, entityType),
+          eq(subscriptions.entityType, entityType as "performer" | "studio" | "scene"),
           eq(subscriptions.entityId, entityId)
         )
       );
@@ -1121,8 +1123,10 @@ export class SubscriptionService {
 
   /**
    * Validate that entity exists
+   * Reserved for future validation implementation
    */
-  private async validateEntity(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private async _validateEntity(
     entityType: string,
     entityId: string
   ): Promise<void> {
@@ -1269,8 +1273,7 @@ export class SubscriptionService {
 }
 
 // Export factory function
-export function createSubscriptionService(
-  db: BetterSQLite3Database<typeof schema>
-) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createSubscriptionService(db: any) {
   return new SubscriptionService(db);
 }

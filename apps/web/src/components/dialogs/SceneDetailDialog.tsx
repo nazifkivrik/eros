@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useSceneDetails } from "@/hooks/useSearch";
 import { useCheckSubscription } from "@/hooks/useSubscriptions";
 import {
@@ -9,20 +8,14 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-  CarouselNext,
-  CarouselPrevious,
-} from "@/components/ui/carousel";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Calendar, Clock, Film, Link as LinkIcon, Check } from "lucide-react";
+import { ImageCarousel } from "./ImageCarousel";
+import { SubscriptionFooter } from "./SubscriptionFooter";
+import { formatDate, formatDuration } from "@/lib/dialog-utils";
 
 interface SceneDetailDialogProps {
   sceneId: string | null;
@@ -39,17 +32,6 @@ export function SceneDetailDialog({
 
   const { data: subscriptionStatus, isLoading: isCheckingSubscription } =
     useCheckSubscription("scene", sceneId || "");
-
-  const formatDuration = (seconds: number | null) => {
-    if (!seconds) return "Unknown";
-    const minutes = Math.floor(seconds / 60);
-    return `${minutes} min`;
-  };
-
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return "Unknown";
-    return new Date(dateStr).toLocaleDateString();
-  };
 
   return (
     <Dialog open={!!sceneId} onOpenChange={(open) => !open && onClose()}>
@@ -82,33 +64,11 @@ export function SceneDetailDialog({
           <>
 
             <div className="space-y-6">
-              {/* Images Carousel */}
-              {scene.images && scene.images.length > 0 && (
-                <Carousel className="w-full">
-                  <CarouselContent>
-                    {scene.images.map((img: any, idx: number) => (
-                      <CarouselItem key={idx}>
-                        <div className="relative aspect-video w-full overflow-hidden rounded-lg">
-                          <Image
-                            src={img.url}
-                            alt={`${scene.title} - Image ${idx + 1}`}
-                            fill
-                            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 90vw, 80vw"
-                            className="object-cover"
-                            unoptimized
-                          />
-                        </div>
-                      </CarouselItem>
-                    ))}
-                  </CarouselContent>
-                  {scene.images.length > 1 && (
-                    <>
-                      <CarouselPrevious className="left-2" />
-                      <CarouselNext className="right-2" />
-                    </>
-                  )}
-                </Carousel>
-              )}
+              <ImageCarousel
+                images={scene.images || []}
+                alt={scene.title}
+                aspectRatio="video"
+              />
 
               {/* Metadata */}
               <div className="grid grid-cols-2 gap-4">
@@ -214,25 +174,12 @@ export function SceneDetailDialog({
               )}
             </div>
 
-            <DialogFooter>
-              <Button variant="outline" onClick={onClose}>
-                Close
-              </Button>
-              {!subscriptionStatus?.isSubscribed && (
-                <Button onClick={() => onSubscribe(scene)}>
-                  Subscribe
-                </Button>
-              )}
-              {subscriptionStatus?.isSubscribed && subscriptionStatus.subscription && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Check className="h-4 w-4 text-green-600" />
-                  <span>
-                    Subscribed with {subscriptionStatus.subscription.qualityProfile?.name || 'profile'}
-                    {subscriptionStatus.subscription.autoDownload && ' - Auto Download'}
-                  </span>
-                </div>
-              )}
-            </DialogFooter>
+            <SubscriptionFooter
+              isSubscribed={subscriptionStatus?.isSubscribed || false}
+              subscription={subscriptionStatus?.subscription}
+              onClose={onClose}
+              onSubscribe={() => onSubscribe(scene)}
+            />
           </>
         ) : (
           <div className="text-center py-8 text-muted-foreground">

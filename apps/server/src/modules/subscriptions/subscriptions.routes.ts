@@ -1,45 +1,27 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
+import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { createSubscriptionService } from "../../services/subscription.service.js";
-
-const SubscriptionSchema = z.object({
-  id: z.string(),
-  entityType: z.enum(["performer", "studio", "scene"]),
-  entityId: z.string(),
-  qualityProfileId: z.string(),
-  autoDownload: z.boolean(),
-  includeMetadataMissing: z.boolean(),
-  includeAliases: z.boolean(),
-  status: z.string(),
-  monitored: z.boolean(),
-  searchCutoffDate: z.string().nullable(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-
-const SubscriptionWithDetailsSchema = SubscriptionSchema.extend({
-  entityName: z.string(),
-  entity: z.any().nullable(), // Can be performer, studio, or scene
-  qualityProfile: z.object({
-    id: z.string(),
-    name: z.string(),
-    items: z.any(), // JSON array of quality items
-    createdAt: z.string(),
-    updatedAt: z.string(),
-  }).nullable(),
-});
-
-const CreateSubscriptionSchema = z.object({
-  entityType: z.enum(["performer", "studio", "scene"]),
-  entityId: z.string(),
-  qualityProfileId: z.string(),
-  autoDownload: z.boolean().default(true),
-  includeMetadataMissing: z.boolean().default(false),
-  includeAliases: z.boolean().default(false),
-});
+import type { Database } from "@repo/database";
+import {
+  SubscriptionSchema,
+  SubscriptionWithDetailsSchema,
+  CreateSubscriptionSchema,
+  UpdateSubscriptionSchema,
+  SubscriptionParamsSchema,
+  EntityTypeParamsSchema,
+  CheckSubscriptionParamsSchema,
+  DeleteSubscriptionQuerySchema,
+  SubscriptionListResponseSchema,
+  SubscriptionsByTypeResponseSchema,
+  SuccessResponseSchema,
+  ErrorResponseSchema,
+  CheckSubscriptionResponseSchema,
+} from "./subscriptions.schema.js";
 
 const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
-  const subscriptionService = createSubscriptionService(app.db);
+  const appWithDb = app as FastifyInstance & { db: Database };
+  const subscriptionService = createSubscriptionService(appWithDb.db);
 
   // Get all subscriptions
   app.get(
@@ -47,9 +29,7 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     {
       schema: {
         response: {
-          200: z.object({
-            data: z.array(SubscriptionWithDetailsSchema),
-          }),
+          200: SubscriptionListResponseSchema,
         },
       },
     },
@@ -64,16 +44,13 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/type/:entityType",
     {
       schema: {
-        params: z.object({
-          entityType: z.enum(["performer", "studio", "scene"]),
-        }),
+        params: EntityTypeParamsSchema,
         response: {
-          200: z.object({
-            data: z.array(SubscriptionSchema),
-          }),
+          200: SubscriptionsByTypeResponseSchema,
         },
       },
     },
+    // @ts-expect-error - Fastify type provider entityType inference
     async (request) => {
       const { entityType } = request.params;
       const data = await subscriptionService.getSubscriptionsByType(entityType);
@@ -86,14 +63,10 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
+        params: SubscriptionParamsSchema,
         response: {
           200: SubscriptionWithDetailsSchema,
-          404: z.object({
-            error: z.string(),
-          }),
+          404: ErrorResponseSchema,
         },
       },
     },
@@ -117,18 +90,16 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
         body: CreateSubscriptionSchema,
         response: {
           201: SubscriptionSchema,
-          400: z.object({
-            error: z.string(),
-          }),
+          400: ErrorResponseSchema,
         },
       },
     },
     async (request, reply) => {
       try {
         const subscription = await subscriptionService.createSubscription(
-          request.body
+          request.body as any
         );
-        return reply.code(201).send(subscription);
+        return reply.code(201).send(subscription as any);
       } catch (error) {
         return reply.code(400).send({
           error: error instanceof Error ? error.message : "Unknown error",
@@ -142,25 +113,15 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
-        body: z.object({
-          qualityProfileId: z.string().optional(),
-          autoDownload: z.boolean().optional(),
-          includeMetadataMissing: z.boolean().optional(),
-          includeAliases: z.boolean().optional(),
-          status: z.string().optional(),
-          monitored: z.boolean().optional(),
-        }),
+        params: SubscriptionParamsSchema,
+        body: UpdateSubscriptionSchema,
         response: {
           200: SubscriptionSchema,
-          404: z.object({
-            error: z.string(),
-          }),
+          404: ErrorResponseSchema,
         },
       },
     },
+    // @ts-expect-error - Fastify type provider entityType inference
     async (request, reply) => {
       const { id } = request.params;
 
@@ -183,16 +144,10 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
-        querystring: z.object({
-          deleteAssociatedScenes: z.coerce.boolean().optional().default(false),
-        }),
+        params: SubscriptionParamsSchema,
+        querystring: DeleteSubscriptionQuerySchema,
         response: {
-          200: z.object({
-            success: z.boolean(),
-          }),
+          200: SuccessResponseSchema,
         },
       },
     },
@@ -209,9 +164,7 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id/toggle-monitoring",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
+        params: SubscriptionParamsSchema,
         response: {
           200: SubscriptionSchema,
         },
@@ -219,7 +172,7 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request) => {
       const { id } = request.params;
-      return await subscriptionService.toggleMonitoring(id);
+      return (await subscriptionService.toggleMonitoring(id)) as any;
     }
   );
 
@@ -228,9 +181,7 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id/toggle-status",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
+        params: SubscriptionParamsSchema,
         response: {
           200: SubscriptionSchema,
         },
@@ -238,7 +189,7 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request) => {
       const { id } = request.params;
-      return await subscriptionService.toggleStatus(id);
+      return (await subscriptionService.toggleStatus(id)) as any;
     }
   );
 
@@ -247,15 +198,9 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/check/:entityType/:entityId",
     {
       schema: {
-        params: z.object({
-          entityType: z.enum(["performer", "studio", "scene"]),
-          entityId: z.string(),
-        }),
+        params: CheckSubscriptionParamsSchema,
         response: {
-          200: z.object({
-            subscribed: z.boolean(),
-            subscription: SubscriptionSchema.nullable(),
-          }),
+          200: CheckSubscriptionResponseSchema,
         },
       },
     },
@@ -268,7 +213,7 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
 
       return {
         subscribed: !!subscription,
-        subscription: subscription || null,
+        subscription: (subscription || null) as any,
       };
     }
   );
@@ -278,16 +223,12 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id/scenes",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
+        params: SubscriptionParamsSchema,
         response: {
           200: z.object({
             data: z.array(z.any()),
           }),
-          404: z.object({
-            error: z.string(),
-          }),
+          404: ErrorResponseSchema,
         },
       },
     },
@@ -306,7 +247,7 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
 
       // Get all scenes for this performer/studio
       const scenesQuery = subscription.entityType === "performer"
-        ? app.db.query.performersScenes.findMany({
+        ? appWithDb.db.query.performersScenes.findMany({
             where: (performersScenes, { eq }) => eq(performersScenes.performerId, subscription.entityId),
             with: {
               scene: {
@@ -316,7 +257,7 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
               },
             },
           })
-        : app.db.query.studiosScenes.findMany({
+        : appWithDb.db.query.studiosScenes.findMany({
             where: (studiosScenes, { eq }) => eq(studiosScenes.studioId, subscription.entityId),
             with: {
               scene: {
@@ -333,13 +274,13 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       // Get download queue status for each scene
       const scenesWithStatus = await Promise.all(
         scenes.map(async (scene: any) => {
-          const downloadQueue = await app.db.query.downloadQueue.findFirst({
+          const downloadQueue = await appWithDb.db.query.downloadQueue.findFirst({
             where: (dq, { eq }) => eq(dq.sceneId, scene.id),
             orderBy: (dq, { desc }) => [desc(dq.addedAt)],
           });
 
           // Check if scene has a subscription
-          const sceneSubscription = await app.db.query.subscriptions.findFirst({
+          const sceneSubscription = await appWithDb.db.query.subscriptions.findFirst({
             where: (subs, { and, eq }) => and(
               eq(subs.entityType, "scene"),
               eq(subs.entityId, scene.id)
@@ -367,17 +308,13 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id/files",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
+        params: SubscriptionParamsSchema,
         response: {
           200: z.object({
             files: z.array(z.any()),
             downloadQueue: z.any().nullable(),
           }),
-          404: z.object({
-            error: z.string(),
-          }),
+          404: ErrorResponseSchema,
         },
       },
     },
@@ -395,12 +332,12 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       // Get scene files
-      const files = await app.db.query.sceneFiles.findMany({
+      const files = await appWithDb.db.query.sceneFiles.findMany({
         where: (sceneFiles, { eq }) => eq(sceneFiles.sceneId, subscription.entityId),
       });
 
       // Get download queue entry
-      const downloadQueue = await app.db.query.downloadQueue.findFirst({
+      const downloadQueue = await appWithDb.db.query.downloadQueue.findFirst({
         where: (dq, { eq }) => eq(dq.sceneId, subscription.entityId),
         orderBy: (dq, { desc }) => [desc(dq.addedAt)],
       });

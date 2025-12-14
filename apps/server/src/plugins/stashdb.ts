@@ -22,6 +22,6 @@ export default fp(async (app) => {
 
   app.decorate("stashdb", stashdb);
 
-  app.log.info("StashDB plugin registered", { apiUrl, hasApiKey: !!apiKey });
+  app.log.info({ apiUrl, hasApiKey: !!apiKey }, "StashDB plugin registered");
 });
 

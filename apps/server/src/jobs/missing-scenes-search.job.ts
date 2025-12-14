@@ -6,8 +6,8 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { eq, and, inArray, sql, notInArray } from "drizzle-orm";
-import { scenes, performersScenes, studiosScenes, subscriptions, downloadQueue, appSettings } from "@repo/database";
+import { eq, and, inArray } from "drizzle-orm";
+import { scenes, performersScenes, studiosScenes, subscriptions, downloadQueue, indexers } from "@repo/database";
 import { createLogsService } from "../services/logs.service.js";
 import { getJobProgressService } from "../services/job-progress.service.js";
 import { createQBittorrentService } from "../services/qbittorrent.service.js";
@@ -253,10 +253,10 @@ export async function missingScenesSearchJob(app: FastifyInstance) {
 
         // Verify indexer exists
         const indexerExists = await app.db.query.indexers.findFirst({
-          where: eq(appSettings.key, `prowlarr-${bestTorrent.indexerId}`),
+          where: eq(indexers.id, `prowlarr-${bestTorrent.indexerId}`),
         });
 
-        const indexerId = indexerExists?.value || `prowlarr-${bestTorrent.indexerId}`;
+        const indexerId = indexerExists?.id || `prowlarr-${bestTorrent.indexerId}`;
 
         // Add to download queue
         await app.db.insert(downloadQueue).values({

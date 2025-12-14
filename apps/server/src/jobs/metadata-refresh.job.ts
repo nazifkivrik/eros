@@ -5,7 +5,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { subscriptions, performers, studios, scenes } from "@repo/database";
 
 export async function metadataRefreshJob(app: FastifyInstance) {
@@ -78,7 +78,7 @@ async function refreshPerformers(
       }
 
       // Fetch updated data from StashDB
-      const updatedData = await app.stashdb.request(
+      const updatedData = await app.stashdb.request<{ findPerformer: any }>(
         `query {
           findPerformer(id: "${performer.stashdbId}") {
             id
@@ -188,7 +188,7 @@ async function refreshStudios(app: FastifyInstance, studioIds: string[]) {
       }
 
       // Fetch updated data from StashDB
-      const updatedData = await app.stashdb.request(
+      const updatedData = await app.stashdb.request<{ findStudio: any }>(
         `query {
           findStudio(id: "${studio.stashdbId}") {
             id
@@ -244,7 +244,7 @@ async function refreshScenes(app: FastifyInstance, sceneIds: string[]) {
       }
 
       // Fetch updated data from StashDB
-      const updatedData = await app.stashdb.request(
+      const updatedData = await app.stashdb.request<{ findScene: any }>(
         `query {
           findScene(id: "${scene.stashdbId}") {
             id

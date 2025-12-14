@@ -520,7 +520,7 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                   Scene Files & Download Status
                 </CardTitle>
                 <CardDescription>
-                  Files in this scene's folder and download progress
+                  Files in this scene&apos;s folder and download progress
                 </CardDescription>
               </div>
               <Badge variant="outline">{sceneFiles.length} file{sceneFiles.length !== 1 ? 's' : ''}</Badge>

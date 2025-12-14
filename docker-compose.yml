@@ -26,8 +26,8 @@ services:
       - PORT=3001
       - HOST=0.0.0.0
       - DATABASE_PATH=/data/app.db
-      - DOWNLOAD_PATH=/downloads
-      - INCOMPLETE_PATH=/downloads/incomplete
+      - DOWNLOAD_PATH=${MEDIA_PATH:-./media}
+      - INCOMPLETE_PATH=${MEDIA_PATH:-./media}/incomplete
       - SESSION_SECRET=${SESSION_SECRET:-change-this-secret}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
       - QBITTORRENT_URL=${QBITTORRENT_URL:-http://qbittorrent:8080}
@@ -41,10 +41,7 @@ services:
       - AI_SIMILARITY_THRESHOLD=${AI_SIMILARITY_THRESHOLD:-0.85}
     volumes:
       - eros-data:/data
-      - eros-downloads:/downloads
-      # Allow mounting additional volumes for downloads
-      - ${ADDITIONAL_DOWNLOAD_PATH_1:-/tmp}:/downloads/additional1:rw
-      - ${ADDITIONAL_DOWNLOAD_PATH_2:-/tmp}:/downloads/additional2:rw
+      - ${MEDIA_PATH:-./media}:/app/media
     networks:
       - eros-network
     restart: unless-stopped
@@ -53,13 +50,14 @@ services:
     image: lscr.io/linuxserver/qbittorrent:latest
     container_name: qbittorrent
     environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=UTC
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Istanbul}
       - WEBUI_PORT=8080
+      - TORRENTING_PORT=6881
     volumes:
-      - qbittorrent-config:/config
-      - eros-downloads:/downloads
+      - ./qbittorrent/appdata:/config
+      - ${MEDIA_PATH:-./media}:/app/media
     ports:
       - "8080:8080"
       - "6881:6881"
@@ -72,13 +70,27 @@ services:
     image: lscr.io/linuxserver/prowlarr:latest
     container_name: prowlarr
     environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=UTC
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Istanbul}
     volumes:
-      - prowlarr-config:/config
+      - ./prowlarr/data:/config
     ports:
       - "9696:9696"
+    networks:
+      - eros-network
+    restart: unless-stopped
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_HTML=${LOG_HTML:-false}
+      - CAPTCHA_SOLVER=${CAPTCHA_SOLVER:-none}
+      - TZ=${TZ:-Europe/Istanbul}
+    ports:
+      - "${FLARESOLVERR_PORT:-8191}:8191"
     networks:
       - eros-network
     restart: unless-stopped
@@ -89,10 +101,4 @@ networks:
 
 volumes:
   eros-data:
-    driver: local
-  eros-downloads:
-    driver: local
-  qbittorrent-config:
-    driver: local
-  prowlarr-config:
     driver: local

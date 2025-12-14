@@ -264,7 +264,7 @@ export class DownloadService {
    */
   applyHardFilters(
     torrents: ParsedTorrent[],
-    expectedTitle: string,
+    _expectedTitle: string,
     minMatchScore = 60
   ): ParsedTorrent[] {
     return torrents.filter((torrent) => {

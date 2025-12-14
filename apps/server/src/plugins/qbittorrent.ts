@@ -30,7 +30,7 @@ export default fp(async (app) => {
     if (!connected) {
       throw new Error("Connection test failed");
     }
-    app.log.info("qBittorrent plugin registered and connected", { url });
+    app.log.info({ url }, "qBittorrent plugin registered and connected");
   } catch (error) {
     app.log.error({ error, url }, "Failed to connect to qBittorrent");
     app.decorate("qbittorrent", null);

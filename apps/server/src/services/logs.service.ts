@@ -8,9 +8,7 @@ import { logs } from "@repo/database";
 import { nanoid } from "nanoid";
 import type * as schema from "@repo/database";
 import { desc, eq, and, gte, lte } from "drizzle-orm";
-
-export type LogLevel = "error" | "warning" | "info" | "debug";
-export type EventType = "torrent" | "subscription" | "download" | "metadata" | "system";
+import type { LogLevel, EventType, Log, LogFilters } from "@repo/shared-types";
 
 interface CreateLogInput {
   level: LogLevel;
@@ -20,18 +18,6 @@ interface CreateLogInput {
   sceneId?: string;
   performerId?: string;
   studioId?: string;
-}
-
-interface Log {
-  id: string;
-  level: string;
-  eventType: string;
-  message: string;
-  details: Record<string, unknown> | null;
-  sceneId: string | null;
-  performerId: string | null;
-  studioId: string | null;
-  createdAt: string;
 }
 
 export class LogsService {
@@ -215,6 +201,7 @@ export class LogsService {
 }
 
 // Export factory function
-export function createLogsService(db: BetterSQLite3Database<typeof schema>) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createLogsService(db: any) {
   return new LogsService(db);
 }

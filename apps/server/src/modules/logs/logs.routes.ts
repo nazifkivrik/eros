@@ -1,18 +1,14 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { z } from "zod";
 import { createLogsService } from "../../services/logs.service.js";
-
-const LogSchema = z.object({
-  id: z.string(),
-  level: z.enum(["error", "warning", "info", "debug"]),
-  eventType: z.enum(["torrent", "subscription", "download", "metadata", "system"]),
-  message: z.string(),
-  details: z.record(z.unknown()).nullable(),
-  sceneId: z.string().nullable(),
-  performerId: z.string().nullable(),
-  studioId: z.string().nullable(),
-  createdAt: z.string(),
-});
+import {
+  LogSchema,
+  LogsQuerySchema,
+  LogParamsSchema,
+  CleanupQuerySchema,
+  LogsListResponseSchema,
+  CleanupResponseSchema,
+  ErrorResponseSchema,
+} from "./logs.schema.js";
 
 const logsRoutes: FastifyPluginAsyncZod = async (app) => {
   const logsService = createLogsService(app.db);
@@ -22,39 +18,13 @@ const logsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/",
     {
       schema: {
-        querystring: z
-          .object({
-            level: z.enum(["error", "warning", "info", "debug"]).optional(),
-            eventType: z.enum(["torrent", "subscription", "download", "metadata", "system"]).optional(),
-            sceneId: z.string().optional(),
-            performerId: z.string().optional(),
-            studioId: z.string().optional(),
-            startDate: z.string().optional(),
-            endDate: z.string().optional(),
-            limit: z.coerce.number().optional().default(100),
-            offset: z.coerce.number().optional().default(0),
-          })
-          .transform((data) => {
-            // Remove undefined/empty string values from optional fields
-            const cleaned: any = {};
-            for (const [key, value] of Object.entries(data)) {
-              if (value !== undefined && value !== "" && value !== "undefined") {
-                cleaned[key] = value;
-              }
-            }
-            // Preserve default values
-            if (!cleaned.limit) cleaned.limit = 100;
-            if (!cleaned.offset) cleaned.offset = 0;
-            return cleaned;
-          }),
+        querystring: LogsQuerySchema,
         response: {
-          200: z.object({
-            data: z.array(LogSchema),
-            total: z.number(),
-          }),
+          200: LogsListResponseSchema,
         },
       },
     },
+    // @ts-expect-error - Fastify type provider has issues with ZodEffects transform
     async (request) => {
       const filters = request.query as any;
       const result = await logsService.getLogs(filters);
@@ -67,17 +37,14 @@ const logsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
-        params: z.object({
-          id: z.string(),
-        }),
+        params: LogParamsSchema,
         response: {
           200: LogSchema,
-          404: z.object({
-            error: z.string(),
-          }),
+          404: ErrorResponseSchema,
         },
       },
     },
+    // @ts-expect-error - Fastify type provider entityType inference issue
     async (request, reply) => {
       const { id } = request.params;
       const log = await logsService.getLog(id);
@@ -95,13 +62,9 @@ const logsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/cleanup",
     {
       schema: {
-        querystring: z.object({
-          daysToKeep: z.coerce.number().optional().default(30),
-        }),
+        querystring: CleanupQuerySchema,
         response: {
-          200: z.object({
-            deletedCount: z.number(),
-          }),
+          200: CleanupResponseSchema,
         },
       },
     },

@@ -1,26 +1,21 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import { toast } from "sonner";
-
-export interface SubscriptionSettings {
-  qualityProfileId: string;
-  autoDownload: boolean;
-  includeMetadataMissing: boolean;
-  includeAliases: boolean;
-}
+import type { SubscriptionSettings } from "@repo/shared-types";
+import { queryKeys } from "@/lib/query-keys";
+import { useMutationWithToast } from "./useMutationWithToast";
 
 export function useSubscriptions() {
   return useQuery({
-    queryKey: ["subscriptions"],
+    queryKey: queryKeys.subscriptions.all,
     queryFn: () => apiClient.getSubscriptions(),
   });
 }
 
 export function useSubscription(id: string) {
   return useQuery({
-    queryKey: ["subscription", id],
+    queryKey: queryKeys.subscriptions.detail(id),
     queryFn: () => apiClient.getSubscription(id),
     enabled: !!id,
   });
@@ -28,16 +23,14 @@ export function useSubscription(id: string) {
 
 export function useCheckSubscription(entityType: string, entityId: string) {
   return useQuery({
-    queryKey: ["subscription", "check", entityType, entityId],
+    queryKey: queryKeys.subscriptions.check(entityType, entityId),
     queryFn: () => apiClient.checkSubscription(entityType, entityId),
     enabled: !!entityType && !!entityId,
   });
 }
 
 export function useSubscribeToPerformer() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
+  return useMutationWithToast({
     mutationFn: ({
       performerId,
       settings,
@@ -45,21 +38,14 @@ export function useSubscribeToPerformer() {
       performerId: string;
       settings: SubscriptionSettings;
     }) => apiClient.subscribeToPerformer(performerId, settings),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
-      queryClient.invalidateQueries({ queryKey: ["subscription", "check"] });
-      toast.success("Subscribed to performer");
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || "Failed to subscribe");
-    },
+    successMessage: "Subscribed to performer",
+    invalidateKeys: [queryKeys.subscriptions.all, ["subscription", "check"]],
+    errorMessage: "Failed to subscribe",
   });
 }
 
 export function useSubscribeToStudio() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
+  return useMutationWithToast({
     mutationFn: ({
       studioId,
       settings,
@@ -67,21 +53,14 @@ export function useSubscribeToStudio() {
       studioId: string;
       settings: SubscriptionSettings;
     }) => apiClient.subscribeToStudio(studioId, settings),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
-      queryClient.invalidateQueries({ queryKey: ["subscription", "check"] });
-      toast.success("Subscribed to studio");
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || "Failed to subscribe");
-    },
+    successMessage: "Subscribed to studio",
+    invalidateKeys: [queryKeys.subscriptions.all, ["subscription", "check"]],
+    errorMessage: "Failed to subscribe",
   });
 }
 
 export function useSubscribeToScene() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
+  return useMutationWithToast({
     mutationFn: ({
       sceneId,
       settings,
@@ -89,37 +68,25 @@ export function useSubscribeToScene() {
       sceneId: string;
       settings: SubscriptionSettings;
     }) => apiClient.subscribeToScene(sceneId, settings),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
-      queryClient.invalidateQueries({ queryKey: ["subscription", "check"] });
-      toast.success("Subscribed to scene");
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || "Failed to subscribe");
-    },
+    successMessage: "Subscribed to scene",
+    invalidateKeys: [queryKeys.subscriptions.all, ["subscription", "check"]],
+    errorMessage: "Failed to subscribe",
   });
 }
 
 export function useDeleteSubscription() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
+  return useMutationWithToast({
     mutationFn: ({ id, deleteAssociatedScenes }: { id: string; deleteAssociatedScenes?: boolean }) =>
       apiClient.deleteSubscription(id, deleteAssociatedScenes),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
-      queryClient.invalidateQueries({ queryKey: ["subscription", "check"] });
-      toast.success("Subscription removed");
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || "Failed to remove subscription");
-    },
+    successMessage: "Subscription removed",
+    invalidateKeys: [queryKeys.subscriptions.all, ["subscription", "check"]],
+    errorMessage: "Failed to remove subscription",
   });
 }
 
 export function useSubscriptionScenes(subscriptionId: string) {
   return useQuery({
-    queryKey: ["subscription", subscriptionId, "scenes"],
+    queryKey: queryKeys.subscriptions.scenes(subscriptionId),
     queryFn: async () => {
       const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
       const response = await fetch(`${baseUrl}/subscriptions/${subscriptionId}/scenes`);
@@ -132,7 +99,7 @@ export function useSubscriptionScenes(subscriptionId: string) {
 
 export function useSubscriptionFiles(subscriptionId: string) {
   return useQuery({
-    queryKey: ["subscription", subscriptionId, "files"],
+    queryKey: queryKeys.subscriptions.files(subscriptionId),
     queryFn: async () => {
       const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
       const response = await fetch(`${baseUrl}/subscriptions/${subscriptionId}/files`);

@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { usePerformerDetails } from "@/hooks/useSearch";
 import { useCheckSubscription } from "@/hooks/useSubscriptions";
 import {
@@ -9,19 +8,13 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-  CarouselNext,
-  CarouselPrevious,
-} from "@/components/ui/carousel";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, MapPin, Users, Check } from "lucide-react";
+import { ImageCarousel } from "./ImageCarousel";
+import { SubscriptionFooter } from "./SubscriptionFooter";
+import { formatDate } from "@/lib/dialog-utils";
 
 interface PerformerDetailDialogProps {
   performerId: string | null;
@@ -40,11 +33,6 @@ export function PerformerDetailDialog({
 
   const { data: subscriptionStatus, isLoading: isCheckingSubscription } =
     useCheckSubscription("performer", performerId || "");
-
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return "Unknown";
-    return new Date(dateStr).toLocaleDateString();
-  };
 
   return (
     <Dialog open={!!performerId} onOpenChange={(open) => !open && onClose()}>
@@ -75,33 +63,12 @@ export function PerformerDetailDialog({
           <>
 
             <div className="space-x-6 flex flex-row items-center justify-center">
-              {/* Images Carousel */}
-              {performer.images && performer.images.length > 0 && (
-                <Carousel className="w-1/2 mx-auto">
-                  <CarouselContent>
-                    {performer.images.map((img: any, idx: number) => (
-                      <CarouselItem key={idx}>
-                        <div className="relative aspect-[3/4] w-full overflow-hidden rounded-lg">
-                          <Image
-                            src={img.url}
-                            alt={`${performer.name} - Image ${idx + 1}`}
-                            fill
-                            sizes="(max-width: 768px) 100vw, 50vw"
-                            className="object-cover"
-                            unoptimized
-                          />
-                        </div>
-                      </CarouselItem>
-                    ))}
-                  </CarouselContent>
-                  {performer.images.length > 1 && (
-                    <>
-                      <CarouselPrevious className="left-2" />
-                      <CarouselNext className="right-2" />
-                    </>
-                  )}
-                </Carousel>
-              )}
+              <ImageCarousel
+                images={performer.images || []}
+                alt={performer.name}
+                aspectRatio="portrait"
+                className="w-1/2 mx-auto"
+              />
 
               {/* Info */}
               <div className="space-y-4 flex-1">
@@ -186,25 +153,12 @@ export function PerformerDetailDialog({
               </div>
             )}
 
-            <DialogFooter>
-              <Button variant="outline" onClick={onClose}>
-                Close
-              </Button>
-              {!subscriptionStatus?.isSubscribed && (
-                <Button onClick={() => onSubscribe(performer)}>
-                  Subscribe
-                </Button>
-              )}
-              {subscriptionStatus?.isSubscribed && subscriptionStatus.subscription && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Check className="h-4 w-4 text-green-600" />
-                  <span>
-                    Subscribed with {subscriptionStatus.subscription.qualityProfile?.name || 'profile'}
-                    {subscriptionStatus.subscription.autoDownload && ' - Auto Download'}
-                  </span>
-                </div>
-              )}
-            </DialogFooter>
+            <SubscriptionFooter
+              isSubscribed={subscriptionStatus?.isSubscribed || false}
+              subscription={subscriptionStatus?.subscription}
+              onClose={onClose}
+              onSubscribe={() => onSubscribe(performer)}
+            />
           </>
         ) : (
           <div className="text-center py-8 text-muted-foreground">

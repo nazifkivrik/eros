@@ -11,7 +11,6 @@ import {
   performers,
   studios,
   downloadQueue,
-  appSettings,
   indexers,
   scenes,
 } from "@repo/database";
@@ -202,14 +201,6 @@ async function processSubscription(
   // Search for torrents using the new service with detailed logging
   try {
     const torrentSearchService = createTorrentSearchService(app.db);
-
-    // Get allowed indexer IDs from settings
-    const minIndexersSetting = await app.db.query.appSettings.findFirst({
-      where: eq(appSettings.key, "minIndexersForMetadataLess"),
-    });
-    const minIndexers = minIndexersSetting?.value
-      ? Number(minIndexersSetting.value)
-      : 2;
 
     // Get all enabled indexers
     const enabledIndexers = await app.db.query.indexers.findMany({

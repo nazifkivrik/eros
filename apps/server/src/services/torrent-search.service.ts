@@ -8,7 +8,7 @@ import type * as schema from "@repo/database";
 import { createLogsService } from "./logs.service.js";
 import { createSettingsService } from "./settings.service.js";
 import { createAIMatchingService } from "./ai-matching.service.js";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import {
   performers,
   studios,
@@ -29,18 +29,6 @@ interface TorrentResult {
   downloadUrl: string;
   infoHash: string;
   sceneId?: string; // Optional: set when matched with a database scene
-}
-
-interface PerformerData {
-  id: string;
-  name: string;
-  aliases: string[];
-}
-
-interface StudioData {
-  id: string;
-  name: string;
-  aliases: string[];
 }
 
 interface SceneMetadata {
@@ -173,7 +161,7 @@ export class TorrentSearchService {
     entityType: "performer" | "studio",
     entityId: string,
     includeAliases: boolean,
-    indexerIds: string[]
+    _indexerIds: string[]
   ): Promise<TorrentResult[]> {
     const results: TorrentResult[] = [];
 
@@ -247,7 +235,16 @@ export class TorrentSearchService {
           continue;
         }
 
-        const prowlarrResults = await response.json();
+        const prowlarrResults = await response.json() as Array<{
+          title: string;
+          size?: number;
+          seeders?: number;
+          indexerId?: number;
+          indexer?: string;
+          downloadUrl?: string;
+          magnetUrl?: string;
+          infoHash?: string;
+        }>;
 
         // Convert Prowlarr results to our format
         for (const result of prowlarrResults) {
@@ -638,7 +635,9 @@ export class TorrentSearchService {
    */
   private extractPerformerNames(title: string): string[] {
     // Remove common words and split by common separators
-    const cleaned = title
+    // Reserved for future enhanced name extraction
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const _cleaned = title
       .toLowerCase()
       .replace(/\b(and|with|the|in|on|at|from|to|for|of|a|an)\b/g, "")
       .trim();
@@ -1026,8 +1025,8 @@ export class TorrentSearchService {
   private async processMatchedResults(
     matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }>,
     qualityProfileId: string,
-    entityType: "performer" | "studio",
-    entityId: string
+    _entityType: "performer" | "studio",
+    _entityId: string
   ): Promise<TorrentResult[]> {
     const selectedTorrents: TorrentResult[] = [];
 
@@ -1216,8 +1215,7 @@ export class TorrentSearchService {
 }
 
 // Export factory function
-export function createTorrentSearchService(
-  db: BetterSQLite3Database<typeof schema>
-) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createTorrentSearchService(db: any) {
   return new TorrentSearchService(db);
 }
