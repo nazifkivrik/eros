@@ -51,12 +51,20 @@ export class ProwlarrService {
     });
 
     if (!response.ok) {
+      const text = await response.text();
       throw new Error(
-        `Prowlarr API error: ${response.status} ${response.statusText}`
+        `Prowlarr API error: ${response.status} ${response.statusText}\nURL: ${url}\nResponse: ${text.substring(0, 200)}`
       );
     }
 
-    return response.json() as Promise<T>;
+    const text = await response.text();
+    try {
+      return JSON.parse(text) as T;
+    } catch (error) {
+      throw new Error(
+        `Prowlarr returned invalid JSON\nURL: ${url}\nResponse: ${text.substring(0, 200)}`
+      );
+    }
   }
 
   async getIndexers(): Promise<ProwlarrIndexer[]> {

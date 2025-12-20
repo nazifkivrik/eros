@@ -140,7 +140,7 @@ export async function missingScenesSearchJob(app: FastifyInstance) {
     app.log.info(`[MissingScenesSearch] Searching ${missingScenes.length} scenes with metadata`);
 
     await logsService.info(
-      "missing-scenes",
+      "subscription",
       `Starting search for ${missingScenes.length} missing scenes`,
       { sceneCount: missingScenes.length }
     );
@@ -291,7 +291,7 @@ export async function missingScenesSearchJob(app: FastifyInstance) {
     }
 
     await logsService.info(
-      "missing-scenes",
+      "subscription",
       `Completed missing scenes search: ${torrentsAdded} torrents added`,
       { scenesSearched: missingScenes.length, torrentsFound, torrentsAdded }
     );

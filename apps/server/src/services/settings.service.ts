@@ -12,6 +12,7 @@ import { DEFAULT_SETTINGS, type AppSettings } from "@repo/shared-types";
 export class SettingsService {
   constructor(private db: BetterSQLite3Database<typeof schema>) {}
 
+
   /**
    * Get all settings
    */
@@ -21,8 +22,17 @@ export class SettingsService {
     });
 
     if (setting) {
-      // Merge with defaults to ensure all required fields exist
+      // Deep merge saved settings over DEFAULT_SETTINGS to ensure all required fields exist
       const savedSettings = setting.value as Partial<AppSettings>;
+
+      // Debug log
+      console.log("[SettingsService] Loaded from DB:", {
+        hasStashdb: !!savedSettings.stashdb,
+        stashdbEnabled: savedSettings.stashdb?.enabled,
+        hasApiKey: !!savedSettings.stashdb?.apiKey,
+        apiKeyLength: savedSettings.stashdb?.apiKey?.length
+      });
+
       return {
         general: {
           ...DEFAULT_SETTINGS.general,
@@ -48,10 +58,44 @@ export class SettingsService {
           ...DEFAULT_SETTINGS.ai,
           ...(savedSettings.ai || {}),
         },
+        jobs: {
+          subscriptionSearch: {
+            ...DEFAULT_SETTINGS.jobs.subscriptionSearch,
+            ...(savedSettings.jobs?.subscriptionSearch || {}),
+          },
+          metadataRefresh: {
+            ...DEFAULT_SETTINGS.jobs.metadataRefresh,
+            ...(savedSettings.jobs?.metadataRefresh || {}),
+          },
+          torrentMonitor: {
+            ...DEFAULT_SETTINGS.jobs.torrentMonitor,
+            ...(savedSettings.jobs?.torrentMonitor || {}),
+          },
+          cleanup: {
+            ...DEFAULT_SETTINGS.jobs.cleanup,
+            ...(savedSettings.jobs?.cleanup || {}),
+          },
+          metadataDiscovery: {
+            ...DEFAULT_SETTINGS.jobs.metadataDiscovery,
+            ...(savedSettings.jobs?.metadataDiscovery || {}),
+          },
+          missingScenesSearch: {
+            ...DEFAULT_SETTINGS.jobs.missingScenesSearch,
+            ...(savedSettings.jobs?.missingScenesSearch || {}),
+          },
+          unifiedSync: {
+            ...DEFAULT_SETTINGS.jobs.unifiedSync,
+            ...(savedSettings.jobs?.unifiedSync || {}),
+          },
+          qbittorrentCleanup: {
+            ...DEFAULT_SETTINGS.jobs.qbittorrentCleanup,
+            ...(savedSettings.jobs?.qbittorrentCleanup || {}),
+          },
+        },
       };
     }
 
-    // Return defaults if not found
+    // Return pure DEFAULT_SETTINGS if not found
     return DEFAULT_SETTINGS;
   }
 

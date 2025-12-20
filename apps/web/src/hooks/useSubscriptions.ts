@@ -88,8 +88,8 @@ export function useSubscriptionScenes(subscriptionId: string) {
   return useQuery({
     queryKey: queryKeys.subscriptions.scenes(subscriptionId),
     queryFn: async () => {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
-      const response = await fetch(`${baseUrl}/subscriptions/${subscriptionId}/scenes`);
+      // Use relative URL for browser (works in both dev and Docker)
+      const response = await fetch(`/api/subscriptions/${subscriptionId}/scenes`);
       if (!response.ok) throw new Error("Failed to fetch scenes");
       return response.json();
     },
@@ -101,8 +101,8 @@ export function useSubscriptionFiles(subscriptionId: string) {
   return useQuery({
     queryKey: queryKeys.subscriptions.files(subscriptionId),
     queryFn: async () => {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
-      const response = await fetch(`${baseUrl}/subscriptions/${subscriptionId}/files`);
+      // Use relative URL for browser (works in both dev and Docker)
+      const response = await fetch(`/api/subscriptions/${subscriptionId}/files`);
       if (!response.ok) throw new Error("Failed to fetch files");
       return response.json();
     },

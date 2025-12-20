@@ -42,8 +42,8 @@ export function useUnifiedDownloads() {
   return useQuery<UnifiedDownloadsResponse>({
     queryKey: queryKeys.downloads.unified,
     queryFn: async () => {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
-      const res = await fetch(`${baseUrl}/download-queue/unified`);
+      // Use relative URL for browser (works in both dev and Docker)
+      const res = await fetch(`/api/download-queue/unified`);
       if (!res.ok) {
         throw new Error("Failed to fetch unified downloads");
       }

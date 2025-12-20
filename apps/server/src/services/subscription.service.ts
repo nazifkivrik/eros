@@ -13,6 +13,7 @@ import {
   qualityProfiles,
   performersScenes,
   studiosScenes,
+  sceneFiles,
 } from "@repo/database";
 import { nanoid } from "nanoid";
 import type * as schema from "@repo/database";
@@ -51,19 +52,34 @@ export class SubscriptionService {
   private stashdbClient: GraphQLClient | null = null;
 
   constructor(private db: BetterSQLite3Database<typeof schema>) {
-    // Initialize StashDB client
-    const stashdbUrl = process.env.STASHDB_URL || "https://stashdb.org/graphql";
-    const stashdbApiKey = process.env.STASHDB_API_KEY;
+    // Initialize StashDB client with settings from database
+    this.initializeStashDBClient();
+  }
 
-    this.stashdbClient = new GraphQLClient(stashdbUrl, {
-      headers: stashdbApiKey ? { ApiKey: stashdbApiKey } : {},
-      requestMiddleware: (request) => {
-        return {
-          ...request,
-          signal: AbortSignal.timeout(30000), // 30 second timeout
-        };
-      },
-    });
+  private async initializeStashDBClient() {
+    try {
+      const { createSettingsService } = await import("./settings.service.js");
+      const settingsService = createSettingsService(this.db);
+      const settings = await settingsService.getSettings();
+
+      if (settings.stashdb.enabled && settings.stashdb.apiKey) {
+        this.stashdbClient = new GraphQLClient(settings.stashdb.apiUrl, {
+          headers: { ApiKey: settings.stashdb.apiKey },
+          requestMiddleware: (request) => {
+            return {
+              ...request,
+              signal: AbortSignal.timeout(30000), // 30 second timeout
+            };
+          },
+        });
+      } else {
+        console.warn("[SubscriptionService] StashDB not configured. Subscription functionality will be limited.");
+        this.stashdbClient = null;
+      }
+    } catch (error) {
+      console.error("[SubscriptionService] Failed to initialize StashDB client:", error);
+      this.stashdbClient = null;
+    }
   }
 
   /**
@@ -221,6 +237,17 @@ export class SubscriptionService {
             where: eq(scenes.stashdbId, entityId),
           });
         }
+
+        // If scene doesn't exist and entityId looks like a StashDB UUID, fetch and create it
+        if (!scene && this.isUUID(entityId)) {
+          console.log(`[SubscriptionService] Scene ${entityId} not found locally, fetching from StashDB`);
+          await this.fetchAndSaveScene(entityId);
+
+          // After fetching, find the scene again
+          scene = await this.db.query.scenes.findFirst({
+            where: eq(scenes.stashdbId, entityId),
+          });
+        }
         return scene?.id || null;
 
       default:
@@ -333,6 +360,9 @@ export class SubscriptionService {
         input.includeMetadataMissing,
         input.includeAliases
       );
+    } else if (input.entityType === "scene") {
+      // For single scene subscription, create folder and metadata immediately
+      await this.createSceneFolderForSubscription(localEntityId);
     }
 
     return subscription;
@@ -499,10 +529,105 @@ export class SubscriptionService {
         `[SubscriptionService] Creating ${filteredSubscriptions.length} scene subscriptions`
       );
       await this.db.insert(subscriptions).values(filteredSubscriptions);
+
+      // Create folders and metadata for all new scene subscriptions
+      console.log(
+        `[SubscriptionService] Creating folders and metadata for ${filteredSubscriptions.length} scenes`
+      );
+      for (const sub of filteredSubscriptions) {
+        try {
+          await this.createSceneFolderForSubscription(sub.entityId);
+        } catch (error) {
+          console.error(
+            `[SubscriptionService] Failed to create folder for scene ${sub.entityId}:`,
+            error
+          );
+          // Continue with other scenes
+        }
+      }
     } else {
       console.log(
         `[SubscriptionService] No new scene subscriptions to create (found ${entityScenes.length} scenes total)`
       );
+    }
+
+    // Also create folders for ALL scenes, including already subscribed ones
+    // This ensures folders exist even if subscription was created before
+    console.log(
+      `[SubscriptionService] Ensuring folders exist for all ${entityScenes.length} scenes (including already subscribed)`
+    );
+    for (const scene of entityScenes) {
+      try {
+        // Check if folder already exists by checking if scene has files
+        const existingFiles = await this.db.query.sceneFiles.findMany({
+          where: (sceneFiles, { eq }) => eq(sceneFiles.sceneId, scene.id),
+        });
+
+        // Only create folder if no files exist (folder not created yet)
+        if (existingFiles.length === 0) {
+          console.log(
+            `[SubscriptionService] Creating missing folder for scene ${scene.id}: ${scene.title}`
+          );
+          await this.createSceneFolderForSubscription(scene.id);
+        }
+      } catch (error) {
+        console.error(
+          `[SubscriptionService] Failed to ensure folder for scene ${scene.id}:`,
+          error
+        );
+        // Continue with other scenes
+      }
+    }
+  }
+
+  /**
+   * Create scene folder and metadata files for a subscription
+   */
+  private async createSceneFolderForSubscription(sceneId: string): Promise<void> {
+    try {
+      // Get scene to check if it has metadata
+      const scene = await this.db.query.scenes.findFirst({
+        where: eq(scenes.id, sceneId),
+      });
+
+      if (!scene) {
+        console.error(`[SubscriptionService] Scene ${sceneId} not found`);
+        return;
+      }
+
+      // Get settings for file paths
+      const { createSettingsService } = await import("./settings.service.js");
+      const settingsService = createSettingsService(this.db);
+      const settings = await settingsService.getSettings();
+
+      // Import and create file manager service
+      const { createFileManagerService } = await import("./file-manager.service.js");
+      const fileManagerService = createFileManagerService(
+        this.db,
+        settings.general.scenesPath || "/media/scenes",
+        settings.general.incompletePath || "/media/incomplete"
+      );
+
+      // Create folder with appropriate metadata
+      if (scene.hasMetadata && scene.stashdbId) {
+        // Full metadata: create folder, download poster, generate complete NFO
+        const { folderPath } = await fileManagerService.setupSceneFiles(sceneId);
+        console.log(
+          `[SubscriptionService] ✅ Created scene folder with full metadata: ${folderPath}`
+        );
+      } else {
+        // No metadata: create folder with simplified NFO only
+        const { folderPath } = await fileManagerService.setupSceneFilesSimplified(sceneId);
+        console.log(
+          `[SubscriptionService] ✅ Created scene folder with simplified metadata: ${folderPath}`
+        );
+      }
+    } catch (error) {
+      console.error(
+        `[SubscriptionService] Failed to create scene folder for ${sceneId}:`,
+        error
+      );
+      // Don't throw - we want to continue with the subscription even if folder creation fails
     }
   }
 
@@ -1277,3 +1402,4 @@ export class SubscriptionService {
 export function createSubscriptionService(db: any) {
   return new SubscriptionService(db);
 }
+// Test comment

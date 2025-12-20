@@ -39,7 +39,7 @@ export function SceneDetailDialog({
         <DialogHeader>
           <DialogTitle className="text-2xl flex items-center gap-2">
             {isLoading ? "Loading..." : scene?.title || "Scene Details"}
-            {!isCheckingSubscription && subscriptionStatus?.isSubscribed && (
+            {!isCheckingSubscription && subscriptionStatus?.subscribed && (
               <Badge variant="secondary" className="gap-1">
                 <Check className="h-3 w-3" />
                 Subscribed
@@ -175,7 +175,7 @@ export function SceneDetailDialog({
             </div>
 
             <SubscriptionFooter
-              isSubscribed={subscriptionStatus?.isSubscribed || false}
+              isSubscribed={subscriptionStatus?.subscribed || false}
               subscription={subscriptionStatus?.subscription}
               onClose={onClose}
               onSubscribe={() => onSubscribe(scene)}

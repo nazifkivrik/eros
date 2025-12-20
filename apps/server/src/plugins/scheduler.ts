@@ -25,7 +25,15 @@ interface JobDefinition {
 }
 
 const schedulerPlugin: FastifyPluginAsync = async (app) => {
+  // Wait for plugins to be ready
+  await app.after();
+
   const jobs: Map<string, cron.ScheduledTask> = new Map();
+
+  // Get settings
+  const { createSettingsService } = await import("../services/settings.service.js");
+  const settingsService = createSettingsService(app.db);
+  const settings = await settingsService.getSettings();
 
   // Register a job
   const registerJob = (job: JobDefinition) => {
@@ -107,61 +115,61 @@ const schedulerPlugin: FastifyPluginAsync = async (app) => {
     getJobs,
   });
 
-  // Register jobs
+  // Register jobs from settings
   registerJob({
     name: "subscription-search",
-    schedule: process.env.JOB_SUBSCRIPTION_SEARCH_CRON || "0 */6 * * *", // Every 6 hours
+    schedule: settings.jobs.subscriptionSearch.schedule,
     handler: () => subscriptionSearchJob(app),
-    enabled: process.env.JOB_SUBSCRIPTION_SEARCH_ENABLED !== "false",
+    enabled: settings.jobs.subscriptionSearch.enabled,
   });
 
   registerJob({
     name: "metadata-refresh",
-    schedule: process.env.JOB_METADATA_REFRESH_CRON || "0 2 * * *", // Daily at 2 AM
+    schedule: settings.jobs.metadataRefresh.schedule,
     handler: () => metadataRefreshJob(app),
-    enabled: process.env.JOB_METADATA_REFRESH_ENABLED !== "false",
+    enabled: settings.jobs.metadataRefresh.enabled,
   });
 
   registerJob({
     name: "torrent-monitor",
-    schedule: process.env.JOB_TORRENT_MONITOR_CRON || "*/5 * * * *", // Every 5 minutes
+    schedule: settings.jobs.torrentMonitor.schedule,
     handler: () => torrentMonitorJob(app),
-    enabled: process.env.JOB_TORRENT_MONITOR_ENABLED !== "false",
+    enabled: settings.jobs.torrentMonitor.enabled,
   });
 
   registerJob({
     name: "cleanup",
-    schedule: process.env.JOB_CLEANUP_CRON || "0 3 * * 0", // Weekly on Sunday at 3 AM
+    schedule: settings.jobs.cleanup.schedule,
     handler: () => cleanupJob(app),
-    enabled: process.env.JOB_CLEANUP_ENABLED !== "false",
+    enabled: settings.jobs.cleanup.enabled,
   });
 
   registerJob({
     name: "metadata-discovery",
-    schedule: process.env.JOB_METADATA_DISCOVERY_CRON || "0 3 * * *", // Daily at 3 AM
+    schedule: settings.jobs.metadataDiscovery.schedule,
     handler: () => metadataDiscoveryJob(app),
-    enabled: process.env.JOB_METADATA_DISCOVERY_ENABLED !== "false",
+    enabled: settings.jobs.metadataDiscovery.enabled,
   });
 
   registerJob({
     name: "missing-scenes-search",
-    schedule: process.env.JOB_MISSING_SCENES_SEARCH_CRON || "0 */8 * * *", // Every 8 hours
+    schedule: settings.jobs.missingScenesSearch.schedule,
     handler: () => missingScenesSearchJob(app),
-    enabled: process.env.JOB_MISSING_SCENES_SEARCH_ENABLED !== "false",
+    enabled: settings.jobs.missingScenesSearch.enabled,
   });
 
   registerJob({
     name: "unified-sync",
-    schedule: process.env.JOB_UNIFIED_SYNC_CRON || "*/10 * * * *", // Every 10 minutes
+    schedule: settings.jobs.unifiedSync.schedule,
     handler: () => unifiedSyncJob(app),
-    enabled: process.env.JOB_UNIFIED_SYNC_ENABLED !== "false",
+    enabled: settings.jobs.unifiedSync.enabled,
   });
 
   registerJob({
     name: "qbittorrent-cleanup",
-    schedule: process.env.JOB_QBITTORRENT_CLEANUP_CRON || "0 4 * * *", // Daily at 4 AM
+    schedule: settings.jobs.qbittorrentCleanup.schedule,
     handler: () => qbittorrentCleanupJob(app),
-    enabled: process.env.JOB_QBITTORRENT_CLEANUP_ENABLED !== "false",
+    enabled: settings.jobs.qbittorrentCleanup.enabled,
   });
 
   // Cleanup on server shutdown

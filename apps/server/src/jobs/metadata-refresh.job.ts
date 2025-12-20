@@ -1,14 +1,20 @@
 /**
  * Metadata Refresh Job
  * Re-queries StashDB for subscribed entities to update their metadata
+ * Also discovers and fixes scenes with missing metadata
+ * Creates folders and metadata files for scenes
  * Runs daily at 2 AM
  */
 
 import type { FastifyInstance } from "fastify";
-import { eq } from "drizzle-orm";
+import { eq, isNull, or } from "drizzle-orm";
 import { subscriptions, performers, studios, scenes } from "@repo/database";
+import { getJobProgressService } from "../services/job-progress.service.js";
 
 export async function metadataRefreshJob(app: FastifyInstance) {
+  const progressService = getJobProgressService();
+
+  progressService.emitStarted("metadata-refresh", "Starting metadata refresh job");
   app.log.info("Starting metadata refresh job");
 
   try {
@@ -17,11 +23,31 @@ export async function metadataRefreshJob(app: FastifyInstance) {
       where: eq(subscriptions.status, "active"),
     });
 
-    app.log.info(
-      `Found ${activeSubscriptions.length} active subscriptions to refresh metadata`
+    // Find scenes with missing or incomplete metadata
+    const scenesWithMissingMetadata = await app.db.query.scenes.findMany({
+      where: or(
+        isNull(scenes.details),
+        isNull(scenes.duration),
+        isNull(scenes.director)
+      ),
+    });
+
+    const totalTasks = activeSubscriptions.length + scenesWithMissingMetadata.length;
+
+    progressService.emitProgress(
+      "metadata-refresh",
+      `Found ${activeSubscriptions.length} subscriptions and ${scenesWithMissingMetadata.length} scenes with missing metadata`,
+      0,
+      totalTasks
     );
 
-    // Group by entity type
+    app.log.info(
+      `Found ${activeSubscriptions.length} active subscriptions and ${scenesWithMissingMetadata.length} scenes with missing metadata`
+    );
+
+    let processedCount = 0;
+
+    // Group subscriptions by entity type
     const performerIds = new Set<string>();
     const studioIds = new Set<string>();
     const sceneIds = new Set<string>();
@@ -38,24 +64,115 @@ export async function metadataRefreshJob(app: FastifyInstance) {
 
     // Refresh performers
     if (performerIds.size > 0) {
-      app.log.info(`Refreshing metadata for ${performerIds.size} performers`);
-      await refreshPerformers(app, Array.from(performerIds));
+      progressService.emitProgress(
+        "metadata-refresh",
+        `Refreshing ${performerIds.size} performers`,
+        processedCount,
+        totalTasks
+      );
+      await refreshPerformers(app, Array.from(performerIds), progressService, totalTasks, processedCount);
+      processedCount += performerIds.size;
     }
 
     // Refresh studios
     if (studioIds.size > 0) {
-      app.log.info(`Refreshing metadata for ${studioIds.size} studios`);
-      await refreshStudios(app, Array.from(studioIds));
+      progressService.emitProgress(
+        "metadata-refresh",
+        `Refreshing ${studioIds.size} studios`,
+        processedCount,
+        totalTasks
+      );
+      await refreshStudios(app, Array.from(studioIds), progressService, totalTasks, processedCount);
+      processedCount += studioIds.size;
     }
 
-    // Refresh scenes
+    // Refresh subscribed scenes
     if (sceneIds.size > 0) {
-      app.log.info(`Refreshing metadata for ${sceneIds.size} scenes`);
-      await refreshScenes(app, Array.from(sceneIds));
+      progressService.emitProgress(
+        "metadata-refresh",
+        `Refreshing ${sceneIds.size} subscribed scenes`,
+        processedCount,
+        totalTasks
+      );
+      await refreshScenes(app, Array.from(sceneIds), progressService, totalTasks, processedCount);
+      processedCount += sceneIds.size;
     }
+
+    // Fix scenes with missing metadata
+    if (scenesWithMissingMetadata.length > 0) {
+      progressService.emitProgress(
+        "metadata-refresh",
+        `Fixing ${scenesWithMissingMetadata.length} scenes with missing metadata`,
+        processedCount,
+        totalTasks
+      );
+      const missingSceneIds = scenesWithMissingMetadata.map(s => s.id);
+      await refreshScenes(app, missingSceneIds, progressService, totalTasks, processedCount);
+      processedCount += missingSceneIds.length;
+    }
+
+    // Create folders and metadata for all scenes (subscribed or with missing metadata)
+    const allScenesToProcess = new Set([...Array.from(sceneIds), ...scenesWithMissingMetadata.map(s => s.id)]);
+
+    if (allScenesToProcess.size > 0) {
+      progressService.emitProgress(
+        "metadata-refresh",
+        `Creating folders and metadata for ${allScenesToProcess.size} scenes`,
+        processedCount,
+        totalTasks + allScenesToProcess.size
+      );
+
+      let folderCount = 0;
+
+      // Debug: Check if fileManager is available
+      app.log.info({
+        hasFileManager: !!app.fileManager,
+        fileManagerType: typeof app.fileManager,
+        fileManagerKeys: app.fileManager ? Object.keys(app.fileManager) : []
+      }, "FileManager availability check");
+
+      for (const sceneId of allScenesToProcess) {
+        try {
+          // Create folder structure with NFO and poster
+          await app.fileManager.setupSceneFiles(sceneId);
+          folderCount++;
+
+          if (folderCount % 10 === 0) {
+            progressService.emitProgress(
+              "metadata-refresh",
+              `Created ${folderCount}/${allScenesToProcess.size} scene folders`,
+              processedCount + folderCount,
+              totalTasks + allScenesToProcess.size
+            );
+          }
+        } catch (error) {
+          app.log.error(
+            {
+              error,
+              sceneId,
+              errorMessage: error instanceof Error ? error.message : String(error),
+              errorStack: error instanceof Error ? error.stack : undefined
+            },
+            `Failed to create folder for scene ${sceneId}`
+          );
+        }
+      }
+
+      app.log.info(`Created folders for ${folderCount} scenes`);
+    }
+
+    progressService.emitCompleted(
+      "metadata-refresh",
+      `Completed: Refreshed ${totalTasks} items and created ${allScenesToProcess.size} folders`,
+      { processedCount: totalTasks, foldersCreated: allScenesToProcess.size }
+    );
 
     app.log.info("Metadata refresh job completed");
   } catch (error) {
+    progressService.emitFailed(
+      "metadata-refresh",
+      `Metadata refresh job failed: ${error instanceof Error ? error.message : String(error)}`
+    );
     app.log.error({ error }, "Metadata refresh job failed");
     throw error;
   }
@@ -63,9 +180,13 @@ export async function metadataRefreshJob(app: FastifyInstance) {
 
 async function refreshPerformers(
   app: FastifyInstance,
-  performerIds: string[]
+  performerIds: string[],
+  progressService: any,
+  totalTasks: number,
+  baseCount: number
 ) {
-  for (const id of performerIds) {
+  for (let i = 0; i < performerIds.length; i++) {
+    const id = performerIds[i];
     try {
       // Get current performer data
       const performer = await app.db.query.performers.findFirst({
@@ -164,6 +285,13 @@ async function refreshPerformers(
         })
         .where(eq(performers.id, id));
 
+      progressService.emitProgress(
+        "metadata-refresh",
+        `Updated performer: ${performer.name}`,
+        baseCount + i + 1,
+        totalTasks,
+        { entityName: performer.name }
+      );
       app.log.info(`Updated metadata for performer ${performer.name}`);
     } catch (error) {
       app.log.error(
@@ -174,8 +302,15 @@ async function refreshPerformers(
   }
 }
 
-async function refreshStudios(app: FastifyInstance, studioIds: string[]) {
-  for (const id of studioIds) {
+async function refreshStudios(
+  app: FastifyInstance,
+  studioIds: string[],
+  progressService: any,
+  totalTasks: number,
+  baseCount: number
+) {
+  for (let i = 0; i < studioIds.length; i++) {
+    const id = studioIds[i];
     try {
       // Get current studio data
       const studio = await app.db.query.studios.findFirst({
@@ -220,6 +355,13 @@ async function refreshStudios(app: FastifyInstance, studioIds: string[]) {
         })
         .where(eq(studios.id, id));
 
+      progressService.emitProgress(
+        "metadata-refresh",
+        `Updated studio: ${studio.name}`,
+        baseCount + i + 1,
+        totalTasks,
+        { entityName: studio.name }
+      );
       app.log.info(`Updated metadata for studio ${studio.name}`);
     } catch (error) {
       app.log.error(
@@ -230,8 +372,15 @@ async function refreshStudios(app: FastifyInstance, studioIds: string[]) {
   }
 }
 
-async function refreshScenes(app: FastifyInstance, sceneIds: string[]) {
-  for (const id of sceneIds) {
+async function refreshScenes(
+  app: FastifyInstance,
+  sceneIds: string[],
+  progressService: any,
+  totalTasks: number,
+  baseCount: number
+) {
+  for (let i = 0; i < sceneIds.length; i++) {
+    const id = sceneIds[i];
     try {
       // Get current scene data
       const scene = await app.db.query.scenes.findFirst({
@@ -283,6 +432,13 @@ async function refreshScenes(app: FastifyInstance, sceneIds: string[]) {
         })
         .where(eq(scenes.id, id));
 
+      progressService.emitProgress(
+        "metadata-refresh",
+        `Updated scene: ${scene.title}`,
+        baseCount + i + 1,
+        totalTasks,
+        { entityName: scene.title }
+      );
       app.log.info(`Updated metadata for scene ${scene.title}`);
     } catch (error) {
       app.log.error(

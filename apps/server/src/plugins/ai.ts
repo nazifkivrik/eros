@@ -8,9 +8,15 @@ import fp from "fastify-plugin";
 import { createAIMatchingService } from "../services/ai-matching.service.js";
 
 const aiPlugin: FastifyPluginAsync = async (app) => {
-  const aiEnabled = process.env.AI_MATCHING_ENABLED !== "false";
+  // Wait for plugins to be ready
+  await app.after();
 
-  if (!aiEnabled) {
+  // Get settings
+  const { createSettingsService } = await import("../services/settings.service.js");
+  const settingsService = createSettingsService(app.db);
+  const settings = await settingsService.getSettings();
+
+  if (!settings.ai.enabled) {
     app.log.info("AI matching is disabled");
     app.decorate("ai", null);
     return;
@@ -18,27 +24,22 @@ const aiPlugin: FastifyPluginAsync = async (app) => {
 
   const aiService = createAIMatchingService();
 
-  // Initialize the AI model on startup
-  try {
-    app.log.info("Initializing AI matching service...");
-    await aiService.initialize();
-    app.log.info("AI matching service initialized successfully");
-  } catch (error) {
-    app.log.error(
-      { error },
-      "Failed to initialize AI matching service - AI features will be disabled"
-    );
-    app.decorate("ai", null);
-    return;
-  }
+  // Don't initialize on startup - lazy load when first used
+  // This prevents blocking startup while downloading AI models
+  app.log.info(
+    {
+      model: settings.ai.model,
+      threshold: settings.ai.threshold,
+    },
+    "AI matching service registered (will initialize on first use)"
+  );
 
   app.decorate("ai", aiService);
-
-  app.log.info("AI matching plugin registered");
 };
 
 export default fp(aiPlugin, {
   name: "ai",
+  timeout: 60000, // 60 seconds for AI model initialization
 });
 
 // Extend Fastify types

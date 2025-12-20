@@ -13,10 +13,8 @@ import {
 } from "./search.schema.js";
 
 const searchRoutes: FastifyPluginAsyncZod = async (app) => {
-  const stashdbService = createStashDBService({
-    apiUrl: process.env.STASHDB_API_URL || "https://stashdb.org/graphql",
-    apiKey: process.env.STASHDB_API_KEY,
-  });
+  // Use the StashDB service from the app instance (configured via plugin)
+  const stashdbService = app.stashdb;
 
   // Search all entities
   app.post(

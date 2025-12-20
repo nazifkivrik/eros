@@ -40,7 +40,7 @@ export function PerformerDetailDialog({
         <DialogHeader>
           <DialogTitle className="text-2xl flex items-center gap-2">
             {isLoading ? "Loading..." : performer?.name || "Performer Details"}
-            {!isCheckingSubscription && subscriptionStatus?.isSubscribed && (
+            {!isCheckingSubscription && subscriptionStatus?.subscribed && (
               <Badge variant="secondary" className="gap-1">
                 <Check className="h-3 w-3" />
                 Subscribed
@@ -154,7 +154,7 @@ export function PerformerDetailDialog({
             )}
 
             <SubscriptionFooter
-              isSubscribed={subscriptionStatus?.isSubscribed || false}
+              isSubscribed={subscriptionStatus?.subscribed || false}
               subscription={subscriptionStatus?.subscription}
               onClose={onClose}
               onSubscribe={() => onSubscribe(performer)}

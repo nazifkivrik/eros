@@ -42,6 +42,15 @@ interface QBTorrentProperties {
   share_ratio: number;
 }
 
+interface QBTorrentFile {
+  index: number;
+  name: string;
+  size: number;
+  progress: number;
+  priority: number;
+  is_seed: boolean;
+}
+
 export class QBittorrentService {
   private baseUrl: string;
   private username: string;
@@ -278,6 +287,52 @@ export class QBittorrentService {
     });
 
     return result === "Ok.";
+  }
+
+  /**
+   * Set torrent location (move files via qBittorrent)
+   * This preserves seeding by letting qBittorrent track the move
+   */
+  async setLocation(hash: string, location: string): Promise<boolean> {
+    const formData = new URLSearchParams();
+    formData.append("hashes", hash);
+    formData.append("location", location);
+
+    const result = await this.request<string>("/api/v2/torrents/setLocation", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: formData,
+    });
+
+    return result === "Ok.";
+  }
+
+  /**
+   * Rename torrent (changes display name in qBittorrent)
+   */
+  async renameTorrent(hash: string, newName: string): Promise<boolean> {
+    const formData = new URLSearchParams();
+    formData.append("hash", hash);
+    formData.append("name", newName);
+
+    const result = await this.request<string>("/api/v2/torrents/rename", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: formData,
+    });
+
+    return result === "Ok.";
+  }
+
+  /**
+   * Get files in a torrent
+   */
+  async getTorrentFiles(hash: string): Promise<QBTorrentFile[]> {
+    return this.request<QBTorrentFile[]>(`/api/v2/torrents/files?hash=${hash}`);
   }
 
   async getCategories(): Promise<

@@ -22,7 +22,6 @@ export async function filesystemSyncJob(app: FastifyInstance) {
     const settings = await settingsService.getSettings();
     const fileManager = createFileManagerService(
       app.db,
-      settings.general.downloadPath,
       settings.general.scenesPath,
       settings.general.incompletePath
     );
@@ -124,7 +123,7 @@ export async function filesystemSyncJob(app: FastifyInstance) {
                       password: settings.qbittorrent.password,
                     });
 
-                    const downloadPath = settings.general.downloadPath || "/downloads";
+                    const downloadPath = settings.general.incompletePath || "/media/incomplete";
                     const isMagnet = bestTorrent.downloadUrl.startsWith("magnet:");
 
                     const success = await qbittorrentService.addTorrent({

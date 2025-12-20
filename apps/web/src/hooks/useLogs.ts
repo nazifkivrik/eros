@@ -16,12 +16,13 @@ interface LogFilters {
   endDate?: string;
   limit?: number;
   offset?: number;
+ 
 }
 
 export function useLogs(filters?: LogFilters) {
   return useQuery({
     queryKey: ["logs", filters],
-    queryFn: () => apiClient.getLogs(filters),
+    queryFn: () => apiClient.getLogs(filters ),
     refetchInterval: 10000, // Auto-refresh every 10 seconds
   });
 }

@@ -6,9 +6,8 @@ import {
   useCreateQualityProfile,
   useUpdateQualityProfile,
   useDeleteQualityProfile,
-  type QualityProfile,
-  type QualityItem,
 } from "@/hooks/useQualityProfiles";
+import type { QualityProfile, QualityItem } from "@repo/shared-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -233,7 +232,7 @@ function QualityProfileDialog({
       return;
     }
 
-    setItems((prev) => [...prev, { ...newItem }]);
+    setItems((prev) => [...prev, { ...newItem } as QualityItem]);
     setError("");
 
     // Reset form

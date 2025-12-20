@@ -27,18 +27,18 @@ const JOB_INFO = {
   },
   "metadata-refresh": {
     name: "Metadata Refresh",
-    description: "Update metadata for scenes from StashDB",
+    description: "Update and fix missing metadata for scenes from StashDB",
     schedule: "Daily at 2:00 AM",
   },
-  "cleanup-old-logs": {
-    name: "Cleanup Old Logs",
-    description: "Remove logs older than 30 days",
-    schedule: "Daily at 3:00 AM",
+  "torrent-monitor": {
+    name: "Torrent Monitor",
+    description: "Monitor torrent downloads and handle completions",
+    schedule: "Every 5 minutes",
   },
-  "check-downloads": {
-    name: "Check Downloads",
-    description: "Verify download status and update queue",
-    schedule: "Every hour",
+  "cleanup": {
+    name: "Cleanup",
+    description: "Remove old logs and cleanup temporary files",
+    schedule: "Daily at 3:00 AM",
   },
 };
 

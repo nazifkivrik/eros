@@ -25,10 +25,10 @@ export default function HomePage() {
 
   const activeTorrents = torrents?.torrents?.length || 0;
 
-  const getServiceStatus = (service: keyof typeof settings) => {
+  const getServiceStatus = (service: string) => {
     if (!settings) return { status: "Not Configured", variant: "secondary" as const };
 
-    const serviceConfig = settings[service] as any;
+    const serviceConfig = (settings as any)[service];
     if (!serviceConfig) return { status: "Not Configured", variant: "secondary" as const };
 
     if (serviceConfig.enabled && serviceConfig.apiUrl) {
@@ -121,7 +121,7 @@ export default function HomePage() {
                 </div>
               ) : (downloads?.items?.length ?? 0) > 0 ? (
                 <div className="space-y-4">
-                  {downloads.items.slice(0, 5).map((item: any) => (
+                  {downloads?.items?.slice(0, 5).map((item: any) => (
                     <div key={item.id} className="space-y-2">
                       <div className="flex items-start justify-between">
                         <div className="flex-1 min-w-0">
@@ -176,9 +176,9 @@ export default function HomePage() {
                     </div>
                   ))}
                 </div>
-              ) : torrents?.torrents?.length > 0 ? (
+              ) : (torrents?.torrents?.length ?? 0) > 0 ? (
                 <div className="space-y-4">
-                  {torrents.torrents.slice(0, 5).map((torrent: any) => (
+                  {torrents?.torrents?.slice(0, 5).map((torrent: any) => (
                     <div key={torrent.hash} className="space-y-2">
                       <div className="flex items-start justify-between">
                         <div className="flex-1 min-w-0">

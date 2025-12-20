@@ -1,4 +1,8 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
+// Use relative URL for browser requests to work in any environment (local, Docker, etc.)
+// Server-side requests will use the full URL from env
+const API_URL = typeof window === 'undefined'
+  ? (process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api")
+  : "/api"; // Browser: relative URL to same origin
 
 interface ApiRequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean>;
@@ -58,11 +62,49 @@ class ApiClient {
     return response.json();
   }
 
+  // Setup
+  async getSetupStatus() {
+    return this.request<{ setupCompleted: boolean; hasAdmin: boolean }>(
+      "/setup/status"
+    );
+  }
+
+  async completeSetup(data: {
+    username: string;
+    password: string;
+    settings?: {
+      qbittorrent?: {
+        url: string;
+        username: string;
+        password: string;
+        enabled: boolean;
+      };
+      prowlarr?: {
+        apiUrl: string;
+        apiKey: string;
+        enabled: boolean;
+      };
+      stashdb?: {
+        apiUrl: string;
+        apiKey: string;
+        enabled: boolean;
+      };
+    };
+  }) {
+    return this.request<{ setupCompleted: boolean; hasAdmin: boolean }>(
+      "/setup",
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      }
+    );
+  }
+
   // Auth
-  async login(password: string) {
+  async login(username: string, password: string) {
     return this.request<{ success: boolean; message: string }>("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ username, password }),
     });
   }
 
@@ -260,6 +302,20 @@ class ApiClient {
     return this.request<{ subscribed: boolean; subscription: any | null }>(
       `/subscriptions/check/${entityType}/${entityId}`
     );
+  }
+
+  async updateSubscription(id: string, data: {
+    qualityProfileId?: string;
+    autoDownload?: boolean;
+    includeMetadataMissing?: boolean;
+    includeAliases?: boolean;
+    monitored?: boolean;
+    status?: string;
+  }) {
+    return this.request<any>(`/subscriptions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
   }
 
   async deleteSubscription(id: string, deleteAssociatedScenes: boolean = false) {

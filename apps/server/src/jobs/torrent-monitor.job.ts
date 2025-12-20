@@ -12,12 +12,17 @@ import { createTorrentCompletionService } from "../services/torrent-completion.s
 import { createFileManagerService } from "../services/file-manager.service.js";
 import { createLogsService } from "../services/logs.service.js";
 import { createSettingsService } from "../services/settings.service.js";
+import { getJobProgressService } from "../services/job-progress.service.js";
 
 export async function torrentMonitorJob(app: FastifyInstance) {
+  const progressService = getJobProgressService();
+
+  progressService.emitStarted("torrent-monitor", "Starting torrent monitor job");
   app.log.info("Starting torrent monitor job");
 
   if (!app.qbittorrent) {
     app.log.warn("qBittorrent not configured, skipping torrent monitor job");
+    progressService.emitCompleted("torrent-monitor", "Skipped: qBittorrent not configured");
     return;
   }
 
@@ -25,18 +30,45 @@ export async function torrentMonitorJob(app: FastifyInstance) {
     // Get all torrents from qBittorrent
     const torrents = await app.qbittorrent.getTorrents();
 
+    progressService.emitProgress(
+      "torrent-monitor",
+      `Found ${torrents.length} torrents in qBittorrent`,
+      0,
+      torrents.length
+    );
+
     app.log.info(`Found ${torrents.length} torrents in qBittorrent`);
 
-    // Get all download queue items that are downloading
+    // Get all download queue items (include completed to check them too)
     const downloadingItems = await app.db.query.downloadQueue.findMany({
-      where: inArray(downloadQueue.status, ["downloading", "queued"]),
+      where: inArray(downloadQueue.status, ["downloading", "queued", "completed"]),
     });
 
     // Map torrent hashes to download queue items (use qbitHash if available, fallback to torrentHash)
+    // IMPORTANT: Normalize hashes to lowercase because qBittorrent returns lowercase hashes
     const hashToQueueItem = new Map(
       downloadingItems
         .filter((item) => item.qbitHash || item.torrentHash)
-        .map((item) => [item.qbitHash || item.torrentHash!, item])
+        .map((item) => {
+          const hash = (item.qbitHash || item.torrentHash!).toLowerCase();
+          return [hash, item];
+        })
+    );
+
+    app.log.info(
+      {
+        totalQueueItems: downloadingItems.length,
+        hashedItemsCount: hashToQueueItem.size,
+        sampleHashes: Array.from(hashToQueueItem.keys()).slice(0, 3),
+        sampleQueueItems: downloadingItems.slice(0, 2).map(item => ({
+          id: item.id,
+          title: item.title,
+          status: item.status,
+          qbitHash: item.qbitHash,
+          torrentHash: item.torrentHash
+        }))
+      },
+      "Hash map created for torrent monitoring"
     );
 
     // Initialize services for torrent completion
@@ -44,7 +76,6 @@ export async function torrentMonitorJob(app: FastifyInstance) {
     const settings = await settingsService.getSettings();
     const fileManager = createFileManagerService(
       app.db,
-      settings.general.downloadPath,
       settings.general.scenesPath,
       settings.general.incompletePath
     );
@@ -56,15 +87,26 @@ export async function torrentMonitorJob(app: FastifyInstance) {
       logsService
     );
 
+    let processedCount = 0;
     for (const torrent of torrents) {
       const queueItem = hashToQueueItem.get(torrent.hash);
 
       if (!queueItem) {
         // Torrent not in our queue, ignore
+        app.log.debug(
+          {
+            torrentHash: torrent.hash,
+            torrentName: torrent.name,
+            torrentProgress: torrent.progress,
+            hashedKeys: Array.from(hashToQueueItem.keys()).slice(0, 3), // Show first 3 keys for debugging
+          },
+          "Torrent not found in queue map"
+        );
         continue;
       }
 
       try {
+        processedCount++;
         // Check if torrent is stalled (no progress, low speed, low seeds)
         const isStalled = checkIfStalled(torrent);
 
@@ -101,13 +143,22 @@ export async function torrentMonitorJob(app: FastifyInstance) {
         } else if (torrent.progress >= 1.0 && queueItem.status !== "completed") {
           // Torrent completed - trigger completion handler
           app.log.info(
-            { torrentHash: torrent.hash, name: torrent.name },
+            { torrentHash: torrent.hash, name: torrent.name, currentStatus: queueItem.status },
             "Torrent completed, processing..."
+          );
+
+          progressService.emitProgress(
+            "torrent-monitor",
+            `Processing completed torrent: ${torrent.name}`,
+            processedCount,
+            torrents.length,
+            { torrentName: torrent.name }
           );
 
           try {
             // Store qbitHash if not already stored
             if (!queueItem.qbitHash) {
+              app.log.info({ torrentHash: torrent.hash }, "Storing qBit hash");
               await app.db
                 .update(downloadQueue)
                 .set({ qbitHash: torrent.hash })
@@ -115,10 +166,26 @@ export async function torrentMonitorJob(app: FastifyInstance) {
             }
 
             // Handle torrent completion (move files, generate metadata, etc.)
+            app.log.info(
+              { torrentHash: torrent.hash, sceneId: queueItem.sceneId },
+              "Calling handleTorrentCompleted"
+            );
+
             await completionService.handleTorrentCompleted(torrent.hash);
+
+            app.log.info(
+              { torrentHash: torrent.hash, sceneId: queueItem.sceneId },
+              "handleTorrentCompleted finished successfully"
+            );
           } catch (error) {
             app.log.error(
-              { error, torrentHash: torrent.hash, sceneId: queueItem.sceneId },
+              {
+                error,
+                errorMessage: error instanceof Error ? error.message : String(error),
+                errorStack: error instanceof Error ? error.stack : undefined,
+                torrentHash: torrent.hash,
+                sceneId: queueItem.sceneId
+              },
               "Failed to process completed torrent"
             );
 
@@ -149,8 +216,18 @@ export async function torrentMonitorJob(app: FastifyInstance) {
     // Apply speed profiles if enabled
     await applySpeedProfiles(app);
 
+    progressService.emitCompleted(
+      "torrent-monitor",
+      `Completed: Processed ${processedCount} torrents`,
+      { processedCount, totalTorrents: torrents.length }
+    );
+
     app.log.info("Torrent monitor job completed");
   } catch (error) {
+    progressService.emitFailed(
+      "torrent-monitor",
+      `Torrent monitor job failed: ${error instanceof Error ? error.message : String(error)}`
+    );
     app.log.error({ error }, "Torrent monitor job failed");
     throw error;
   }

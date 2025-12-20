@@ -17,6 +17,7 @@ export * from "./entities/scene.js";
 export * from "./entities/subscription.js";
 export * from "./entities/logs.js";
 export * from "./entities/jobs.js";
+export * from "./entities/setup.js";
 
 // Settings - explicit export for const values
 export type {

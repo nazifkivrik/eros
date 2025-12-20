@@ -4,6 +4,8 @@ import type { Database } from "@repo/database";
 import { eq } from "drizzle-orm";
 import { scenes, performers, studios, sceneFiles, sceneExclusions } from "@repo/database";
 import { constants } from "fs";
+import type { QBittorrentService } from "./qbittorrent.service.js";
+import { createTorrentParserService } from "./parser.service.js";
 
 export type SceneMetadata = {
   id: string;
@@ -27,26 +29,22 @@ export type SceneMetadata = {
 };
 
 export class FileManagerService {
-  private downloadPath: string;
   private scenesPath: string;
-  // Used for future implementation of incomplete downloads handling
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private incompletePath: string;
 
   constructor(
     private db: Database,
-    downloadPath?: string,
-    scenesPath?: string,
-    incompletePath?: string
+    scenesPath: string,
+    incompletePath: string
   ) {
-    this.downloadPath = downloadPath || process.env.DOWNLOAD_PATH || "/downloads";
-    this.scenesPath = scenesPath || process.env.SCENES_PATH || "/scenes";
-    this.incompletePath = incompletePath || process.env.INCOMPLETE_PATH || "/incomplete";
+    this.scenesPath = scenesPath;
+    this.incompletePath = incompletePath;
   }
 
   /**
    * Create folder structure for a scene
-   * Format: /downloads/{studio}/{scene_title}_{scene_id}/
+   * Format: /scenes/{cleaned_title}/
+   * Adds random chars only on collision: /scenes/{cleaned_title} rand/
    */
   async createSceneFolder(sceneId: string): Promise<string> {
     // Get scene with performers and studios
@@ -56,22 +54,57 @@ export class FileManagerService {
       throw new Error(`Scene ${sceneId} not found`);
     }
 
-    // Sanitize folder names
-    const studioName = scene.studios[0]?.name || "Unknown";
-    const sanitizedStudio = this.sanitizeFilename(studioName);
+    // Sanitize folder name
     const sanitizedTitle = this.sanitizeFilename(scene.title);
 
-    // Create folder path: /downloads/{studio}/{title}_{id}/
-    const folderPath = join(
-      this.downloadPath,
-      sanitizedStudio,
-      `${sanitizedTitle}_${scene.id}`
-    );
+    // Try base path first
+    let folderPath = join(this.scenesPath, sanitizedTitle);
+
+    // Check for collision
+    const exists = await this.checkFolderExists(folderPath);
+
+    if (exists) {
+      // Add random chars on collision (4 alphanumeric characters)
+      const randomSuffix = this.generateRandomSuffix(4);
+      folderPath = join(this.scenesPath, `${sanitizedTitle} ${randomSuffix}`);
+
+      // Edge case: Check if random suffix also collides (very unlikely)
+      const stillExists = await this.checkFolderExists(folderPath);
+      if (stillExists) {
+        // Use timestamp as ultimate fallback
+        const timestamp = Date.now().toString(36).slice(-4);
+        folderPath = join(this.scenesPath, `${sanitizedTitle} ${timestamp}`);
+      }
+    }
 
     // Create directory recursively
     await mkdir(folderPath, { recursive: true });
 
     return folderPath;
+  }
+
+  /**
+   * Check if folder exists
+   */
+  private async checkFolderExists(path: string): Promise<boolean> {
+    try {
+      await access(path, constants.F_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Generate random alphanumeric suffix for collision avoidance
+   */
+  private generateRandomSuffix(length: number): string {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    let result = '';
+    for (let i = 0; i < length; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
   }
 
   /**
@@ -249,6 +282,92 @@ export class FileManagerService {
   }
 
   /**
+   * Move completed torrent files using qBittorrent API
+   * This preserves seeding by letting qBittorrent track the file location
+   */
+  async moveCompletedTorrentViaQBit(
+    sceneId: string,
+    qbitHash: string,
+    qbittorrent: QBittorrentService
+  ): Promise<{
+    destinationPath: string;
+    nfoPath: string | null;
+    posterPath: string | null;
+  }> {
+    const scene = await this.getSceneWithMetadata(sceneId);
+    if (!scene) {
+      throw new Error(`Scene ${sceneId} not found`);
+    }
+
+    // Use createSceneFolder which handles collision detection automatically
+    const destinationFolder = await this.createSceneFolder(sceneId);
+
+    // Use qBittorrent API to move torrent (preserves seeding)
+    const success = await qbittorrent.setLocation(qbitHash, destinationFolder);
+
+    if (!success) {
+      throw new Error(`Failed to move torrent ${qbitHash} via qBittorrent API`);
+    }
+
+    // Wait for qBittorrent to complete the move (poll for confirmation)
+    await this.waitForTorrentMove(qbitHash, destinationFolder, qbittorrent);
+
+    // Generate NFO and download poster
+    let nfoPath: string | null = null;
+    let posterPath: string | null = null;
+
+    try {
+      nfoPath = await this.generateNFO(sceneId, destinationFolder);
+    } catch (error) {
+      console.error(`Failed to generate NFO for scene ${sceneId}:`, error);
+    }
+
+    try {
+      posterPath = await this.downloadPoster(sceneId, destinationFolder);
+    } catch (error) {
+      console.error(`Failed to download poster for scene ${sceneId}:`, error);
+    }
+
+    return {
+      destinationPath: destinationFolder,
+      nfoPath,
+      posterPath,
+    };
+  }
+
+  /**
+   * Wait for qBittorrent to complete file move operation
+   * Polls torrent properties until save_path matches expected path
+   */
+  private async waitForTorrentMove(
+    qbitHash: string,
+    expectedPath: string,
+    qbittorrent: QBittorrentService,
+    maxRetries = 10,
+    delayMs = 1000
+  ): Promise<void> {
+    for (let i = 0; i < maxRetries; i++) {
+      const torrentInfo = await qbittorrent.getTorrentProperties(qbitHash);
+
+      // Check if save_path matches expected path
+      if (
+        torrentInfo.save_path === expectedPath ||
+        torrentInfo.content_path.startsWith(expectedPath)
+      ) {
+        return; // Move completed successfully
+      }
+
+      // Wait before retry
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+
+    throw new Error(
+      `Timeout waiting for qBittorrent to move torrent ${qbitHash} to ${expectedPath}`
+    );
+  }
+
+  /**
+   * @deprecated Use moveCompletedTorrentViaQBit instead to preserve seeding
    * Move completed torrent files from incomplete to scenes folder
    */
   async moveCompletedTorrent(
@@ -477,7 +596,7 @@ export class FileManagerService {
   }
 
   /**
-   * Create complete scene folder with metadata files
+   * Create complete scene folder with metadata files (for scenes with full metadata)
    */
   async setupSceneFiles(sceneId: string): Promise<{
     folderPath: string;
@@ -499,13 +618,66 @@ export class FileManagerService {
       nfoPath,
     };
   }
+
+  /**
+   * Create scene folder with simplified metadata (for scenes without StashDB metadata)
+   * Only creates folder and basic NFO with title and performer/studio info
+   */
+  async setupSceneFilesSimplified(sceneId: string): Promise<{
+    folderPath: string;
+    nfoPath: string;
+  }> {
+    // Get scene with performers and studios
+    const scene = await this.getSceneWithMetadata(sceneId);
+
+    if (!scene) {
+      throw new Error(`Scene ${sceneId} not found`);
+    }
+
+    // Use parser service to clean the title (removes quality tags, resolution, etc.)
+    const parserService = createTorrentParserService();
+    const cleanedTitle = parserService.parseTorrent(scene.title).title;
+
+    // Create folder
+    const studioName = scene.studios[0]?.name || "Unknown";
+    const sanitizedStudio = this.sanitizeFilename(studioName);
+    const sanitizedTitle = this.sanitizeFilename(cleanedTitle);
+
+    const folderPath = join(
+      this.scenesPath,
+      sanitizedStudio,
+      `${sanitizedTitle}_${scene.id}`
+    );
+
+    await mkdir(folderPath, { recursive: true });
+
+    // Generate simplified NFO content (use cleaned title)
+    const performers = scene.performers.map((p) => `    <actor>\n      <name>${this.escapeXML(p.name)}</name>\n    </actor>`).join("\n");
+    const studio = scene.studios[0]?.name || "";
+
+    const nfoContent = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+  <title>${this.escapeXML(cleanedTitle)}</title>
+  <originaltitle>${this.escapeXML(scene.title)}</originaltitle>
+  ${studio ? `<studio>${this.escapeXML(studio)}</studio>` : ""}
+  ${performers}
+</movie>`;
+
+    // Save NFO file (use cleaned title for filename)
+    const nfoPath = join(folderPath, `${this.sanitizeFilename(cleanedTitle)}.nfo`);
+    await writeFile(nfoPath, nfoContent, "utf-8");
+
+    return {
+      folderPath,
+      nfoPath,
+    };
+  }
 }
 
 export function createFileManagerService(
   db: Database,
-  downloadPath?: string,
-  scenesPath?: string,
-  incompletePath?: string
+  scenesPath: string,
+  incompletePath: string
 ): FileManagerService {
-  return new FileManagerService(db, downloadPath, scenesPath, incompletePath);
+  return new FileManagerService(db, scenesPath, incompletePath);
 }

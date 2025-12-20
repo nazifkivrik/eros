@@ -8,20 +8,24 @@ declare module "fastify" {
 }
 
 export default fp(async (app) => {
-  const url = process.env.QBITTORRENT_URL;
-  const username = process.env.QBITTORRENT_USERNAME || "admin";
-  const password = process.env.QBITTORRENT_PASSWORD || "adminadmin";
+  // Wait for database plugin to be ready
+  await app.after();
 
-  if (!url) {
-    app.log.warn("qBittorrent URL not configured. Download functionality will be disabled.");
+  // Get settings from database
+  const { createSettingsService } = await import("../services/settings.service.js");
+  const settingsService = createSettingsService(app.db);
+  const settings = await settingsService.getSettings();
+
+  if (!settings.qbittorrent.enabled || !settings.qbittorrent.url) {
+    app.log.warn("qBittorrent not configured. Download functionality will be disabled.");
     app.decorate("qbittorrent", null);
     return;
   }
 
   const qbittorrent = new QBittorrentService({
-    url,
-    username,
-    password,
+    url: settings.qbittorrent.url,
+    username: settings.qbittorrent.username,
+    password: settings.qbittorrent.password,
   });
 
   // Test connection
@@ -30,9 +34,9 @@ export default fp(async (app) => {
     if (!connected) {
       throw new Error("Connection test failed");
     }
-    app.log.info({ url }, "qBittorrent plugin registered and connected");
+    app.log.info({ url: settings.qbittorrent.url }, "qBittorrent plugin registered and connected");
   } catch (error) {
-    app.log.error({ error, url }, "Failed to connect to qBittorrent");
+    app.log.error({ error, url: settings.qbittorrent.url }, "Failed to connect to qBittorrent");
     app.decorate("qbittorrent", null);
     return;
   }

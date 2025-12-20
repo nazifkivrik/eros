@@ -21,7 +21,7 @@ export type JobStatus = "running" | "completed" | "failed";
 // Log enums (moved from logs.service.ts)
 export type LogLevel = "error" | "warning" | "info" | "debug";
 
-export type EventType = "torrent" | "subscription" | "download" | "metadata" | "system" | "missing-scenes";
+export type EventType = "torrent" | "subscription" | "download" | "metadata" | "system" ;
 
 // Quality Types
 export const QUALITIES = {

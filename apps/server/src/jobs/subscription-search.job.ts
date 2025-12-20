@@ -341,11 +341,31 @@ async function processSubscription(
           );
         }
 
+        // Create scene folder structure
+        // For metadata-less scenes from torrent search, use simplified NFO (no poster)
+        try {
+          const { createFileManagerService } = await import("../services/file-manager.service.js");
+          const fileManagerService = createFileManagerService(
+            app.db,
+            settings.general.scenesPath || "/media/scenes",
+            settings.general.incompletePath || "/media/incomplete"
+          );
+          const { folderPath } = await fileManagerService.setupSceneFilesSimplified(sceneId);
+          app.log.info(
+            `[Subscription Search] ✅ Created scene folder with simplified metadata: ${folderPath}`
+          );
+        } catch (error) {
+          app.log.error(
+            { error, sceneId },
+            `[Subscription Search] ⚠️ Failed to create scene folder (continuing): ${error instanceof Error ? error.message : "Unknown error"}`
+          );
+        }
+
         // Add to qBittorrent if configured
         let qbittorrentStatus = "not_attempted";
         if (qbittorrentService && (torrent.downloadUrl || torrent.infoHash)) {
           try {
-            const downloadPath = settings.general.downloadPath || "/downloads";
+            const downloadPath = settings.general.incompletePath || "/media/incomplete";
 
             // Prefer infoHash to create magnet link (more reliable than Prowlarr's downloadUrl)
             let magnetLink: string | undefined;

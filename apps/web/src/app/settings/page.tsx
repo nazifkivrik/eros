@@ -111,7 +111,15 @@ export default function SettingsPage() {
   // Update local state when data is loaded
   useEffect(() => {
     if (settingsData) {
-      setSettings(settingsData);
+      setSettings({
+        ...defaultSettings,
+        ...settingsData,
+        general: { ...defaultSettings.general, ...settingsData.general },
+        stashdb: { ...defaultSettings.stashdb, ...settingsData.stashdb },
+        prowlarr: { ...defaultSettings.prowlarr, ...settingsData.prowlarr },
+        qbittorrent: { ...defaultSettings.qbittorrent, ...settingsData.qbittorrent },
+        ai: { ...defaultSettings.ai, ...settingsData.ai },
+      });
     }
   }, [settingsData]);
 

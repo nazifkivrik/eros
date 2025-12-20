@@ -1,15 +1,32 @@
 "use client";
 
-import { use } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Trash2, Edit, Film, Calendar, Clock, Users, MapPin } from "lucide-react";
+import { ArrowLeft, Trash2, Film, Calendar, Clock, Users, MapPin, Settings } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -25,10 +42,10 @@ import {
   CarouselNext,
   CarouselPrevious,
 } from "@/components/ui/carousel";
-import { Separator } from "@/components/ui/separator";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { useDeleteSubscription, useSubscriptionScenes, useSubscriptionFiles } from "@/hooks/useSubscriptions";
+import { useMutationWithToast } from "@/hooks/useMutationWithToast";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -38,11 +55,19 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
   const { id } = use(params);
   const router = useRouter();
   const deleteSubscription = useDeleteSubscription();
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
 
   const { data: subscription, isLoading } = useQuery({
     queryKey: ["subscription", id],
     queryFn: () => apiClient.getSubscription(id),
   });
+
+  // Get quality profiles
+  const { data: qualityProfilesData } = useQuery({
+    queryKey: ["quality-profiles"],
+    queryFn: () => apiClient.getQualityProfiles(),
+  });
+  const qualityProfiles = qualityProfilesData?.data || [];
 
   // Get scenes for performer/studio subscriptions with download status
   const { data: scenesData } = useSubscriptionScenes(id);
@@ -53,23 +78,45 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
   const sceneFiles = filesData?.files || [];
   const downloadQueue = filesData?.downloadQueue;
 
-  // Get associated subscribed scenes for performer/studio (for backward compatibility)
-  const { data: allSubscriptions } = useQuery({
-    queryKey: ["subscriptions"],
-    queryFn: () => apiClient.getSubscriptions(),
-    enabled: subscription?.entityType === "performer" || subscription?.entityType === "studio",
+  // Form state for editing
+  const [editForm, setEditForm] = useState({
+    qualityProfileId: "",
+    autoDownload: false,
+    includeMetadataMissing: false,
+    includeAliases: false,
   });
 
-  const associatedScenes = allSubscriptions?.data?.filter(
-    (s: any) =>
-      s.entityType === "scene" &&
-      subscription?.entityType &&
-      subscription.entityId &&
-      s.entity &&
-      (subscription.entityType === "performer"
-        ? s.entity.performerIds && JSON.parse(s.entity.performerIds).includes(subscription.entityId)
-        : s.entity.studioId === subscription.entityId)
-  ) || [];
+  // Update mutation
+  const updateSubscription = useMutationWithToast({
+    mutationFn: (data: any) => apiClient.updateSubscription(id, data),
+    successMessage: "Subscription updated successfully",
+    errorMessage: "Failed to update subscription",
+    invalidateKeys: [["subscription", id], ["subscriptions"]],
+  });
+
+
+
+
+
+  const handleEdit = () => {
+    if (subscription) {
+      setEditForm({
+        qualityProfileId: subscription.qualityProfileId || "",
+        autoDownload: subscription.autoDownload || false,
+        includeMetadataMissing: subscription.includeMetadataMissing || false,
+        includeAliases: subscription.includeAliases || false,
+      });
+      setEditDialogOpen(true);
+    }
+  };
+
+  const handleSaveEdit = () => {
+    updateSubscription.mutate(editForm, {
+      onSuccess: () => {
+        setEditDialogOpen(false);
+      },
+    });
+  };
 
   const handleDelete = () => {
     deleteSubscription.mutate(
@@ -147,6 +194,13 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
         </div>
         <div className="flex gap-2">
           <Button
+            variant="outline"
+            onClick={handleEdit}
+          >
+            <Settings className="h-4 w-4 mr-2" />
+            Edit Settings
+          </Button>
+          <Button
             variant="destructive"
             onClick={handleDelete}
             disabled={deleteSubscription.isPending}
@@ -156,6 +210,96 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
           </Button>
         </div>
       </div>
+
+      {/* Edit Subscription Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Subscription Settings</DialogTitle>
+            <DialogDescription>
+              Update quality profile and download settings for this subscription
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="qualityProfile">Quality Profile</Label>
+              <Select
+                value={editForm.qualityProfileId}
+                onValueChange={(value) =>
+                  setEditForm({ ...editForm, qualityProfileId: value })
+                }
+              >
+                <SelectTrigger id="qualityProfile">
+                  <SelectValue placeholder="Select quality profile" />
+                </SelectTrigger>
+                <SelectContent>
+                  {qualityProfiles.map((profile: any) => (
+                    <SelectItem key={profile.id} value={profile.id}>
+                      {profile.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="autoDownload"
+                checked={editForm.autoDownload}
+                onCheckedChange={(checked) =>
+                  setEditForm({ ...editForm, autoDownload: checked as boolean })
+                }
+              />
+              <Label
+                htmlFor="autoDownload"
+                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+              >
+                Auto Download
+              </Label>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="includeMetadataMissing"
+                checked={editForm.includeMetadataMissing}
+                onCheckedChange={(checked) =>
+                  setEditForm({ ...editForm, includeMetadataMissing: checked as boolean })
+                }
+              />
+              <Label
+                htmlFor="includeMetadataMissing"
+                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+              >
+                Include Metadata Missing
+              </Label>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="includeAliases"
+                checked={editForm.includeAliases}
+                onCheckedChange={(checked) =>
+                  setEditForm({ ...editForm, includeAliases: checked as boolean })
+                }
+              />
+              <Label
+                htmlFor="includeAliases"
+                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+              >
+                Include Aliases
+              </Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEdit} disabled={updateSubscription.isPending}>
+              {updateSubscription.isPending ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Entity Details Card */}
       {entity && (

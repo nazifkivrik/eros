@@ -1,13 +1,15 @@
-import { config } from "dotenv";
-import { resolve } from "path";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
+// Only load .env in development
+if (process.env.NODE_ENV !== "production") {
+  const { config } = await import("dotenv");
+  const { resolve } = await import("path");
+  const { fileURLToPath } = await import("url");
+  const { dirname } = await import("path");
 
-// Load .env from workspace root (monorepo)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const rootDir = resolve(__dirname, "../../../");
-config({ path: resolve(rootDir, ".env") });
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const rootDir = resolve(__dirname, "../../../");
+  config({ path: resolve(rootDir, ".env") });
+}
 
 import { buildApp } from "./app.js";
 

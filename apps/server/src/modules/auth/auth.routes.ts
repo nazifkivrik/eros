@@ -1,4 +1,7 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
+import { eq } from "drizzle-orm";
+import argon2 from "argon2";
+import { users } from "@repo/database/schema";
 import {
   LoginSchema,
   LoginResponseSchema,
@@ -21,17 +24,28 @@ const authRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
-      const { password } = request.body;
+      const { username, password } = request.body;
 
-      // Single user authentication - check against env variable
-      const adminPassword = process.env.ADMIN_PASSWORD || "admin";
+      // Find user by username
+      const user = await app.db
+        .select()
+        .from(users)
+        .where(eq(users.username, username))
+        .limit(1);
 
-      if (password !== adminPassword) {
-        return reply.code(401).send({ error: "Invalid password" });
+      if (user.length === 0) {
+        return reply.code(401).send({ error: "Invalid username or password" });
+      }
+
+      // Verify password using Argon2
+      const isValidPassword = await argon2.verify(user[0].passwordHash, password);
+
+      if (!isValidPassword) {
+        return reply.code(401).send({ error: "Invalid username or password" });
       }
 
       request.session.authenticated = true;
-      request.session.userId = "admin";
+      request.session.userId = user[0].id;
 
       return { success: true, message: "Logged in successfully" };
     }

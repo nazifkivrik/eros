@@ -24,7 +24,6 @@ const logsRoutes: FastifyPluginAsyncZod = async (app) => {
         },
       },
     },
-    // @ts-expect-error - Fastify type provider has issues with ZodEffects transform
     async (request) => {
       const filters = request.query as any;
       const result = await logsService.getLogs(filters);
@@ -44,7 +43,7 @@ const logsRoutes: FastifyPluginAsyncZod = async (app) => {
         },
       },
     },
-    // @ts-expect-error - Fastify type provider entityType inference issue
+
     async (request, reply) => {
       const { id } = request.params;
       const log = await logsService.getLog(id);

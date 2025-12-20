@@ -253,6 +253,14 @@ export const jobsLog = sqliteTable("jobs_log", {
   metadata: text("metadata", { mode: "json" }).$type<Record<string, unknown>>(),
 });
 
+// Users Table
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  ...timestamps,
+});
+
 // App Settings Table
 export const appSettings = sqliteTable("app_settings", {
   key: text("key").primaryKey(),

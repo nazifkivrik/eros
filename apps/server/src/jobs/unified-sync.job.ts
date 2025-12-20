@@ -186,7 +186,6 @@ async function checkFilesystemSync(
 ) {
   const fileManager = createFileManagerService(
     app.db,
-    settings.general.downloadPath,
     settings.general.scenesPath,
     settings.general.incompletePath
   );

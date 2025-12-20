@@ -3,7 +3,7 @@
   "extends": "./base.json",
   "compilerOptions": {
     "module": "ESNext",
-    "moduleResolution": "Node",
+    "moduleResolution": "Bundler",
     "outDir": "./dist",
     "rootDir": "./src"
   },

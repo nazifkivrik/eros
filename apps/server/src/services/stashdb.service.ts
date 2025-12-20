@@ -88,7 +88,7 @@ export class StashDBService {
     this.client = new GraphQLClient(config.apiUrl, {
       headers: config.apiKey
         ? {
-            ApiKey: config.apiKey,
+            "ApiKey": config.apiKey,
           }
         : {},
     });

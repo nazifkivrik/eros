@@ -71,14 +71,35 @@ export class TorrentCompletionService {
           qbitHash,
           sceneId: queueItem.sceneId,
           sourcePath,
+          currentStatus: queueItem.status,
         },
         { sceneId: queueItem.sceneId }
       );
 
-      // 4. Move files to scenes folder and generate metadata
-      const moveResult = await this.fileManager.moveCompletedTorrent(
+      // 4. Move files to scenes folder and generate metadata using qBittorrent API
+      // This preserves seeding by letting qBittorrent track the file location
+      await this.logger.info(
+        "torrent",
+        `Calling moveCompletedTorrentViaQBit for scene: ${queueItem.sceneId}`,
+        { qbitHash, sceneId: queueItem.sceneId },
+        { sceneId: queueItem.sceneId }
+      );
+
+      const moveResult = await this.fileManager.moveCompletedTorrentViaQBit(
         queueItem.sceneId,
-        sourcePath
+        qbitHash,
+        this.qbittorrent
+      );
+
+      await this.logger.info(
+        "torrent",
+        `moveCompletedTorrentViaQBit succeeded for scene: ${queueItem.sceneId}`,
+        {
+          qbitHash,
+          sceneId: queueItem.sceneId,
+          destinationPath: moveResult.destinationPath
+        },
+        { sceneId: queueItem.sceneId }
       );
 
       await this.logger.info(

@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Heart, Users, Building2, Film, Trash2, Settings2, AlertCircle, LayoutGrid, List } from "lucide-react";
+import Image from "next/image";
+import {  Users, Building2, Film, Trash2, AlertCircle, LayoutGrid, List } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -129,9 +130,11 @@ export default function SubscriptionsPage() {
             <Card className="cursor-pointer hover:bg-accent/50 transition-colors h-full overflow-hidden">
               {imageUrl && (
                 <div className="aspect-[3/4] w-full overflow-hidden bg-muted">
-                  <img
+                  <Image
                     src={imageUrl}
                     alt={sub.entityName}
+                    width={300}
+                    height={400}
                     className="w-full h-full object-cover"
                   />
                 </div>
@@ -242,9 +245,11 @@ export default function SubscriptionsPage() {
             <Card className="cursor-pointer hover:bg-accent/50 transition-colors h-full overflow-hidden">
               {imageUrl && (
                 <div className="aspect-video w-full overflow-hidden bg-muted">
-                  <img
+                  <Image
                     src={imageUrl}
                     alt={sub.entityName}
+                    width={640}
+                    height={360}
                     className="w-full h-full object-cover"
                   />
                 </div>
@@ -355,9 +360,11 @@ export default function SubscriptionsPage() {
             <Card className="cursor-pointer hover:bg-accent/50 transition-colors h-full overflow-hidden">
               {imageUrl && (
                 <div className="aspect-video w-full overflow-hidden bg-muted">
-                  <img
+                  <Image
                     src={imageUrl}
                     alt={sub.entityName}
+                    width={640}
+                    height={360}
                     className="w-full h-full object-cover"
                   />
                 </div>

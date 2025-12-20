@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import type { JobProgressEvent } from "@repo/shared-types";
 
 interface UseJobProgressOptions {
@@ -42,16 +42,16 @@ export function useJobProgress(options: UseJobProgressOptions = {}) {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const shouldReconnectRef = useRef(autoConnect);
 
-  const connect = () => {
+  const connect = useCallback(() => {
     if (eventSourceRef.current) {
       return; // Already connected
     }
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-      // Remove trailing slash and /api if present to avoid double /api/
-      const baseUrl = apiUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
-      const url = `${baseUrl}/api/jobs/progress`;
+      // Use relative URL for browser (works in both dev and Docker)
+      // In dev: /api -> localhost:3000 -> next.config.ts rewrites to localhost:3001
+      // In Docker: /api -> container:3000 -> next.config.ts rewrites to localhost:3001
+      const url = `/api/jobs/progress`;
 
       console.log("[JobProgress] Connecting to SSE:", url);
 
@@ -113,7 +113,7 @@ export function useJobProgress(options: UseJobProgressOptions = {}) {
         err instanceof Error ? err : new Error("Failed to connect")
       );
     }
-  };
+  }, [jobName, autoReconnect, reconnectDelay]);
 
   const disconnect = () => {
     shouldReconnectRef.current = false;
@@ -144,7 +144,7 @@ export function useJobProgress(options: UseJobProgressOptions = {}) {
     return () => {
       disconnect();
     };
-  }, [autoConnect, jobName]);
+  }, [autoConnect, connect]);
 
   // Get events for specific job
   const getJobEvents = (name: string) => {

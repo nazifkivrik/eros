@@ -1,13 +1,60 @@
+# Dependencies
 node_modules
+**/node_modules
+
+# Build artifacts
 .next
 dist
+**/dist
 .turbo
+**/.turbo
+
+# Git
 .git
+.gitignore
+
+# Environment & Secrets
 .env
-.env.local
+.env.*
+!.env.example
+
+# Logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Data & Media
 downloads
 data
+media
 *.db
 *.db-shm
 *.db-wal
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Documentation (optional - uncomment if you want to exclude)
+# README.md
+# *.md
+
+# Tests (optional - uncomment if tests aren't needed in production)
+# **/*.test.ts
+# **/*.spec.ts
+# **/tests/
+# **/__tests__/

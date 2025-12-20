@@ -5,7 +5,7 @@ import {
   RemoveTorrentQuerySchema,
   TorrentListResponseSchema,
   SuccessResponseSchema,
-} from "./torrents.schema";
+} from "./torrents.schema.js";
 
 const torrentsRoutes: FastifyPluginAsyncZod = async (app) => {
   // Get all torrents

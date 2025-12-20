@@ -65,7 +65,7 @@ export function useMutationWithToast<TData = unknown, TVariables = void>({
 
   return useMutation({
     mutationFn,
-    onSuccess: (data, variables, context) => {
+    onSuccess: (data, variables) => {
       // Invalidate specified query keys
       invalidateKeys.forEach((key) => {
         queryClient.invalidateQueries({ queryKey: key });
@@ -77,7 +77,7 @@ export function useMutationWithToast<TData = unknown, TVariables = void>({
       // Call custom success callback if provided
       onSuccess?.(data, variables);
     },
-    onError: (error: Error, variables, context) => {
+    onError: (error: Error, variables) => {
       // Show error toast
       const message =
         typeof errorMessage === "function"

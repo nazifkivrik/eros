@@ -38,7 +38,48 @@ const settingsRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request) => {
-      return await settingsService.updateSettings(request.body);
+      const updatedSettings = await settingsService.updateSettings(request.body);
+
+      // Reload StashDB plugin with new settings
+      if (updatedSettings.stashdb?.apiKey) {
+        const { StashDBService } = await import("../../services/stashdb.service.js");
+        const stashdb = new StashDBService({
+          apiUrl: "https://stashdb.org/graphql",
+          apiKey: updatedSettings.stashdb.apiKey,
+        });
+        // Directly reassign the decorator value (plugin already initialized it)
+        app.stashdb = stashdb;
+        app.log.info("StashDB plugin reloaded with new API key");
+      }
+
+      // Reload qBittorrent plugin with new settings
+      if (updatedSettings.qbittorrent?.enabled && updatedSettings.qbittorrent?.url) {
+        const { QBittorrentService } = await import("../../services/qbittorrent.service.js");
+        const qbittorrent = new QBittorrentService({
+          url: updatedSettings.qbittorrent.url,
+          username: updatedSettings.qbittorrent.username || "admin",
+          password: updatedSettings.qbittorrent.password || "adminadmin",
+        });
+
+        try {
+          const connected = await qbittorrent.testConnection();
+          if (connected) {
+            // Directly reassign the decorator value (plugin already initialized it)
+            app.qbittorrent = qbittorrent;
+            app.log.info("qBittorrent plugin reloaded and connected");
+          } else {
+            app.qbittorrent = null;
+            app.log.warn("qBittorrent plugin reloaded but connection failed");
+          }
+        } catch (error) {
+          app.qbittorrent = null;
+          app.log.error({ error }, "Failed to reload qBittorrent plugin");
+        }
+      } else {
+        app.qbittorrent = null;
+      }
+
+      return updatedSettings;
     }
   );
 
