@@ -76,8 +76,15 @@ export function useSubscribeToScene() {
 
 export function useDeleteSubscription() {
   return useMutationWithToast({
-    mutationFn: ({ id, deleteAssociatedScenes }: { id: string; deleteAssociatedScenes?: boolean }) =>
-      apiClient.deleteSubscription(id, deleteAssociatedScenes),
+    mutationFn: ({
+      id,
+      deleteAssociatedScenes,
+      removeFiles,
+    }: {
+      id: string;
+      deleteAssociatedScenes?: boolean;
+      removeFiles?: boolean;
+    }) => apiClient.deleteSubscription(id, deleteAssociatedScenes, removeFiles),
     successMessage: "Subscription removed",
     invalidateKeys: [queryKeys.subscriptions.all, ["subscription", "check"]],
     errorMessage: "Failed to remove subscription",

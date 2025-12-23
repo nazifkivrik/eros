@@ -33,92 +33,33 @@ import {
 import { toast } from "sonner";
 import { QualityProfilesTab } from "@/components/settings/QualityProfilesTab";
 import { useSettings, useUpdateSettings, useTestConnection } from "@/hooks/useSettings";
-
-interface AppSettings {
-  general: {
-    appName: string;
-    downloadPath: string;
-    enableNotifications: boolean;
-    minIndexersForMetadataLess: number;
-    groupingThreshold: number;
-    deleteFilesOnRemove: boolean;
-    deleteTorrentOnRemove: boolean;
-  };
-  stashdb: {
-    apiUrl: string;
-    apiKey: string;
-    enabled: boolean;
-  };
-  prowlarr: {
-    apiUrl: string;
-    apiKey: string;
-    enabled: boolean;
-  };
-  qbittorrent: {
-    url: string;
-    username: string;
-    password: string;
-    enabled: boolean;
-  };
-  ai: {
-    enabled: boolean;
-    model: string;
-    threshold: number;
-  };
-}
-
-const defaultSettings: AppSettings = {
-  general: {
-    appName: "Eros",
-    downloadPath: "/downloads",
-    enableNotifications: true,
-    minIndexersForMetadataLess: 2,
-    groupingThreshold: 0.7,
-    deleteFilesOnRemove: false,
-    deleteTorrentOnRemove: true,
-  },
-  stashdb: {
-    apiUrl: "https://stashdb.org/graphql",
-    apiKey: "",
-    enabled: false,
-  },
-  prowlarr: {
-    apiUrl: "",
-    apiKey: "",
-    enabled: false,
-  },
-  qbittorrent: {
-    url: "",
-    username: "",
-    password: "",
-    enabled: false,
-  },
-  ai: {
-    enabled: false,
-    model: "Xenova/all-MiniLM-L6-v2",
-    threshold: 0.75,
-  },
-};
+import type { AppSettings } from "@repo/shared-types";
+import { DEFAULT_SETTINGS } from "@repo/shared-types";
 
 export default function SettingsPage() {
   const { data: settingsData, isLoading } = useSettings();
   const updateSettings = useUpdateSettings();
   const testConnection = useTestConnection();
 
-  const [settings, setSettings] = useState<AppSettings>(defaultSettings);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [activeTab, setActiveTab] = useState("general");
 
   // Update local state when data is loaded
   useEffect(() => {
     if (settingsData) {
+      const data = settingsData as any; // Backend may not have all fields yet
       setSettings({
-        ...defaultSettings,
-        ...settingsData,
-        general: { ...defaultSettings.general, ...settingsData.general },
-        stashdb: { ...defaultSettings.stashdb, ...settingsData.stashdb },
-        prowlarr: { ...defaultSettings.prowlarr, ...settingsData.prowlarr },
-        qbittorrent: { ...defaultSettings.qbittorrent, ...settingsData.qbittorrent },
-        ai: { ...defaultSettings.ai, ...settingsData.ai },
+        ...DEFAULT_SETTINGS,
+        ...data,
+        general: { ...DEFAULT_SETTINGS.general, ...(data.general || {}) },
+        fileManagement: { ...DEFAULT_SETTINGS.fileManagement, ...(data.fileManagement || {}) },
+        stashdb: { ...DEFAULT_SETTINGS.stashdb, ...(data.stashdb || {}) },
+        tpdb: { ...DEFAULT_SETTINGS.tpdb, ...(data.tpdb || {}) },
+        metadata: { ...DEFAULT_SETTINGS.metadata, ...(data.metadata || {}) },
+        prowlarr: { ...DEFAULT_SETTINGS.prowlarr, ...(data.prowlarr || {}) },
+        qbittorrent: { ...DEFAULT_SETTINGS.qbittorrent, ...(data.qbittorrent || {}) },
+        ai: { ...DEFAULT_SETTINGS.ai, ...(data.ai || {}) },
+        jobs: { ...DEFAULT_SETTINGS.jobs, ...(data.jobs || {}) },
       });
     }
   }, [settingsData]);
@@ -127,9 +68,21 @@ export default function SettingsPage() {
     updateSettings.mutate(settings);
   };
 
-  const handleTestConnection = (service: "stashdb" | "prowlarr" | "qbittorrent") => {
+  const handleTestConnection = (service: "stashdb" | "tpdb" | "prowlarr" | "qbittorrent") => {
     toast.info(`Testing ${service} connection...`);
-    testConnection.mutate(service);
+
+    // For TPDB, send current config in the request body
+    if (service === "tpdb") {
+      testConnection.mutate({
+        service,
+        config: {
+          apiUrl: settings.tpdb.apiUrl,
+          apiKey: settings.tpdb.apiKey,
+        },
+      });
+    } else {
+      testConnection.mutate({ service });
+    }
   };
 
   if (isLoading) {
@@ -161,7 +114,7 @@ export default function SettingsPage() {
         <TabsList>
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="quality">Quality Profiles</TabsTrigger>
-          <TabsTrigger value="stashdb">StashDB</TabsTrigger>
+          <TabsTrigger value="metadata">Metadata</TabsTrigger>
           <TabsTrigger value="prowlarr">Prowlarr</TabsTrigger>
           <TabsTrigger value="qbittorrent">qBittorrent</TabsTrigger>
           <TabsTrigger value="ai">AI Matching</TabsTrigger>
@@ -287,7 +240,7 @@ export default function SettingsPage() {
 
                 <div className="flex items-center justify-between mb-4">
                   <div className="space-y-0.5">
-                    <Label htmlFor="deleteTorrentOnRemove">
+                    <Label htmlFor="autoRedownloadDeletedScenes">
                       Auto-Delete Missing Files
                     </Label>
                     <p className="text-xs text-muted-foreground">
@@ -295,14 +248,14 @@ export default function SettingsPage() {
                     </p>
                   </div>
                   <Switch
-                    id="deleteFilesOnRemove"
-                    checked={settings.general.deleteFilesOnRemove ?? false}
+                    id="autoRedownloadDeletedScenes"
+                    checked={settings.fileManagement.autoRedownloadDeletedScenes ?? false}
                     onCheckedChange={(checked) =>
                       setSettings({
                         ...settings,
-                        general: {
-                          ...settings.general,
-                          deleteFilesOnRemove: checked,
+                        fileManagement: {
+                          ...settings.fileManagement,
+                          autoRedownloadDeletedScenes: checked,
                         },
                       })
                     }
@@ -311,7 +264,7 @@ export default function SettingsPage() {
 
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
-                    <Label htmlFor="deleteTorrentOnRemove">
+                    <Label htmlFor="readdManuallyRemovedTorrents">
                       Re-add Manually Deleted Torrents
                     </Label>
                     <p className="text-xs text-muted-foreground">
@@ -319,14 +272,14 @@ export default function SettingsPage() {
                     </p>
                   </div>
                   <Switch
-                    id="deleteTorrentOnRemove"
-                    checked={settings.general.deleteTorrentOnRemove ?? true}
+                    id="readdManuallyRemovedTorrents"
+                    checked={settings.fileManagement.readdManuallyRemovedTorrents ?? false}
                     onCheckedChange={(checked) =>
                       setSettings({
                         ...settings,
-                        general: {
-                          ...settings.general,
-                          deleteTorrentOnRemove: checked,
+                        fileManagement: {
+                          ...settings.fileManagement,
+                          readdManuallyRemovedTorrents: checked,
                         },
                       })
                     }
@@ -346,79 +299,261 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
 
-        {/* StashDB Settings */}
-        <TabsContent value="stashdb" className="mt-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Database className="h-5 w-5" />
-                    StashDB Configuration
-                  </CardTitle>
-                  <CardDescription>
-                    Configure StashDB API for metadata fetching
-                  </CardDescription>
+        {/* Metadata Settings */}
+        <TabsContent value="metadata" className="mt-6">
+          <div className="space-y-6">
+            {/* Metadata Configuration */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Database className="h-5 w-5" />
+                  Metadata Configuration
+                </CardTitle>
+                <CardDescription>
+                  Configure metadata sources and lookup behavior
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="primarySource">Primary Metadata Source</Label>
+                  <Select
+                    value={settings.metadata.primarySource}
+                    onValueChange={(value: "stashdb" | "tpdb") =>
+                      setSettings({
+                        ...settings,
+                        metadata: { ...settings.metadata, primarySource: value },
+                      })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select primary source" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="tpdb">ThePornDB (TPDB)</SelectItem>
+                      <SelectItem value="stashdb">StashDB</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-muted-foreground text-xs">
+                    Primary source will be used first for metadata lookups
+                  </p>
                 </div>
-                <Switch
-                  checked={settings.stashdb.enabled}
-                  onCheckedChange={(checked) =>
-                    setSettings({
-                      ...settings,
-                      stashdb: { ...settings.stashdb, enabled: checked },
-                    })
-                  }
-                />
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="stashdbUrl">API URL</Label>
-                <Input
-                  id="stashdbUrl"
-                  value={settings.stashdb.apiUrl}
-                  onChange={(e) =>
-                    setSettings({
-                      ...settings,
-                      stashdb: { ...settings.stashdb, apiUrl: e.target.value },
-                    })
-                  }
-                  placeholder="https://stashdb.org/graphql"
-                  disabled={!settings.stashdb.enabled}
-                />
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="stashdbKey">API Key</Label>
-                <Input
-                  id="stashdbKey"
-                  type="password"
-                  value={settings.stashdb.apiKey}
-                  onChange={(e) =>
-                    setSettings({
-                      ...settings,
-                      stashdb: { ...settings.stashdb, apiKey: e.target.value },
-                    })
-                  }
-                  placeholder="Enter your StashDB API key"
-                  disabled={!settings.stashdb.enabled}
-                />
-              </div>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="enableMultiSource">Enable Multi-Source</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Fall back to secondary source if primary fails
+                    </p>
+                  </div>
+                  <Switch
+                    id="enableMultiSource"
+                    checked={settings.metadata.enableMultiSource}
+                    onCheckedChange={(checked) =>
+                      setSettings({
+                        ...settings,
+                        metadata: { ...settings.metadata, enableMultiSource: checked },
+                      })
+                    }
+                  />
+                </div>
 
-              <Button
-                onClick={() => handleTestConnection("stashdb")}
-                disabled={!settings.stashdb.enabled || testConnection.isPending}
-                variant="outline"
-              >
-                {testConnection.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                )}
-                Test Connection
-              </Button>
-            </CardContent>
-          </Card>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="hashLookupEnabled">Enable Hash Lookup</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Use OSHASH/PHASH for automatic file matching
+                    </p>
+                  </div>
+                  <Switch
+                    id="hashLookupEnabled"
+                    checked={settings.metadata.hashLookupEnabled}
+                    onCheckedChange={(checked) =>
+                      setSettings({
+                        ...settings,
+                        metadata: { ...settings.metadata, hashLookupEnabled: checked },
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="autoLinkOnMatch">Auto-Link on Match</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Automatically link entities when a match is found
+                    </p>
+                  </div>
+                  <Switch
+                    id="autoLinkOnMatch"
+                    checked={settings.metadata.autoLinkOnMatch}
+                    onCheckedChange={(checked) =>
+                      setSettings({
+                        ...settings,
+                        metadata: { ...settings.metadata, autoLinkOnMatch: checked },
+                      })
+                    }
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* TPDB Configuration */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Database className="h-5 w-5" />
+                      ThePornDB (TPDB)
+                    </CardTitle>
+                    <CardDescription>
+                      Configure TPDB API for metadata fetching
+                    </CardDescription>
+                  </div>
+                  <Switch
+                    checked={settings.tpdb.enabled}
+                    onCheckedChange={(checked) =>
+                      setSettings({
+                        ...settings,
+                        tpdb: { ...settings.tpdb, enabled: checked },
+                      })
+                    }
+                  />
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="tpdbUrl">API URL</Label>
+                  <Input
+                    id="tpdbUrl"
+                    value={settings.tpdb.apiUrl}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        tpdb: { ...settings.tpdb, apiUrl: e.target.value },
+                      })
+                    }
+                    placeholder="https://api.theporndb.net"
+                    disabled={!settings.tpdb.enabled}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="tpdbKey">API Key</Label>
+                  <Input
+                    id="tpdbKey"
+                    type="password"
+                    value={settings.tpdb.apiKey}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        tpdb: { ...settings.tpdb, apiKey: e.target.value },
+                      })
+                    }
+                    placeholder="Enter your TPDB API key"
+                    disabled={!settings.tpdb.enabled}
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    Get your API key from{" "}
+                    <a
+                      href="https://metadataapi.net"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      metadataapi.net
+                    </a>
+                  </p>
+                </div>
+
+                <Button
+                  onClick={() => handleTestConnection("tpdb")}
+                  disabled={!settings.tpdb.enabled || testConnection.isPending}
+                  variant="outline"
+                >
+                  {testConnection.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  Test Connection
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* StashDB Configuration */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Database className="h-5 w-5" />
+                      StashDB
+                    </CardTitle>
+                    <CardDescription>
+                      Configure StashDB API for metadata fetching
+                    </CardDescription>
+                  </div>
+                  <Switch
+                    checked={settings.stashdb.enabled}
+                    onCheckedChange={(checked) =>
+                      setSettings({
+                        ...settings,
+                        stashdb: { ...settings.stashdb, enabled: checked },
+                      })
+                    }
+                  />
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="stashdbUrl">API URL</Label>
+                  <Input
+                    id="stashdbUrl"
+                    value={settings.stashdb.apiUrl}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        stashdb: { ...settings.stashdb, apiUrl: e.target.value },
+                      })
+                    }
+                    placeholder="https://stashdb.org/graphql"
+                    disabled={!settings.stashdb.enabled}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="stashdbKey">API Key</Label>
+                  <Input
+                    id="stashdbKey"
+                    type="password"
+                    value={settings.stashdb.apiKey}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        stashdb: { ...settings.stashdb, apiKey: e.target.value },
+                      })
+                    }
+                    placeholder="Enter your StashDB API key"
+                    disabled={!settings.stashdb.enabled}
+                  />
+                </div>
+
+                <Button
+                  onClick={() => handleTestConnection("stashdb")}
+                  disabled={!settings.stashdb.enabled || testConnection.isPending}
+                  variant="outline"
+                >
+                  {testConnection.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  Test Connection
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         {/* Prowlarr Settings */}

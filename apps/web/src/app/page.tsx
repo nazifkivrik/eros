@@ -42,8 +42,24 @@ export default function HomePage() {
 
   const recentJobs = jobs?.jobs
     ?.filter((j: any) => j.lastRun)
-    ?.sort((a: any, b: any) => new Date(b.lastRun).getTime() - new Date(a.lastRun).getTime())
+    ?.sort((a: any, b: any) => {
+      const dateA = new Date(a.lastRun || 0).getTime();
+      const dateB = new Date(b.lastRun || 0).getTime();
+      return dateB - dateA;
+    })
     ?.slice(0, 3) || [];
+
+  // Map job names to display names
+  const getJobDisplayName = (jobName: string) => {
+    const nameMap: Record<string, string> = {
+      "subscription-search": "Subscription Search",
+      "metadata-refresh": "Metadata Refresh",
+      "torrent-monitor": "Torrent Monitor",
+      "cleanup": "Cleanup",
+      "hash-generation": "Hash Generation",
+    };
+    return nameMap[jobName] || jobName;
+  };
 
   return (
     <div className="space-y-8">
@@ -236,11 +252,13 @@ export default function HomePage() {
                         <CheckCircle2 className="h-5 w-5 text-green-500" />
                       ) : job.status === "running" ? (
                         <Clock className="h-5 w-5 text-blue-500 animate-spin" />
+                      ) : job.status === "failed" ? (
+                        <Play className="h-5 w-5 text-red-500" />
                       ) : (
                         <Play className="h-5 w-5 text-muted-foreground" />
                       )}
                       <div>
-                        <p className="text-sm font-medium">{job.name}</p>
+                        <p className="text-sm font-medium">{getJobDisplayName(job.name)}</p>
                         <p className="text-xs text-muted-foreground">
                           Last run: {formatDistanceToNow(new Date(job.lastRun), { addSuffix: true })}
                         </p>
@@ -250,6 +268,7 @@ export default function HomePage() {
                       variant={
                         job.status === "completed" ? "default" :
                         job.status === "running" ? "secondary" :
+                        job.status === "failed" ? "destructive" :
                         "outline"
                       }
                       className={job.status === "completed" ? "bg-green-500" : ""}
@@ -261,7 +280,7 @@ export default function HomePage() {
               </div>
             ) : (
               <p className="text-sm text-muted-foreground text-center py-8">
-                No job history available
+                No job history available yet. Jobs will appear here after they run.
               </p>
             )}
           </CardContent>

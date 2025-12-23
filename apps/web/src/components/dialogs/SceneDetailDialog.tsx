@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { useSceneDetails } from "@/hooks/useSearch";
-import { useCheckSubscription } from "@/hooks/useSubscriptions";
+import { useCheckSubscription, useDeleteSubscription } from "@/hooks/useSubscriptions";
 import {
   Dialog,
   DialogContent,
@@ -15,6 +16,7 @@ import { Separator } from "@/components/ui/separator";
 import { Calendar, Clock, Film, Link as LinkIcon, Check } from "lucide-react";
 import { ImageCarousel } from "./ImageCarousel";
 import { SubscriptionFooter } from "./SubscriptionFooter";
+import { UnsubscribeConfirmDialog } from "./UnsubscribeConfirmDialog";
 import { formatDate, formatDuration } from "@/lib/dialog-utils";
 
 interface SceneDetailDialogProps {
@@ -28,10 +30,24 @@ export function SceneDetailDialog({
   onClose,
   onSubscribe,
 }: SceneDetailDialogProps) {
+  const [showUnsubscribeDialog, setShowUnsubscribeDialog] = useState(false);
+
   const { data: scene, isLoading } = useSceneDetails(sceneId || "");
 
   const { data: subscriptionStatus, isLoading: isCheckingSubscription } =
     useCheckSubscription("scene", sceneId || "");
+
+  const deleteSubscription = useDeleteSubscription();
+
+  const handleUnsubscribe = (deleteAssociatedScenes: boolean, removeFiles: boolean) => {
+    if (subscriptionStatus?.subscription?.id) {
+      deleteSubscription.mutate({
+        id: subscriptionStatus.subscription.id,
+        deleteAssociatedScenes: deleteAssociatedScenes, // Scene is standalone, but keep parameter for consistency
+        removeFiles,
+      });
+    }
+  };
 
   return (
     <Dialog open={!!sceneId} onOpenChange={(open) => !open && onClose()}>
@@ -140,9 +156,9 @@ export function SceneDetailDialog({
                 <div>
                   <h3 className="font-medium mb-2">Tags</h3>
                   <div className="flex flex-wrap gap-2">
-                    {scene.tags.map((tag: any, idx: number) => (
+                    {scene.tags.map((tag: string, idx: number) => (
                       <Badge key={idx} variant="outline">
-                        {tag.name}
+                        {tag}
                       </Badge>
                     ))}
                   </div>
@@ -179,6 +195,7 @@ export function SceneDetailDialog({
               subscription={subscriptionStatus?.subscription}
               onClose={onClose}
               onSubscribe={() => onSubscribe(scene)}
+              onUnsubscribe={() => setShowUnsubscribeDialog(true)}
             />
           </>
         ) : (
@@ -187,6 +204,14 @@ export function SceneDetailDialog({
           </div>
         )}
       </DialogContent>
+
+      <UnsubscribeConfirmDialog
+        open={showUnsubscribeDialog}
+        onOpenChange={setShowUnsubscribeDialog}
+        entityType="scene"
+        entityName={scene?.title || "this scene"}
+        onConfirm={handleUnsubscribe}
+      />
     </Dialog>
   );
 }

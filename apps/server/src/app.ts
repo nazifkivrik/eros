@@ -9,7 +9,7 @@ import sensible from "@fastify/sensible";
 
 import databasePlugin from "./plugins/database.js";
 import authPlugin from "./plugins/auth.js";
-import stashdbPlugin from "./plugins/stashdb.js";
+import tpdbPlugin from "./plugins/tpdb.js";
 import qbittorrentPlugin from "./plugins/qbittorrent.js";
 import schedulerPlugin from "./plugins/scheduler.js";
 import aiPlugin from "./plugins/ai.js";
@@ -64,7 +64,7 @@ export async function buildApp() {
   // Register infrastructure plugins
   await app.register(databasePlugin);
   await app.register(authPlugin);
-  await app.register(stashdbPlugin);
+  await app.register(tpdbPlugin);
   await app.register(qbittorrentPlugin);
   await app.register(fileManagerPlugin);
   await app.register(schedulerPlugin);

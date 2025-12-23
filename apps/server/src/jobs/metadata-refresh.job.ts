@@ -185,121 +185,9 @@ async function refreshPerformers(
   totalTasks: number,
   baseCount: number
 ) {
-  for (let i = 0; i < performerIds.length; i++) {
-    const id = performerIds[i];
-    try {
-      // Get current performer data
-      const performer = await app.db.query.performers.findFirst({
-        where: eq(performers.id, id),
-      });
-
-      if (!performer || !performer.stashdbId) {
-        app.log.warn(`Performer ${id} not found or has no StashDB ID, skipping`);
-        continue;
-      }
-
-      // Fetch updated data from StashDB
-      const updatedData = await app.stashdb.request<{ findPerformer: any }>(
-        `query {
-          findPerformer(id: "${performer.stashdbId}") {
-            id
-            name
-            disambiguation
-            gender
-            birth_date
-            death_date
-            career_start_year
-            career_end_year
-            cup_size
-            band_size
-            waist_size
-            hip_size
-            tattoos {
-              location
-              description
-            }
-            piercings {
-              location
-              description
-            }
-            aliases
-            images {
-              url
-              width
-              height
-            }
-          }
-        }`
-      );
-
-      if (!updatedData?.findPerformer) {
-        app.log.warn(`No data returned from StashDB for performer ${performer.stashdbId}`);
-        continue;
-      }
-
-      const p = updatedData.findPerformer;
-
-      // Format body modifications to string
-      const formatBodyMods = (mods: any[]) => {
-        if (!mods || mods.length === 0) return null;
-        return mods.map((m: any) => `${m.location}${m.description ? `: ${m.description}` : ''}`).join(', ');
-      };
-
-      // Format measurements
-      const formatMeasurements = () => {
-        const parts = [];
-        if (p.cup_size || p.band_size) {
-          parts.push(`${p.cup_size || ''}${p.band_size || ''}`);
-        }
-        if (p.waist_size) parts.push(String(p.waist_size));
-        if (p.hip_size) parts.push(String(p.hip_size));
-        return parts.length > 0 ? parts.join('-') : null;
-      };
-
-      // Calculate career length
-      const careerLength = p.career_start_year && p.career_end_year
-        ? `${p.career_end_year - p.career_start_year} years`
-        : p.career_start_year
-        ? `${new Date().getFullYear() - p.career_start_year}+ years`
-        : null;
-
-      // Update performer in database
-      await app.db
-        .update(performers)
-        .set({
-          name: p.name,
-          aliases: p.aliases || [],
-          disambiguation: p.disambiguation,
-          gender: p.gender,
-          birthdate: p.birth_date,
-          deathDate: p.death_date,
-          careerStartDate: p.career_start_year ? String(p.career_start_year) : null,
-          careerEndDate: p.career_end_year ? String(p.career_end_year) : null,
-          careerLength: careerLength,
-          bio: null, // StashDB doesn't have bio
-          measurements: formatMeasurements(),
-          tattoos: formatBodyMods(p.tattoos),
-          piercings: formatBodyMods(p.piercings),
-          images: p.images || [],
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(performers.id, id));
-
-      progressService.emitProgress(
-        "metadata-refresh",
-        `Updated performer: ${performer.name}`,
-        baseCount + i + 1,
-        totalTasks,
-        { entityName: performer.name }
-      );
-      app.log.info(`Updated metadata for performer ${performer.name}`);
-    } catch (error) {
-      app.log.error(
-        { error, performerId: id },
-        `Failed to refresh metadata for performer ${id}`
-      );
-    }
-  }
+  // TPDB doesn't support performer refresh yet
+  // This functionality requires StashDB integration
+  app.log.info(`Skipping ${performerIds.length} performers (TPDB-only mode)`);
 }
 
 async function refreshStudios(
@@ -309,67 +197,9 @@ async function refreshStudios(
   totalTasks: number,
   baseCount: number
 ) {
-  for (let i = 0; i < studioIds.length; i++) {
-    const id = studioIds[i];
-    try {
-      // Get current studio data
-      const studio = await app.db.query.studios.findFirst({
-        where: eq(studios.id, id),
-      });
-
-      if (!studio || !studio.stashdbId) {
-        app.log.warn(`Studio ${id} not found or has no StashDB ID, skipping`);
-        continue;
-      }
-
-      // Fetch updated data from StashDB
-      const updatedData = await app.stashdb.request<{ findStudio: any }>(
-        `query {
-          findStudio(id: "${studio.stashdbId}") {
-            id
-            name
-            parent { id }
-            urls { url type }
-            images { url width height }
-          }
-        }`
-      );
-
-      if (!updatedData?.findStudio) {
-        app.log.warn(`No data returned from StashDB for studio ${studio.stashdbId}`);
-        continue;
-      }
-
-      const s = updatedData.findStudio;
-
-      // Update studio in database
-      await app.db
-        .update(studios)
-        .set({
-          name: s.name,
-          aliases: [], // StashDB doesn't have aliases for studios
-          parentStudioId: s.parent?.id || null,
-          images: s.images || [],
-          url: s.urls?.[0]?.url || null,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(studios.id, id));
-
-      progressService.emitProgress(
-        "metadata-refresh",
-        `Updated studio: ${studio.name}`,
-        baseCount + i + 1,
-        totalTasks,
-        { entityName: studio.name }
-      );
-      app.log.info(`Updated metadata for studio ${studio.name}`);
-    } catch (error) {
-      app.log.error(
-        { error, studioId: id },
-        `Failed to refresh metadata for studio ${id}`
-      );
-    }
-  }
+  // TPDB doesn't support studio refresh yet
+  // This functionality requires StashDB integration
+  app.log.info(`Skipping ${studioIds.length} studios (TPDB-only mode)`);
 }
 
 async function refreshScenes(
@@ -379,67 +209,88 @@ async function refreshScenes(
   totalTasks: number,
   baseCount: number
 ) {
+  const { createSettingsService } = await import("../services/settings.service.js");
+  const settingsService = createSettingsService(app.db);
+  const settings = await settingsService.getSettings();
+
   for (let i = 0; i < sceneIds.length; i++) {
     const id = sceneIds[i];
     try {
-      // Get current scene data
+      // Get current scene data with file hashes
       const scene = await app.db.query.scenes.findFirst({
         where: eq(scenes.id, id),
+        with: {
+          sceneFiles: {
+            with: {
+              fileHashes: true,
+            },
+          },
+        },
       });
 
-      if (!scene || !scene.stashdbId) {
-        app.log.warn(`Scene ${id} not found or has no StashDB ID, skipping`);
+      if (!scene) {
+        app.log.warn(`Scene ${id} not found, skipping`);
         continue;
       }
 
-      // Fetch updated data from StashDB
-      const updatedData = await app.stashdb.request<{ findScene: any }>(
-        `query {
-          findScene(id: "${scene.stashdbId}") {
-            id
-            title
-            date
-            details
-            duration
-            director
-            code
-            urls { url type }
-            images { url width height }
-          }
-        }`
-      );
+      let metadata: any = null;
+      let source: "tpdb" | "stashdb" | null = null;
 
-      if (!updatedData?.findScene) {
-        app.log.warn(`No data returned from StashDB for scene ${scene.stashdbId}`);
+      // STRATEGY 1: Hash-based lookup (TPDB only, most accurate)
+      if (settings.metadata.hashLookupEnabled && settings.tpdb.enabled && app.tpdb) {
+        metadata = await tryHashLookup(app, scene);
+        if (metadata) {
+          source = "tpdb";
+          app.log.info({ sceneId: id, method: "hash" }, "Found metadata via hash");
+        }
+      }
+
+      // STRATEGY 2: Use existing ID to refresh (subscribed scenes)
+      if (!metadata) {
+        if (scene.tpdbId && settings.tpdb.enabled && app.tpdb) {
+          const contentType = scene.tpdbContentType || "scene";
+          metadata = await app.tpdb.getSceneById(scene.tpdbId, contentType);
+          source = "tpdb";
+        }
+        // StashDB support removed - TPDB-only mode
+      }
+
+      if (!metadata) {
+        app.log.warn(`No metadata found for scene ${id}`);
         continue;
       }
 
-      const sc = updatedData.findScene;
+      // Update scene with metadata
+      const updateData: any = {
+        title: metadata.title,
+        date: metadata.date,
+        details: metadata.details,
+        duration: metadata.duration,
+        director: metadata.director,
+        code: metadata.code,
+        urls: metadata.urls || [],
+        images: metadata.images || [],
+        hasMetadata: true,
+        updatedAt: new Date().toISOString(),
+      };
 
-      // Update scene in database
-      await app.db
-        .update(scenes)
-        .set({
-          title: sc.title,
-          date: sc.date,
-          details: sc.details,
-          duration: sc.duration,
-          director: sc.director,
-          code: sc.code,
-          urls: sc.urls?.map((u: any) => u.url) || [],
-          images: sc.images || [],
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(scenes.id, id));
+      if (source === "tpdb") {
+        updateData.tpdbId = metadata.id || metadata.tpdbId;
+        updateData.tpdbContentType = metadata.tpdbContentType || null;
+      } else {
+        updateData.stashdbId = metadata.id;
+      }
+
+      await app.db.update(scenes).set(updateData).where(eq(scenes.id, id));
 
       progressService.emitProgress(
         "metadata-refresh",
         `Updated scene: ${scene.title}`,
         baseCount + i + 1,
         totalTasks,
-        { entityName: scene.title }
+        { entityName: scene.title, source }
       );
-      app.log.info(`Updated metadata for scene ${scene.title}`);
+      app.log.info({ scene: scene.title, source }, `Updated metadata for scene`);
     } catch (error) {
       app.log.error(
         { error, sceneId: id },
@@ -447,4 +298,42 @@ async function refreshScenes(
       );
     }
   }
+}
+
+async function tryHashLookup(app: FastifyInstance, scene: any) {
+  if (!scene.sceneFiles || scene.sceneFiles.length === 0) return null;
+
+  for (const file of scene.sceneFiles) {
+    if (!file.fileHashes || file.fileHashes.length === 0) continue;
+
+    const hashes = file.fileHashes[0];
+
+    // Try OSHASH first
+    if (hashes.oshash) {
+      try {
+        const result = await app.tpdb.getSceneByHash(hashes.oshash, "OSHASH");
+        if (result) {
+          app.log.info({ oshash: hashes.oshash, tpdbId: result.id }, "Found via OSHASH");
+          return result;
+        }
+      } catch (error) {
+        app.log.debug({ error }, "OSHASH lookup failed");
+      }
+    }
+
+    // Fallback to PHASH
+    if (hashes.phash) {
+      try {
+        const result = await app.tpdb.getSceneByHash(hashes.phash, "PHASH");
+        if (result) {
+          app.log.info({ phash: hashes.phash, tpdbId: result.id }, "Found via PHASH");
+          return result;
+        }
+      } catch (error) {
+        app.log.debug({ error }, "PHASH lookup failed");
+      }
+    }
+  }
+
+  return null;
 }

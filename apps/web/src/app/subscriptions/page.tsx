@@ -9,15 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -27,6 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useSubscriptions, useDeleteSubscription } from "@/hooks/useSubscriptions";
+import { UnsubscribeConfirmDialog } from "@/components/dialogs/UnsubscribeConfirmDialog";
 
 export default function SubscriptionsPage() {
   const [activeTab, setActiveTab] = useState("performers");
@@ -56,11 +48,12 @@ export default function SubscriptionsPage() {
     setUnsubscribeDialog({ open: true, subscription });
   };
 
-  const handleConfirmUnsubscribe = (deleteAssociatedScenes: boolean) => {
+  const handleConfirmUnsubscribe = (deleteAssociatedScenes: boolean, removeFiles: boolean) => {
     if (unsubscribeDialog.subscription) {
       deleteSubscription.mutate({
         id: unsubscribeDialog.subscription.id,
         deleteAssociatedScenes,
+        removeFiles,
       });
       setUnsubscribeDialog({ open: false, subscription: null });
     }
@@ -490,12 +483,14 @@ export default function SubscriptionsPage() {
               </CardContent>
             </Card>
           ) : performers.length === 0 ? (
-            <Alert>
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                No performer subscriptions yet. Search and subscribe to performers to start tracking their content.
-              </AlertDescription>
-            </Alert>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3 text-muted-foreground">
+                  <AlertCircle className="h-5 w-5" />
+                  <p>No performer subscriptions yet. Search and subscribe to performers to start tracking their content.</p>
+                </div>
+              </CardContent>
+            </Card>
           ) : (
             viewMode === "table" ? renderPerformersTable() : renderPerformersCards()
           )}
@@ -514,12 +509,14 @@ export default function SubscriptionsPage() {
               </CardContent>
             </Card>
           ) : studios.length === 0 ? (
-            <Alert>
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                No studio subscriptions yet. Search and subscribe to studios to start tracking their content.
-              </AlertDescription>
-            </Alert>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3 text-muted-foreground">
+                  <AlertCircle className="h-5 w-5" />
+                  <p>No studio subscriptions yet. Search and subscribe to studios to start tracking their content.</p>
+                </div>
+              </CardContent>
+            </Card>
           ) : (
             viewMode === "table" ? renderStudiosTable() : renderStudiosCards()
           )}
@@ -538,12 +535,14 @@ export default function SubscriptionsPage() {
               </CardContent>
             </Card>
           ) : scenes.length === 0 ? (
-            <Alert>
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                No scene subscriptions yet. Scene subscriptions are automatically created when you subscribe to performers or studios.
-              </AlertDescription>
-            </Alert>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3 text-muted-foreground">
+                  <AlertCircle className="h-5 w-5" />
+                  <p>No scene subscriptions yet. Scene subscriptions are automatically created when you subscribe to performers or studios.</p>
+                </div>
+              </CardContent>
+            </Card>
           ) : (
             viewMode === "table" ? renderScenesTable() : renderScenesCards()
           )}
@@ -551,45 +550,13 @@ export default function SubscriptionsPage() {
       </Tabs>
 
       {/* Unsubscribe Confirmation Dialog */}
-      <Dialog open={unsubscribeDialog.open} onOpenChange={(open) => !open && setUnsubscribeDialog({ open: false, subscription: null })}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Unsubscribe Confirmation</DialogTitle>
-            <DialogDescription>
-              You are about to unsubscribe from{" "}
-              <strong>{unsubscribeDialog.subscription?.entityName}</strong>.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
-            <p className="text-sm text-muted-foreground">
-              This {unsubscribeDialog.subscription?.entityType} has associated scene subscriptions.
-              Would you like to remove those as well?
-            </p>
-          </div>
-          <DialogFooter className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setUnsubscribeDialog({ open: false, subscription: null })}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => handleConfirmUnsubscribe(false)}
-              disabled={deleteSubscription.isPending}
-            >
-              Keep Scenes
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => handleConfirmUnsubscribe(true)}
-              disabled={deleteSubscription.isPending}
-            >
-              Remove All
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <UnsubscribeConfirmDialog
+        open={unsubscribeDialog.open}
+        onOpenChange={(open) => setUnsubscribeDialog({ open, subscription: null })}
+        entityType={unsubscribeDialog.subscription?.entityType || "performer"}
+        entityName={unsubscribeDialog.subscription?.entityName || "Unknown"}
+        onConfirm={handleConfirmUnsubscribe}
+      />
     </div>
   );
 }

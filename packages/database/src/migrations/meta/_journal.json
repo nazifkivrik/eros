@@ -50,6 +50,13 @@
       "when": 1765716404771,
       "tag": "0006_concerned_mephistopheles",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1766276200717,
+      "tag": "0007_lucky_blur",
+      "breakpoints": true
     }
   ]
 }

@@ -17,12 +17,7 @@ import {
 } from "@repo/database";
 import { nanoid } from "nanoid";
 import type * as schema from "@repo/database";
-import { GraphQLClient } from "graphql-request";
-import {
-  GET_PERFORMER_SCENES_QUERY,
-  GET_STUDIO_SCENES_QUERY,
-  GET_SCENE_QUERY,
-} from "./stashdb.queries.js";
+import type { TPDBService } from "./tpdb/tpdb.service.js";
 
 interface CreateSubscriptionInput {
   entityType: "performer" | "studio" | "scene";
@@ -49,215 +44,140 @@ interface Subscription {
 }
 
 export class SubscriptionService {
-  private stashdbClient: GraphQLClient | null = null;
-
-  constructor(private db: BetterSQLite3Database<typeof schema>) {
-    // Initialize StashDB client with settings from database
-    this.initializeStashDBClient();
-  }
-
-  private async initializeStashDBClient() {
-    try {
-      const { createSettingsService } = await import("./settings.service.js");
-      const settingsService = createSettingsService(this.db);
-      const settings = await settingsService.getSettings();
-
-      if (settings.stashdb.enabled && settings.stashdb.apiKey) {
-        this.stashdbClient = new GraphQLClient(settings.stashdb.apiUrl, {
-          headers: { ApiKey: settings.stashdb.apiKey },
-          requestMiddleware: (request) => {
-            return {
-              ...request,
-              signal: AbortSignal.timeout(30000), // 30 second timeout
-            };
-          },
-        });
-      } else {
-        console.warn("[SubscriptionService] StashDB not configured. Subscription functionality will be limited.");
-        this.stashdbClient = null;
-      }
-    } catch (error) {
-      console.error("[SubscriptionService] Failed to initialize StashDB client:", error);
-      this.stashdbClient = null;
-    }
-  }
+  constructor(
+    private db: BetterSQLite3Database<typeof schema>,
+    private tpdb?: TPDBService
+  ) {}
 
   /**
-   * Get local entity ID from either local ID or StashDB ID
-   * If entity doesn't exist, fetch from StashDB and create it
+   * Get local entity ID - checks local database first, then fetches from TPDB if available
    */
   private async getLocalEntityId(
     entityType: string,
     entityId: string
   ): Promise<string | null> {
     switch (entityType) {
-      case "performer":
+      case "performer": {
+        // Check local DB first by local ID
         let performer = await this.db.query.performers.findFirst({
           where: eq(performers.id, entityId),
         });
+
+        // If not found by local ID, try by TPDB ID
         if (!performer) {
           performer = await this.db.query.performers.findFirst({
-            where: eq(performers.stashdbId, entityId),
+            where: eq(performers.tpdbId, entityId),
           });
         }
 
-        // If performer doesn't exist and entityId looks like a StashDB UUID, fetch and create it
-        if (!performer && this.isUUID(entityId)) {
-          console.log(`[SubscriptionService] Performer ${entityId} not found locally, fetching from StashDB`);
-          const performerData = await this.stashdbClient?.request(
-            `query {
-              findPerformer(id: "${entityId}") {
-                id
-                name
-                disambiguation
-                gender
-                birth_date
-                death_date
-                career_start_year
-                career_end_year
-                cup_size
-                band_size
-                waist_size
-                hip_size
-                tattoos {
-                  location
-                  description
-                }
-                piercings {
-                  location
-                  description
-                }
-                aliases
-                images {
-                  url
-                  width
-                  height
-                }
+        // If still not found and TPDB is available, try fetching from TPDB
+        if (!performer && this.tpdb) {
+          try {
+            console.log(`[SubscriptionService] Performer ${entityId} not found locally, fetching from TPDB`);
+            const tpdbPerformer = await this.tpdb.getPerformerById(entityId);
+
+            if (tpdbPerformer) {
+              // Check once more if performer was created in the meantime (race condition)
+              performer = await this.db.query.performers.findFirst({
+                where: eq(performers.tpdbId, tpdbPerformer.id),
+              });
+
+              if (!performer) {
+                // Create performer in local DB
+                const localId = nanoid();
+                await this.db.insert(performers).values({
+                  id: localId,
+                  tpdbId: tpdbPerformer.id,
+                  name: tpdbPerformer.name,
+                  aliases: tpdbPerformer.aliases || [],
+                  disambiguation: tpdbPerformer.disambiguation,
+                  gender: tpdbPerformer.gender,
+                  birthdate: tpdbPerformer.birthdate,
+                  deathDate: tpdbPerformer.deathDate,
+                  careerStartDate: tpdbPerformer.careerStartDate,
+                  careerEndDate: tpdbPerformer.careerEndDate,
+                  careerLength: tpdbPerformer.careerLength,
+                  bio: tpdbPerformer.bio,
+                  measurements: tpdbPerformer.measurements,
+                  tattoos: tpdbPerformer.tattoos,
+                  piercings: tpdbPerformer.piercings,
+                  images: tpdbPerformer.images,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                });
+                console.log(`[SubscriptionService] Created performer ${tpdbPerformer.name} with ID ${localId}`);
+                return localId;
               }
-            }`
-          );
-
-          if (performerData?.findPerformer) {
-            const p = performerData.findPerformer;
-            const localId = nanoid();
-
-            // Format body modifications to string
-            const formatBodyMods = (mods: any[]) => {
-              if (!mods || mods.length === 0) return null;
-              return mods.map(m => `${m.location}${m.description ? `: ${m.description}` : ''}`).join(', ');
-            };
-
-            // Format measurements
-            const formatMeasurements = () => {
-              const parts = [];
-              if (p.cup_size || p.band_size) {
-                parts.push(`${p.cup_size || ''}${p.band_size || ''}`);
-              }
-              if (p.waist_size) parts.push(String(p.waist_size));
-              if (p.hip_size) parts.push(String(p.hip_size));
-              return parts.length > 0 ? parts.join('-') : null;
-            };
-
-            // Calculate career length
-            const careerLength = p.career_start_year && p.career_end_year
-              ? `${p.career_end_year - p.career_start_year} years`
-              : p.career_start_year
-              ? `${new Date().getFullYear() - p.career_start_year}+ years`
-              : null;
-
-            await this.db.insert(performers).values({
-              id: localId,
-              stashdbId: p.id,
-              name: p.name,
-              aliases: p.aliases || [],
-              disambiguation: p.disambiguation,
-              gender: p.gender,
-              birthdate: p.birth_date,
-              deathDate: p.death_date,
-              careerStartDate: p.career_start_year ? String(p.career_start_year) : null,
-              careerEndDate: p.career_end_year ? String(p.career_end_year) : null,
-              careerLength: careerLength,
-              bio: null, // StashDB doesn't have bio field
-              measurements: formatMeasurements(),
-              tattoos: formatBodyMods(p.tattoos),
-              piercings: formatBodyMods(p.piercings),
-              images: p.images || [],
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            });
-            console.log(`[SubscriptionService] Created performer ${p.name} with ID ${localId}`);
-            return localId;
+            }
+          } catch (error) {
+            console.error(`[SubscriptionService] Failed to fetch performer from TPDB:`, error);
           }
         }
-        return performer?.id || null;
 
-      case "studio":
+        return performer?.id || null;
+      }
+
+      case "studio": {
+        // Check local DB first by local ID
         let studio = await this.db.query.studios.findFirst({
           where: eq(studios.id, entityId),
         });
+
+        // If not found by local ID, try by TPDB ID
         if (!studio) {
           studio = await this.db.query.studios.findFirst({
-            where: eq(studios.stashdbId, entityId),
+            where: eq(studios.tpdbId, entityId),
           });
         }
 
-        // If studio doesn't exist and entityId looks like a StashDB UUID, fetch and create it
-        if (!studio && this.isUUID(entityId)) {
-          console.log(`[SubscriptionService] Studio ${entityId} not found locally, fetching from StashDB`);
-          const studioData = await this.stashdbClient?.request(
-            `query { findStudio(id: "${entityId}") { id name parent { id } urls { url type } images { url width height } }`
-          );
+        // If still not found and TPDB is available, try fetching from TPDB
+        if (!studio && this.tpdb) {
+          try {
+            console.log(`[SubscriptionService] Studio ${entityId} not found locally, fetching from TPDB`);
+            const tpdbSite = await this.tpdb.getSiteById(entityId);
 
-          if (studioData?.findStudio) {
-            const s = studioData.findStudio;
-            const localId = nanoid();
-            await this.db.insert(studios).values({
-              id: localId,
-              stashdbId: s.id,
-              name: s.name,
-              aliases: [],
-              parentStudioId: s.parent?.id || null,
-              url: s.urls?.[0]?.url || null,
-              images: s.images || [],
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            });
-            console.log(`[SubscriptionService] Created studio ${s.name} with ID ${localId}`);
-            return localId;
+            if (tpdbSite) {
+              // Check once more if studio was created in the meantime (race condition)
+              studio = await this.db.query.studios.findFirst({
+                where: eq(studios.tpdbId, tpdbSite.id),
+              });
+
+              if (!studio) {
+                // Create studio in local DB
+                const localId = nanoid();
+                await this.db.insert(studios).values({
+                  id: localId,
+                  tpdbId: tpdbSite.id,
+                  name: tpdbSite.name,
+                  aliases: tpdbSite.aliases || [],
+                  parentStudioId: tpdbSite.parentStudioId,
+                  url: tpdbSite.url,
+                  images: tpdbSite.images,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                });
+                console.log(`[SubscriptionService] Created studio ${tpdbSite.name} with ID ${localId}`);
+                return localId;
+              }
+            }
+          } catch (error) {
+            console.error(`[SubscriptionService] Failed to fetch studio from TPDB:`, error);
           }
         }
-        return studio?.id || null;
 
-      case "scene":
-        let scene = await this.db.query.scenes.findFirst({
+        return studio?.id || null;
+      }
+
+      case "scene": {
+        const scene = await this.db.query.scenes.findFirst({
           where: eq(scenes.id, entityId),
         });
-        if (!scene) {
-          scene = await this.db.query.scenes.findFirst({
-            where: eq(scenes.stashdbId, entityId),
-          });
-        }
-
-        // If scene doesn't exist and entityId looks like a StashDB UUID, fetch and create it
-        if (!scene && this.isUUID(entityId)) {
-          console.log(`[SubscriptionService] Scene ${entityId} not found locally, fetching from StashDB`);
-          await this.fetchAndSaveScene(entityId);
-
-          // After fetching, find the scene again
-          scene = await this.db.query.scenes.findFirst({
-            where: eq(scenes.stashdbId, entityId),
-          });
-        }
         return scene?.id || null;
+      }
 
       default:
         return null;
     }
-  }
-
-  private isUUID(str: string): boolean {
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    return uuidRegex.test(str);
   }
 
   /**
@@ -370,7 +290,7 @@ export class SubscriptionService {
 
   /**
    * Subscribe to all scenes of a performer or studio
-   * First fetches scenes from StashDB and saves them to database
+   * Fetches scenes from TPDB if available, then uses local database
    */
   private async subscribeToEntityScenes(
     entityType: "performer" | "studio",
@@ -386,38 +306,28 @@ export class SubscriptionService {
       `[SubscriptionService] Starting to subscribe to scenes for ${entityType} ${entityId}`
     );
 
-    // First, fetch and save scenes from StashDB
-    await this.fetchAndSaveScenesFromStashDB(entityType, entityId);
+    // First, fetch and save scenes from TPDB if available
+    if (this.tpdb) {
+      await this.fetchAndSaveScenesFromTPDB(entityType, entityId);
+    }
 
-    // Find all scenes for this entity from database
+    // Find all scenes for this entity from local database
     let entityScenes: any[] = [];
 
     if (entityType === "performer") {
-      // Get the performer - entityId could be either local ID or StashDB ID
-      let performer = await this.db.query.performers.findFirst({
+      const performer = await this.db.query.performers.findFirst({
         where: eq(performers.id, entityId),
       });
 
-      // If not found by local ID, try StashDB ID
-      if (!performer) {
-        performer = await this.db.query.performers.findFirst({
-          where: eq(performers.stashdbId, entityId),
-        });
-      }
-
       if (!performer) {
         console.log(
-          `[SubscriptionService] Performer ${entityId} not found in database (tried both local ID and StashDB ID)`
+          `[SubscriptionService] Performer ${entityId} not found in database`
         );
         return;
       }
 
       console.log(
-        `[SubscriptionService] Found performer: ${performer.name} (local ID: ${performer.id}, StashDB ID: ${performer.stashdbId})`
-      );
-
-      console.log(
-        `[SubscriptionService] Looking for scenes for performer ID: ${performer.id}`
+        `[SubscriptionService] Found performer: ${performer.name} (ID: ${performer.id})`
       );
 
       // Find scenes by performer using junction table
@@ -443,31 +353,19 @@ export class SubscriptionService {
       );
       entityScenes = entityScenes.filter(Boolean);
     } else if (entityType === "studio") {
-      // Get the studio - entityId could be either local ID or StashDB ID
-      let studio = await this.db.query.studios.findFirst({
+      const studio = await this.db.query.studios.findFirst({
         where: eq(studios.id, entityId),
       });
 
-      // If not found by local ID, try StashDB ID
-      if (!studio) {
-        studio = await this.db.query.studios.findFirst({
-          where: eq(studios.stashdbId, entityId),
-        });
-      }
-
       if (!studio) {
         console.log(
-          `[SubscriptionService] Studio ${entityId} not found in database (tried both local ID and StashDB ID)`
+          `[SubscriptionService] Studio ${entityId} not found in database`
         );
         return;
       }
 
       console.log(
-        `[SubscriptionService] Found studio: ${studio.name} (local ID: ${studio.id}, StashDB ID: ${studio.stashdbId})`
-      );
-
-      console.log(
-        `[SubscriptionService] Looking for scenes for studio ID: ${studio.id}`
+        `[SubscriptionService] Found studio: ${studio.name} (ID: ${studio.id})`
       );
 
       // Find scenes by studio using junction table
@@ -551,32 +449,297 @@ export class SubscriptionService {
       );
     }
 
-    // Also create folders for ALL scenes, including already subscribed ones
-    // This ensures folders exist even if subscription was created before
-    console.log(
-      `[SubscriptionService] Ensuring folders exist for all ${entityScenes.length} scenes (including already subscribed)`
-    );
-    for (const scene of entityScenes) {
-      try {
-        // Check if folder already exists by checking if scene has files
-        const existingFiles = await this.db.query.sceneFiles.findMany({
-          where: (sceneFiles, { eq }) => eq(sceneFiles.sceneId, scene.id),
-        });
+    // Note: We don't need a second loop to create folders for already-subscribed scenes
+    // because the first loop (lines 435-445) already handles folder creation for all
+    // new subscriptions. Any previously subscribed scenes already have their folders.
+  }
 
-        // Only create folder if no files exist (folder not created yet)
-        if (existingFiles.length === 0) {
-          console.log(
-            `[SubscriptionService] Creating missing folder for scene ${scene.id}: ${scene.title}`
-          );
-          await this.createSceneFolderForSubscription(scene.id);
-        }
-      } catch (error) {
-        console.error(
-          `[SubscriptionService] Failed to ensure folder for scene ${scene.id}:`,
-          error
-        );
-        // Continue with other scenes
+  /**
+   * Fetch scenes from TPDB and save to database
+   */
+  private async fetchAndSaveScenesFromTPDB(
+    entityType: "performer" | "studio",
+    entityId: string
+  ): Promise<void> {
+    if (!this.tpdb) {
+      return;
+    }
+
+    try {
+      // Get TPDB ID from the entity
+      let tpdbId: string | null = null;
+
+      if (entityType === "performer") {
+        const performer = await this.db.query.performers.findFirst({
+          where: eq(performers.id, entityId),
+        });
+        tpdbId = performer?.tpdbId || null;
+      } else if (entityType === "studio") {
+        const studio = await this.db.query.studios.findFirst({
+          where: eq(studios.id, entityId),
+        });
+        tpdbId = studio?.tpdbId || null;
       }
+
+      if (!tpdbId) {
+        console.log(`[SubscriptionService] No TPDB ID found for ${entityType} ${entityId}`);
+        return;
+      }
+
+      console.log(`[SubscriptionService] Fetching scenes from TPDB for ${entityType} ${tpdbId}`);
+
+      // Fetch scenes from TPDB
+      let tpdbScenes: any[] = [];
+      if (entityType === "performer") {
+        // Fetch from all content types and combine
+        const sceneTypes: Array<"scene" | "jav" | "movie"> = ["scene", "jav", "movie"];
+        const allScenes: any[] = [];
+
+        for (const contentType of sceneTypes) {
+          try {
+            console.log(`[SubscriptionService] Fetching ${contentType}s for performer ${tpdbId}...`);
+
+            // Fetch all pages for this content type
+            let page = 1;
+            let hasMore = true;
+            let totalForType = 0;
+
+            while (hasMore) {
+              const result = await this.tpdb.getPerformerScenes(tpdbId, contentType, page, false);
+
+              if (result.scenes.length === 0) {
+                console.log(`[SubscriptionService]   Page ${page}: No more ${contentType}s found`);
+                hasMore = false;
+              } else {
+                console.log(`[SubscriptionService]   Page ${page}: Found ${result.scenes.length} ${contentType}s`);
+                allScenes.push(...result.scenes);
+                totalForType += result.scenes.length;
+
+                // Use pagination metadata if available
+                if (result.pagination) {
+                  hasMore = result.pagination.hasMore;
+                  console.log(`[SubscriptionService]   Progress: ${totalForType} / ${result.pagination.total} total ${contentType}s`);
+                } else {
+                  // Fallback: if no pagination metadata, check scene count
+                  // TPDB typically returns 20 scenes per page
+                  hasMore = result.scenes.length >= 20;
+                }
+
+                page++;
+              }
+            }
+
+            if (totalForType > 0) {
+              console.log(`[SubscriptionService] ✅ Total ${contentType}s fetched: ${totalForType}`);
+            } else {
+              console.log(`[SubscriptionService] No ${contentType}s found for performer ${tpdbId}`);
+            }
+          } catch (error) {
+            console.log(`[SubscriptionService] ❌ Error fetching ${contentType}s for performer ${tpdbId}:`, error);
+          }
+        }
+
+        // Apply deduplication across all content types
+        const { deduplicateScenes } = await import("../utils/scene-deduplicator.js");
+        console.log(`[SubscriptionService] Applying deduplication to ${allScenes.length} total scenes...`);
+        tpdbScenes = deduplicateScenes(allScenes);
+        const removed = allScenes.length - tpdbScenes.length;
+        console.log(`[SubscriptionService] ✅ Deduplication complete: ${tpdbScenes.length} unique scenes (removed ${removed} duplicates/trailers)`);
+      } else {
+        // TPDB doesn't have getSiteScenes, so we skip for now
+        console.log(`[SubscriptionService] Site scenes fetching not yet implemented`);
+        return;
+      }
+
+      console.log(`[SubscriptionService] Found ${tpdbScenes.length} unique scenes from TPDB`);
+
+      // Save each scene to database
+      for (const tpdbScene of tpdbScenes) {
+        try {
+          // Advanced duplicate checking
+          let sceneId: string | null = null;
+
+          // 1. Check by tpdbId
+          const existingByTpdbId = await this.db.query.scenes.findFirst({
+            where: eq(scenes.tpdbId, tpdbScene.id),
+          });
+
+          if (existingByTpdbId) {
+            sceneId = existingByTpdbId.id;
+            console.log(`[SubscriptionService] Scene "${tpdbScene.title}" already exists (by tpdbId)`);
+          }
+
+          // 2. Check by title + date combination (very likely duplicate)
+          if (!sceneId && tpdbScene.title && tpdbScene.date) {
+            const existingByTitleDate = await this.db.query.scenes.findFirst({
+              where: and(
+                eq(scenes.title, tpdbScene.title),
+                eq(scenes.date, tpdbScene.date)
+              ),
+            });
+
+            if (existingByTitleDate) {
+              sceneId = existingByTitleDate.id;
+              console.log(`[SubscriptionService] Scene "${tpdbScene.title}" already exists (by title+date) - different tpdb_id detected!`);
+            }
+          }
+
+          // 3. Check by JAV code (for JAV content)
+          if (!sceneId && tpdbScene.tpdbContentType === 'jav' && tpdbScene.code) {
+            const baseCode = this.extractBaseStudioCode(tpdbScene.code);
+            if (baseCode) {
+              const allJavScenes = await this.db.query.scenes.findMany({
+                where: eq(scenes.tpdbContentType, 'jav'),
+              });
+
+              for (const javScene of allJavScenes) {
+                if (javScene.code) {
+                  const existingBaseCode = this.extractBaseStudioCode(javScene.code);
+                  if (existingBaseCode === baseCode) {
+                    sceneId = javScene.id;
+                    console.log(`[SubscriptionService] Scene "${tpdbScene.title}" already exists (by JAV code pattern: ${baseCode})`);
+                    break;
+                  }
+                }
+              }
+            }
+          }
+
+          // If no duplicate found, create new scene
+          if (!sceneId) {
+            sceneId = nanoid();
+            await this.db.insert(scenes).values({
+              id: sceneId,
+              tpdbId: tpdbScene.id,
+              tpdbContentType: tpdbScene.tpdbContentType,
+              title: tpdbScene.title,
+              date: tpdbScene.date,
+              details: tpdbScene.details,
+              duration: tpdbScene.duration,
+              director: tpdbScene.director,
+              code: tpdbScene.code,
+              urls: tpdbScene.urls,
+              images: tpdbScene.images,
+              hasMetadata: true,
+              inferredFromIndexers: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            });
+            console.log(`[SubscriptionService] Created scene "${tpdbScene.title}"`);
+          }
+
+          // Link the subscribed entity (performer) to the scene first
+          if (entityType === "performer") {
+            await this.db
+              .insert(performersScenes)
+              .values({
+                performerId: entityId,
+                sceneId: sceneId,
+              })
+              .onConflictDoNothing();
+          }
+
+          // Link other performers from scene to scene
+          if (tpdbScene.performers && tpdbScene.performers.length > 0) {
+            for (const tpdbPerformer of tpdbScene.performers) {
+              let performerRecord = await this.db.query.performers.findFirst({
+                where: eq(performers.tpdbId, tpdbPerformer.id),
+              });
+
+              if (!performerRecord) {
+                // Create performer if doesn't exist
+                const performerId = nanoid();
+                await this.db.insert(performers).values({
+                  id: performerId,
+                  tpdbId: tpdbPerformer.id,
+                  name: tpdbPerformer.name,
+                  aliases: [],
+                  disambiguation: tpdbPerformer.disambiguation,
+                  images: [],
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                });
+
+                performerRecord = await this.db.query.performers.findFirst({
+                  where: eq(performers.id, performerId),
+                });
+              }
+
+              if (performerRecord) {
+                // Link performer to scene
+                await this.db
+                  .insert(performersScenes)
+                  .values({
+                    performerId: performerRecord.id,
+                    sceneId: sceneId,
+                  })
+                  .onConflictDoNothing();
+              }
+            }
+          }
+
+          // Link the subscribed entity (studio) to the scene first
+          if (entityType === "studio") {
+            await this.db
+              .insert(studiosScenes)
+              .values({
+                studioId: entityId,
+                sceneId: sceneId,
+              })
+              .onConflictDoNothing();
+          }
+
+          // Link studio from scene metadata to scene
+          if (tpdbScene.studio) {
+            let studioRecord = await this.db.query.studios.findFirst({
+              where: eq(studios.tpdbId, tpdbScene.studio.id),
+            });
+
+            if (!studioRecord) {
+              // Create studio if doesn't exist
+              const studioId = nanoid();
+              await this.db.insert(studios).values({
+                id: studioId,
+                tpdbId: tpdbScene.studio.id,
+                name: tpdbScene.studio.name,
+                aliases: [],
+                images: [],
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              });
+
+              studioRecord = await this.db.query.studios.findFirst({
+                where: eq(studios.id, studioId),
+              });
+            }
+
+            if (studioRecord) {
+              // Link studio to scene
+              await this.db
+                .insert(studiosScenes)
+                .values({
+                  studioId: studioRecord.id,
+                  sceneId: sceneId,
+                })
+                .onConflictDoNothing();
+            }
+          }
+        } catch (error) {
+          console.error(
+            `[SubscriptionService] Failed to save scene ${tpdbScene.title}:`,
+            error
+          );
+          // Continue with other scenes
+        }
+      }
+
+      console.log(`[SubscriptionService] Finished fetching scenes from TPDB`);
+    } catch (error) {
+      console.error(
+        `[SubscriptionService] Failed to fetch scenes from TPDB for ${entityType} ${entityId}:`,
+        error
+      );
+      // Don't throw - continue with subscription
     }
   }
 
@@ -609,7 +772,7 @@ export class SubscriptionService {
       );
 
       // Create folder with appropriate metadata
-      if (scene.hasMetadata && scene.stashdbId) {
+      if (scene.hasMetadata) {
         // Full metadata: create folder, download poster, generate complete NFO
         const { folderPath } = await fileManagerService.setupSceneFiles(sceneId);
         console.log(
@@ -631,318 +794,6 @@ export class SubscriptionService {
     }
   }
 
-  /**
-   * Fetch scenes from StashDB and save to database
-   */
-  private async fetchAndSaveScenesFromStashDB(
-    entityType: "performer" | "studio",
-    entityId: string
-  ): Promise<void> {
-    if (!this.stashdbClient) {
-      console.log(`[SubscriptionService] StashDB client not initialized`);
-      return;
-    }
-
-    try {
-      // Get StashDB ID - entityId might be local ID or StashDB ID
-      let stashdbId = entityId;
-
-      if (entityType === "performer") {
-        const performer = await this.db.query.performers.findFirst({
-          where: eq(performers.id, entityId),
-        });
-        if (performer?.stashdbId) {
-          stashdbId = performer.stashdbId;
-        }
-      } else if (entityType === "studio") {
-        const studio = await this.db.query.studios.findFirst({
-          where: eq(studios.id, entityId),
-        });
-        if (studio?.stashdbId) {
-          stashdbId = studio.stashdbId;
-        }
-      }
-
-      // Get scene IDs from StashDB
-      let sceneIds: string[] = [];
-
-      if (entityType === "performer") {
-        console.log(
-          `[SubscriptionService] Fetching scenes from StashDB for performer ${stashdbId}`
-        );
-        const response = await this.stashdbClient.request<{
-          findPerformer: { scenes: Array<{ id: string }> };
-        }>(GET_PERFORMER_SCENES_QUERY, { id: stashdbId });
-
-        sceneIds = response.findPerformer?.scenes?.map((s) => s.id) || [];
-        console.log(
-          `[SubscriptionService] Found ${sceneIds.length} scenes in StashDB for performer`
-        );
-      } else if (entityType === "studio") {
-        console.log(
-          `[SubscriptionService] Fetching scenes from StashDB for studio ${stashdbId}`
-        );
-        const response = await this.stashdbClient.request<{
-          findStudio: { scenes: Array<{ id: string }> };
-        }>(GET_STUDIO_SCENES_QUERY, { id: stashdbId });
-
-        sceneIds = response.findStudio?.scenes?.map((s) => s.id) || [];
-        console.log(
-          `[SubscriptionService] Found ${sceneIds.length} scenes in StashDB for studio`
-        );
-      }
-
-      // Fetch and save each scene with rate limiting
-      // Process in batches of 3 to avoid overwhelming StashDB and reduce timeout risk
-      const batchSize = 3;
-      const delayBetweenBatches = 2000; // 2 seconds between batches
-
-      console.log(
-        `[SubscriptionService] Processing ${sceneIds.length} scenes in batches of ${batchSize}`
-      );
-
-      for (let i = 0; i < sceneIds.length; i += batchSize) {
-        const batch = sceneIds.slice(i, i + batchSize);
-        console.log(
-          `[SubscriptionService] Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(sceneIds.length / batchSize)}`
-        );
-
-        await Promise.all(
-          batch.map(async (sceneId) => {
-            try {
-              await this.fetchAndSaveScene(sceneId);
-            } catch (error) {
-              console.error(
-                `[SubscriptionService] Failed to fetch scene ${sceneId}:`,
-                error
-              );
-              // Continue with other scenes
-            }
-          })
-        );
-
-        // Wait between batches to avoid rate limiting
-        if (i + batchSize < sceneIds.length) {
-          console.log(
-            `[SubscriptionService] Waiting ${delayBetweenBatches}ms before next batch...`
-          );
-          await new Promise((resolve) =>
-            setTimeout(resolve, delayBetweenBatches)
-          );
-        }
-      }
-
-      console.log(
-        `[SubscriptionService] Finished processing all scene batches`
-      );
-    } catch (error) {
-      console.error(
-        `[SubscriptionService] Failed to fetch scenes from StashDB for ${entityType} ${entityId}:`,
-        error
-      );
-      // Don't throw - we want to continue even if StashDB fetch fails
-    }
-  }
-
-  /**
-   * Fetch a single scene from StashDB and save to database with retry logic
-   */
-  private async fetchAndSaveScene(sceneId: string, retries = 3): Promise<void> {
-    if (!this.stashdbClient) {
-      return;
-    }
-
-    try {
-      // Check if scene already exists
-      let existingScene = await this.db.query.scenes.findFirst({
-        where: eq(scenes.stashdbId, sceneId),
-      });
-
-      let newSceneId: string;
-
-      console.log(
-        `[SubscriptionService] Fetching scene ${sceneId} from StashDB`
-      );
-
-      // Fetch scene details from StashDB with retry logic
-      let response;
-      let lastError;
-
-      for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-          response = await this.stashdbClient.request<{
-            findScene: {
-              id: string;
-              title: string;
-              date?: string;
-              details?: string;
-              duration?: number;
-              code?: string;
-              director?: string;
-              urls: Array<{ url: string }>;
-              images: Array<{ url: string; width: number; height: number }>;
-              studio?: { id: string; name: string };
-              performers: Array<{
-                performer: {
-                  id: string;
-                  name: string;
-                  disambiguation?: string;
-                };
-              }>;
-              tags: Array<{ id: string; name: string }>;
-            };
-          }>(GET_SCENE_QUERY, { id: sceneId });
-          break; // Success, exit retry loop
-        } catch (error) {
-          lastError = error;
-          if (attempt < retries) {
-            const delay = attempt * 2000; // Exponential backoff: 2s, 4s, 6s
-            console.log(
-              `[SubscriptionService] Retry ${attempt}/${retries} for scene ${sceneId} after ${delay}ms...`
-            );
-            await new Promise((resolve) => setTimeout(resolve, delay));
-          } else {
-            throw error; // Max retries reached
-          }
-        }
-      }
-
-      if (!response) {
-        throw lastError || new Error("Failed to fetch scene after retries");
-      }
-
-      const sceneData = response.findScene;
-
-      if (!sceneData) {
-        return;
-      }
-
-      // Create scene record if it doesn't exist
-      if (existingScene) {
-        console.log(
-          `[SubscriptionService] Scene "${sceneData.title}" already exists, updating relationships only`
-        );
-        newSceneId = existingScene.id;
-      } else {
-        newSceneId = nanoid();
-        console.log(
-          `[SubscriptionService] Saving scene "${sceneData.title}" to database`
-        );
-        await this.db.insert(scenes).values({
-          id: newSceneId,
-          stashdbId: sceneData.id,
-          title: sceneData.title,
-          date: sceneData.date || null,
-          details: sceneData.details || null,
-          duration: sceneData.duration || null,
-          code: sceneData.code || null,
-          director: sceneData.director || null,
-          urls: sceneData.urls.map((u) => u.url),
-          images: sceneData.images.map((img) => ({
-            url: img.url,
-            width: img.width,
-            height: img.height,
-          })),
-          hasMetadata: true,
-          inferredFromIndexers: false,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
-      }
-
-      // Link performers to scene
-      if (sceneData.performers && sceneData.performers.length > 0) {
-        for (const p of sceneData.performers) {
-          // Ensure performer exists in database
-          let performer = await this.db.query.performers.findFirst({
-            where: eq(performers.stashdbId, p.performer.id),
-          });
-
-          if (!performer) {
-            // Create performer if doesn't exist
-            const performerId = nanoid();
-            await this.db.insert(performers).values({
-              id: performerId,
-              stashdbId: p.performer.id,
-              name: p.performer.name,
-              aliases: [],
-              disambiguation: p.performer.disambiguation || null,
-              gender: null,
-              birthdate: null,
-              deathDate: null,
-              careerStartDate: null,
-              careerEndDate: null,
-              images: [],
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            });
-
-            performer = await this.db.query.performers.findFirst({
-              where: eq(performers.id, performerId),
-            });
-          }
-
-          if (performer) {
-            // Link performer to scene
-            console.log(
-              `[SubscriptionService] Linking performer ${performer.id} (${p.performer.name}) to scene ${newSceneId}`
-            );
-            await this.db
-              .insert(performersScenes)
-              .values({
-                performerId: performer.id,
-                sceneId: newSceneId,
-              })
-              .onConflictDoNothing();
-          }
-        }
-      }
-
-      // Link studio to scene
-      if (sceneData.studio) {
-        let studio = await this.db.query.studios.findFirst({
-          where: eq(studios.stashdbId, sceneData.studio.id),
-        });
-
-        if (!studio) {
-          // Create studio if doesn't exist
-          const studioId = nanoid();
-          await this.db.insert(studios).values({
-            id: studioId,
-            stashdbId: sceneData.studio.id,
-            name: sceneData.studio.name,
-            aliases: [],
-            parentStudioId: null,
-            images: [],
-            url: null,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          });
-
-          studio = await this.db.query.studios.findFirst({
-            where: eq(studios.id, studioId),
-          });
-        }
-
-        if (studio) {
-          // Link studio to scene
-          await this.db
-            .insert(studiosScenes)
-            .values({
-              studioId: studio.id,
-              sceneId: newSceneId,
-            })
-            .onConflictDoNothing();
-        }
-      }
-    } catch (error) {
-      console.error(
-        `Failed to fetch and save scene ${sceneId} from StashDB:`,
-        error
-      );
-      // Don't throw - continue with other scenes
-    }
-  }
 
   /**
    * Get subscription by entity
@@ -1073,10 +924,12 @@ export class SubscriptionService {
   /**
    * Delete subscription
    * For performer/studio subscriptions, optionally delete associated scene subscriptions
+   * For scene subscriptions, optionally delete scene files and folders
    */
   async deleteSubscription(
     id: string,
-    deleteAssociatedScenes: boolean = false
+    deleteAssociatedScenes: boolean = false,
+    removeFiles: boolean = false
   ): Promise<void> {
     // Get the subscription first to check if it's a performer/studio
     const subscription = await this.db.query.subscriptions.findFirst({
@@ -1108,8 +961,13 @@ export class SubscriptionService {
     }
 
     console.log(
-      `[SubscriptionService] Deleting subscription for ${subscription.entityType}: ${entityName} (subscription ID: ${id})`
+      `[SubscriptionService] Deleting subscription for ${subscription.entityType}: ${entityName} (subscription ID: ${id}, removeFiles: ${removeFiles})`
     );
+
+    // If it's a scene subscription and user wants to remove files
+    if (subscription.entityType === "scene" && removeFiles) {
+      await this.deleteSceneFilesAndFolder(subscription.entityId);
+    }
 
     // Delete the main subscription
     await this.db.delete(subscriptions).where(eq(subscriptions.id, id));
@@ -1126,17 +984,21 @@ export class SubscriptionService {
     ) {
       await this.deleteEntitySceneSubscriptions(
         subscription.entityType,
-        subscription.entityId
+        subscription.entityId,
+        removeFiles
       );
     }
   }
 
   /**
    * Delete all scene subscriptions for a performer or studio
+   * Optionally removes scene files and folders
+   * Only deletes scenes that are not subscribed through other performers/studios
    */
   private async deleteEntitySceneSubscriptions(
     entityType: "performer" | "studio",
-    entityId: string
+    entityId: string,
+    removeFiles: boolean = false
   ): Promise<void> {
     // Find all scenes for this entity
     let entityScenes: any[] = [];
@@ -1180,8 +1042,21 @@ export class SubscriptionService {
       entityScenes = entityScenes.filter(Boolean);
     }
 
-    // Delete subscriptions for each scene
+    console.log(
+      `[SubscriptionService] Processing ${entityScenes.length} scenes for ${entityType} ${entityId} (removeFiles: ${removeFiles})`
+    );
+
+    // Delete subscriptions and optionally files for each scene
     for (const scene of entityScenes) {
+      // Check if scene is subscribed through other performers/studios
+      const shouldRemoveFiles = await this.shouldRemoveSceneFiles(
+        scene.id,
+        entityType,
+        entityId,
+        removeFiles
+      );
+
+      // Delete scene subscription
       await this.db
         .delete(subscriptions)
         .where(
@@ -1190,6 +1065,110 @@ export class SubscriptionService {
             eq(subscriptions.entityId, scene.id)
           )
         );
+
+      // Remove files if requested and not shared with other subscribed entities
+      if (shouldRemoveFiles) {
+        await this.deleteSceneFilesAndFolder(scene.id);
+      }
+    }
+  }
+
+  /**
+   * Check if scene files should be removed when unsubscribing
+   * Returns true only if:
+   * - removeFiles is true AND
+   * - Scene is not subscribed through any other active performer/studio subscriptions
+   */
+  private async shouldRemoveSceneFiles(
+    sceneId: string,
+    excludeEntityType: "performer" | "studio",
+    excludeEntityId: string,
+    removeFiles: boolean
+  ): Promise<boolean> {
+    if (!removeFiles) {
+      return false;
+    }
+
+    // Get all performers for this scene
+    const performerRecords = await this.db.query.performersScenes.findMany({
+      where: (performersScenes, { eq }) => eq(performersScenes.sceneId, sceneId),
+    });
+
+    // Get all studios for this scene
+    const studioRecords = await this.db.query.studiosScenes.findMany({
+      where: (studiosScenes, { eq }) => eq(studiosScenes.sceneId, sceneId),
+    });
+
+    // Check if any of these performers/studios have active subscriptions (excluding the one being deleted)
+    for (const pr of performerRecords) {
+      if (excludeEntityType === "performer" && pr.performerId === excludeEntityId) {
+        continue; // Skip the performer being unsubscribed
+      }
+
+      const performerSub = await this.db.query.subscriptions.findFirst({
+        where: and(
+          eq(subscriptions.entityType, "performer"),
+          eq(subscriptions.entityId, pr.performerId)
+        ),
+      });
+
+      if (performerSub) {
+        console.log(
+          `[SubscriptionService] Scene ${sceneId} is still subscribed through performer ${pr.performerId}, keeping files`
+        );
+        return false; // Scene is subscribed through another performer
+      }
+    }
+
+    for (const sr of studioRecords) {
+      if (excludeEntityType === "studio" && sr.studioId === excludeEntityId) {
+        continue; // Skip the studio being unsubscribed
+      }
+
+      const studioSub = await this.db.query.subscriptions.findFirst({
+        where: and(
+          eq(subscriptions.entityType, "studio"),
+          eq(subscriptions.entityId, sr.studioId)
+        ),
+      });
+
+      if (studioSub) {
+        console.log(
+          `[SubscriptionService] Scene ${sceneId} is still subscribed through studio ${sr.studioId}, keeping files`
+        );
+        return false; // Scene is subscribed through another studio
+      }
+    }
+
+    // No other active subscriptions found, safe to remove files
+    return true;
+  }
+
+  /**
+   * Delete scene files and folder
+   * Uses file manager service to clean up filesystem
+   */
+  private async deleteSceneFilesAndFolder(sceneId: string): Promise<void> {
+    try {
+      const { createSettingsService } = await import("./settings.service.js");
+      const settingsService = createSettingsService(this.db);
+      const settings = await settingsService.getSettings();
+
+      const { createFileManagerService } = await import("./file-manager.service.js");
+      const fileManagerService = createFileManagerService(
+        this.db,
+        settings.general.scenesPath || "/media/scenes",
+        settings.general.incompletePath || "/media/incomplete"
+      );
+
+      await fileManagerService.deleteSceneFolder(sceneId, "user_deleted");
+      console.log(`[SubscriptionService] ✅ Deleted files and folder for scene ${sceneId}`);
+    } catch (error) {
+      console.error(
+        `[SubscriptionService] Failed to delete files for scene ${sceneId}:`,
+        error
+      );
+      // Don't throw - we want to continue with subscription deletion even if file deletion fails
     }
   }
 
@@ -1247,81 +1226,51 @@ export class SubscriptionService {
   }
 
   /**
-   * Validate that entity exists
-   * Reserved for future validation implementation
+   * Extract base studio code from JAV codes
+   * Example: rebdb-957tk1 -> rebdb-957
+   */
+  private extractBaseStudioCode(code: string): string | null {
+    if (!code) return null;
+
+    const match = code.match(/^([a-zA-Z]+-\d+)/i);
+
+    if (match) {
+      return match[1].toLowerCase();
+    }
+
+    return null;
+  }
+
+  /**
+   * Validate that entity exists in local database
    */
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async _validateEntity(
     entityType: string,
     entityId: string
   ): Promise<void> {
-    // Entity ID can be either a local ID or a StashDB ID
-    // Check both possibilities
-
     let exists = false;
 
     switch (entityType) {
       case "performer":
-        // Check by local ID first, then by stashdbId
-        const performerById = await this.db.query.performers.findFirst({
+        const performer = await this.db.query.performers.findFirst({
           where: eq(performers.id, entityId),
         });
-
-        const performerByStashId = await this.db.query.performers.findFirst({
-          where: eq(performers.stashdbId, entityId),
-        });
-
-        exists = !!(performerById || performerByStashId);
-
-        // If not found, check if it's a valid UUID (StashDB ID)
-        // Accept it as valid - it will be fetched from StashDB when needed
-        if (!exists) {
-          const uuidRegex =
-            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-          if (uuidRegex.test(entityId)) {
-            exists = true; // Assume it's a valid StashDB ID
-          }
-        }
+        exists = !!performer;
         break;
 
       case "studio":
-        const studioById = await this.db.query.studios.findFirst({
+        const studio = await this.db.query.studios.findFirst({
           where: eq(studios.id, entityId),
         });
-
-        const studioByStashId = await this.db.query.studios.findFirst({
-          where: eq(studios.stashdbId, entityId),
-        });
-
-        exists = !!(studioById || studioByStashId);
-
-        if (!exists) {
-          const uuidRegex =
-            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-          if (uuidRegex.test(entityId)) {
-            exists = true;
-          }
-        }
+        exists = !!studio;
         break;
 
       case "scene":
-        const sceneById = await this.db.query.scenes.findFirst({
+        const scene = await this.db.query.scenes.findFirst({
           where: eq(scenes.id, entityId),
         });
-
-        const sceneByStashId = await this.db.query.scenes.findFirst({
-          where: eq(scenes.stashdbId, entityId),
-        });
-
-        exists = !!(sceneById || sceneByStashId);
-
-        if (!exists) {
-          const uuidRegex =
-            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-          if (uuidRegex.test(entityId)) {
-            exists = true;
-          }
-        }
+        exists = !!scene;
         break;
 
       default:
@@ -1399,7 +1348,6 @@ export class SubscriptionService {
 
 // Export factory function
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createSubscriptionService(db: any) {
-  return new SubscriptionService(db);
+export function createSubscriptionService(db: any, tpdb?: TPDBService) {
+  return new SubscriptionService(db, tpdb);
 }
-// Test comment

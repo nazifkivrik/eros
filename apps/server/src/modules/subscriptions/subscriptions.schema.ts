@@ -64,6 +64,7 @@ export const CheckSubscriptionParamsSchema = z.object({
 
 export const DeleteSubscriptionQuerySchema = z.object({
   deleteAssociatedScenes: z.coerce.boolean().optional().default(false),
+  removeFiles: z.coerce.boolean().optional().default(false),
 });
 
 export const SubscriptionListResponseSchema = z.object({

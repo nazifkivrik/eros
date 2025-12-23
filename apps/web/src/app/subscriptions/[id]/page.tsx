@@ -9,7 +9,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Dialog,
   DialogContent,
@@ -148,11 +147,14 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back
         </Button>
-        <Alert variant="destructive">
-          <AlertDescription>
-            Subscription not found
-          </AlertDescription>
-        </Alert>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3 text-destructive">
+              <Film className="h-5 w-5" />
+              <p className="font-medium">Subscription not found</p>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -749,11 +751,10 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                 </Table>
               </div>
             ) : (
-              <Alert>
-                <AlertDescription>
-                  No files found for this scene. {downloadQueue ? "Download in progress." : "This scene has not been downloaded yet."}
-                </AlertDescription>
-              </Alert>
+              <div className="flex items-center gap-3 text-muted-foreground p-4">
+                <Film className="h-5 w-5" />
+                <p>No files found for this scene. {downloadQueue ? "Download in progress." : "This scene has not been downloaded yet."}</p>
+              </div>
             )}
           </CardContent>
         </Card>

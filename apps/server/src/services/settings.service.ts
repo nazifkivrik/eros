@@ -46,6 +46,14 @@ export class SettingsService {
           ...DEFAULT_SETTINGS.stashdb,
           ...(savedSettings.stashdb || {}),
         },
+        tpdb: {
+          ...DEFAULT_SETTINGS.tpdb,
+          ...(savedSettings.tpdb || {}),
+        },
+        metadata: {
+          ...DEFAULT_SETTINGS.metadata,
+          ...(savedSettings.metadata || {}),
+        },
         prowlarr: {
           ...DEFAULT_SETTINGS.prowlarr,
           ...(savedSettings.prowlarr || {}),
@@ -90,6 +98,10 @@ export class SettingsService {
           qbittorrentCleanup: {
             ...DEFAULT_SETTINGS.jobs.qbittorrentCleanup,
             ...(savedSettings.jobs?.qbittorrentCleanup || {}),
+          },
+          hashGeneration: {
+            ...DEFAULT_SETTINGS.jobs.hashGeneration,
+            ...(savedSettings.jobs?.hashGeneration || {}),
           },
         },
       };
@@ -136,7 +148,7 @@ export class SettingsService {
    * Test connection to a service
    */
   async testConnection(
-    service: "stashdb" | "prowlarr" | "qbittorrent"
+    service: "stashdb" | "tpdb" | "prowlarr" | "qbittorrent"
   ): Promise<{ success: boolean; message: string }> {
     const settings = await this.getSettings();
 
@@ -144,6 +156,8 @@ export class SettingsService {
       switch (service) {
         case "stashdb":
           return await this.testStashDBConnection(settings.stashdb);
+        case "tpdb":
+          return await this.testTPDBConnection(settings.tpdb);
         case "prowlarr":
           return await this.testProwlarrConnection(settings.prowlarr);
         case "qbittorrent":
@@ -156,6 +170,52 @@ export class SettingsService {
         success: false,
         message: error instanceof Error ? error.message : "Connection failed",
       };
+    }
+  }
+
+  /**
+   * Test TPDB connection (wrapper)
+   */
+  private async testTPDBConnection(config: {
+    apiUrl: string;
+    apiKey: string;
+  }): Promise<{ success: boolean; message: string }> {
+    if (!config.apiUrl) {
+      return { success: false, message: "API URL is required" };
+    }
+
+    if (!config.apiKey) {
+      return { success: false, message: "API Key is required" };
+    }
+
+    try {
+      const { TPDBService } = await import("./tpdb/tpdb.service.js");
+      const tpdb = new TPDBService({ apiUrl: config.apiUrl, apiKey: config.apiKey });
+      const isConnected = await tpdb.testConnection();
+
+      if (isConnected) {
+        return { success: true, message: "Connected to TPDB successfully" };
+      } else {
+        return { success: false, message: "Failed to connect to TPDB" };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Connection failed",
+      };
+    }
+  }
+
+  /**
+   * Test TPDB connection (public method for routes)
+   */
+  async testTPDBConnectionPublic(apiUrl: string, apiKey: string): Promise<boolean> {
+    try {
+      const { TPDBService } = await import("./tpdb/tpdb.service.js");
+      const tpdb = new TPDBService({ apiUrl, apiKey });
+      return await tpdb.testConnection();
+    } catch (error) {
+      return false;
     }
   }
 

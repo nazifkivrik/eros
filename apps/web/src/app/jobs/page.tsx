@@ -5,7 +5,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import {
   Table,
@@ -27,7 +26,7 @@ const JOB_INFO = {
   },
   "metadata-refresh": {
     name: "Metadata Refresh",
-    description: "Update and fix missing metadata for scenes from StashDB",
+    description: "Update and fix missing metadata for scenes from StashDB and TPDB",
     schedule: "Daily at 2:00 AM",
   },
   "torrent-monitor": {
@@ -38,7 +37,12 @@ const JOB_INFO = {
   "cleanup": {
     name: "Cleanup",
     description: "Remove old logs and cleanup temporary files",
-    schedule: "Daily at 3:00 AM",
+    schedule: "Weekly on Sunday at 3:00 AM",
+  },
+  "hash-generation": {
+    name: "Hash Generation",
+    description: "Generate OSHASH for video files without hashes",
+    schedule: "Daily at 5:00 AM",
   },
 };
 
@@ -114,12 +118,14 @@ export default function JobsPage() {
           </CardContent>
         </Card>
       ) : !jobs?.jobs || jobs.jobs.length === 0 ? (
-        <Alert>
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            No jobs configured. Jobs will appear here once they are registered.
-          </AlertDescription>
-        </Alert>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3 text-muted-foreground">
+              <AlertCircle className="h-5 w-5" />
+              <p>No jobs configured. Jobs will appear here once they are registered.</p>
+            </div>
+          </CardContent>
+        </Card>
       ) : (
         <div className="grid grid-cols-1 gap-4">
           {Object.entries(JOB_INFO).map(([jobKey, jobInfo]) => {
@@ -201,28 +207,43 @@ export default function JobsPage() {
 
                   {/* Show completed/failed status from live events */}
                   {jobEvent?.status === "completed" && (
-                    <Alert className="mt-4">
-                      <CheckCircle2 className="h-4 w-4" />
-                      <AlertDescription>
-                        <strong>Completed:</strong> {jobEvent.message}
-                      </AlertDescription>
-                    </Alert>
+                    <div className="mt-4 flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950 p-4">
+                      <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-green-900 dark:text-green-100">
+                          Completed
+                        </p>
+                        <p className="text-sm text-green-700 dark:text-green-300 mt-1">
+                          {jobEvent.message}
+                        </p>
+                      </div>
+                    </div>
                   )}
                   {jobEvent?.status === "failed" && (
-                    <Alert variant="destructive" className="mt-4">
-                      <XCircle className="h-4 w-4" />
-                      <AlertDescription>
-                        <strong>Failed:</strong> {jobEvent.message}
-                      </AlertDescription>
-                    </Alert>
+                    <div className="mt-4 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950 p-4">
+                      <XCircle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-red-900 dark:text-red-100">
+                          Failed
+                        </p>
+                        <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+                          {jobEvent.message}
+                        </p>
+                      </div>
+                    </div>
                   )}
                   {job?.error && !jobEvent && (
-                    <Alert variant="destructive" className="mt-4">
-                      <AlertCircle className="h-4 w-4" />
-                      <AlertDescription>
-                        <strong>Error:</strong> {job.error}
-                      </AlertDescription>
-                    </Alert>
+                    <div className="mt-4 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950 p-4">
+                      <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-red-900 dark:text-red-100">
+                          Error
+                        </p>
+                        <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+                          {job.error}
+                        </p>
+                      </div>
+                    </div>
                   )}
                 </CardContent>
               </Card>
@@ -237,45 +258,54 @@ export default function JobsPage() {
           <CardHeader>
             <CardTitle>Recent Job Executions</CardTitle>
             <CardDescription>
-              History of the last 10 job runs
+              History of the latest job runs
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Job Name</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Started</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead>Result</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {jobs.jobs
-                  .filter((j: any) => j.lastRun)
-                  .slice(0, 10)
-                  .map((job: any) => (
-                    <TableRow key={job.name}>
-                      <TableCell className="font-medium">
-                        {JOB_INFO[job.name as keyof typeof JOB_INFO]?.name || job.name}
-                      </TableCell>
-                      <TableCell>{getStatusBadge(job.status)}</TableCell>
-                      <TableCell>
-                        {job.lastRun
-                          ? formatDistanceToNow(new Date(job.lastRun), { addSuffix: true })
-                          : "Never"}
-                      </TableCell>
-                      <TableCell>
-                        {job.duration ? `${job.duration}ms` : "-"}
-                      </TableCell>
-                      <TableCell className="max-w-xs truncate">
-                        {job.result || "-"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
+            {jobs.jobs.filter((j: any) => j.lastRun).length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Job Name</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Started</TableHead>
+                    <TableHead>Completed</TableHead>
+                    <TableHead>Duration</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {jobs.jobs
+                    .filter((j: any) => j.lastRun)
+                    .map((job: any) => (
+                      <TableRow key={job.name}>
+                        <TableCell className="font-medium">
+                          {JOB_INFO[job.name as keyof typeof JOB_INFO]?.name || job.name}
+                        </TableCell>
+                        <TableCell>{getStatusBadge(job.status)}</TableCell>
+                        <TableCell>
+                          {job.lastRun
+                            ? formatDistanceToNow(new Date(job.lastRun), { addSuffix: true })
+                            : "Never"}
+                        </TableCell>
+                        <TableCell>
+                          {job.completedAt
+                            ? formatDistanceToNow(new Date(job.completedAt), { addSuffix: true })
+                            : job.status === "running"
+                            ? "In progress"
+                            : "-"}
+                        </TableCell>
+                        <TableCell>
+                          {job.duration ? `${(job.duration / 1000).toFixed(2)}s` : "-"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No job history available yet. Jobs will appear here after they run.
+              </p>
+            )}
           </CardContent>
         </Card>
       )}

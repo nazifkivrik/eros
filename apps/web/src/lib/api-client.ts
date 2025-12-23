@@ -318,10 +318,14 @@ class ApiClient {
     });
   }
 
-  async deleteSubscription(id: string, deleteAssociatedScenes: boolean = false) {
+  async deleteSubscription(
+    id: string,
+    deleteAssociatedScenes: boolean = false,
+    removeFiles: boolean = false
+  ) {
     return this.request<{ success: boolean }>(`/subscriptions/${id}`, {
       method: "DELETE",
-      params: { deleteAssociatedScenes },
+      params: { deleteAssociatedScenes, removeFiles },
     });
   }
 
@@ -525,10 +529,16 @@ class ApiClient {
     });
   }
 
-  async testServiceConnection(service: "stashdb" | "prowlarr" | "qbittorrent") {
+  async testServiceConnection(
+    service: "stashdb" | "tpdb" | "prowlarr" | "qbittorrent",
+    config?: { apiUrl: string; apiKey: string }
+  ) {
     return this.request<{ success: boolean; message: string }>(
       `/settings/test/${service}`,
-      { method: "POST" }
+      {
+        method: "POST",
+        body: config ? JSON.stringify(config) : undefined
+      }
     );
   }
 }

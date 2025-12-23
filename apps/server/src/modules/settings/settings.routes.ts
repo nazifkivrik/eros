@@ -52,6 +52,17 @@ const settingsRoutes: FastifyPluginAsyncZod = async (app) => {
         app.log.info("StashDB plugin reloaded with new API key");
       }
 
+      // Reload TPDB plugin with new settings
+      if (updatedSettings.tpdb?.apiKey) {
+        const { TPDBService } = await import("../../services/tpdb/tpdb.service.js");
+        const tpdb = new TPDBService({
+          apiUrl: updatedSettings.tpdb.apiUrl || "https://api.theporndb.net",
+          apiKey: updatedSettings.tpdb.apiKey,
+        });
+        app.tpdb = tpdb;
+        app.log.info("TPDB plugin reloaded with new API key");
+      }
+
       // Reload qBittorrent plugin with new settings
       if (updatedSettings.qbittorrent?.enabled && updatedSettings.qbittorrent?.url) {
         const { QBittorrentService } = await import("../../services/qbittorrent.service.js");
@@ -97,6 +108,37 @@ const settingsRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request) => {
       const { service } = request.params;
       return await settingsService.testConnection(service);
+    }
+  );
+
+  // Test TPDB connection with provided credentials
+  app.post(
+    "/test/tpdb",
+    {
+      schema: {
+        body: z.object({
+          apiUrl: z.string().url(),
+          apiKey: z.string().min(1),
+        }),
+        response: {
+          200: z.object({
+            success: z.boolean(),
+            message: z.string(),
+          }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const { apiUrl, apiKey } = request.body;
+
+      const isConnected = await settingsService.testTPDBConnectionPublic(apiUrl, apiKey);
+
+      return reply.send({
+        success: isConnected,
+        message: isConnected
+          ? "Successfully connected to TPDB"
+          : "Failed to connect to TPDB. Check your API URL and key.",
+      });
     }
   );
 

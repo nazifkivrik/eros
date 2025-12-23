@@ -15,6 +15,7 @@ const timestamps = {
 export const performers = sqliteTable("performers", {
   id: text("id").primaryKey(),
   stashdbId: text("stashdb_id").unique(),
+  tpdbId: text("tpdb_id").unique(),
   name: text("name").notNull(),
   aliases: text("aliases", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
   disambiguation: text("disambiguation"),
@@ -39,6 +40,7 @@ export const performers = sqliteTable("performers", {
 export const studios = sqliteTable("studios", {
   id: text("id").primaryKey(),
   stashdbId: text("stashdb_id").unique(),
+  tpdbId: text("tpdb_id").unique(),
   name: text("name").notNull(),
   aliases: text("aliases", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
   parentStudioId: text("parent_studio_id"),
@@ -54,6 +56,8 @@ export const studios = sqliteTable("studios", {
 export const scenes = sqliteTable("scenes", {
   id: text("id").primaryKey(),
   stashdbId: text("stashdb_id").unique(),
+  tpdbId: text("tpdb_id").unique(),
+  tpdbContentType: text("tpdb_content_type").$type<"scene" | "jav" | "movie">(),
   title: text("title").notNull(),
   date: text("date"),
   details: text("details"),
@@ -206,6 +210,39 @@ export const sceneFiles = sqliteTable("scene_files", {
   nfoPath: text("nfo_path"),
   posterPath: text("poster_path"),
 });
+
+// File Hashes Table
+export const fileHashes = sqliteTable("file_hashes", {
+  id: text("id").primaryKey(),
+  sceneFileId: text("scene_file_id")
+    .notNull()
+    .references(() => sceneFiles.id, { onDelete: "cascade" }),
+  oshash: text("oshash"),
+  phash: text("phash"),
+  md5: text("md5"),
+  calculatedAt: text("calculated_at").notNull().default(sql`(datetime('now'))`),
+  ...timestamps,
+}, (table) => ({
+  oshashIdx: index("file_hashes_oshash_idx").on(table.oshash),
+  phashIdx: index("file_hashes_phash_idx").on(table.phash),
+  sceneFileIdx: index("file_hashes_scene_file_idx").on(table.sceneFileId),
+}));
+
+// Entity Meta Sources Table
+export const entityMetaSources = sqliteTable("entity_meta_sources", {
+  id: text("id").primaryKey(),
+  entityType: text("entity_type").$type<"performer" | "studio" | "scene">().notNull(),
+  entityId: text("entity_id").notNull(),
+  sourceType: text("source_type").$type<"stashdb" | "tpdb" | "manual">().notNull(),
+  sourceId: text("source_id").notNull(),
+  isPrimary: integer("is_primary", { mode: "boolean" }).notNull().default(false),
+  lastSyncedAt: text("last_synced_at").notNull(),
+  metadata: text("metadata", { mode: "json" }).$type<Record<string, unknown>>(),
+  ...timestamps,
+}, (table) => ({
+  entityIdx: index("entity_meta_sources_entity_idx").on(table.entityType, table.entityId),
+  sourceIdx: index("entity_meta_sources_source_idx").on(table.sourceType, table.sourceId),
+}));
 
 // Tags Table
 export const tags = sqliteTable("tags", {
@@ -373,10 +410,18 @@ export const downloadQueueRelations = relations(downloadQueue, ({ one }) => ({
   }),
 }));
 
-export const sceneFilesRelations = relations(sceneFiles, ({ one }) => ({
+export const sceneFilesRelations = relations(sceneFiles, ({ one, many }) => ({
   scene: one(scenes, {
     fields: [sceneFiles.sceneId],
     references: [scenes.id],
+  }),
+  fileHashes: many(fileHashes),
+}));
+
+export const fileHashesRelations = relations(fileHashes, ({ one }) => ({
+  sceneFile: one(sceneFiles, {
+    fields: [fileHashes.sceneFileId],
+    references: [sceneFiles.id],
   }),
 }));
 

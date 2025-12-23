@@ -27,8 +27,11 @@ export function useUpdateSettings() {
 
 export function useTestConnection() {
   return useMutation({
-    mutationFn: (service: "stashdb" | "prowlarr" | "qbittorrent") =>
-      apiClient.testServiceConnection(service),
+    mutationFn: ({ service, config }: {
+      service: "stashdb" | "tpdb" | "prowlarr" | "qbittorrent";
+      config?: { apiUrl: string; apiKey: string }
+    }) =>
+      apiClient.testServiceConnection(service, config),
     onSuccess: (data) => {
       if (data.success) {
         toast.success(data.message);

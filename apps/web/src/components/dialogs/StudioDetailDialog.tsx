@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { useStudioDetails } from "@/hooks/useSearch";
-import { useCheckSubscription } from "@/hooks/useSubscriptions";
+import { useCheckSubscription, useDeleteSubscription } from "@/hooks/useSubscriptions";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Building2, Check } from "lucide-react";
 import { ImageCarousel } from "./ImageCarousel";
 import { SubscriptionFooter } from "./SubscriptionFooter";
+import { UnsubscribeConfirmDialog } from "./UnsubscribeConfirmDialog";
 
 interface StudioDetailDialogProps {
   studioId: string | null;
@@ -26,10 +28,24 @@ export function StudioDetailDialog({
   onClose,
   onSubscribe,
 }: StudioDetailDialogProps) {
+  const [showUnsubscribeDialog, setShowUnsubscribeDialog] = useState(false);
+
   const { data: studio, isLoading } = useStudioDetails(studioId || "");
 
   const { data: subscriptionStatus, isLoading: isCheckingSubscription } =
     useCheckSubscription("studio", studioId || "");
+
+  const deleteSubscription = useDeleteSubscription();
+
+  const handleUnsubscribe = (deleteAssociatedScenes: boolean, removeFiles: boolean) => {
+    if (subscriptionStatus?.subscription?.id) {
+      deleteSubscription.mutate({
+        id: subscriptionStatus.subscription.id,
+        deleteAssociatedScenes,
+        removeFiles,
+      });
+    }
+  };
 
   return (
     <Dialog open={!!studioId} onOpenChange={(open) => !open && onClose()}>
@@ -67,7 +83,13 @@ export function StudioDetailDialog({
               />
 
               {/* Info */}
-              <div className="space-y-3">
+              <div className="space-y-4">
+                {studio.description && (
+                  <div className="text-sm text-muted-foreground">
+                    {studio.description}
+                  </div>
+                )}
+
                 {studio.url && (
                   <div className="flex items-center gap-2">
                     <Building2 className="h-4 w-4 text-muted-foreground" />
@@ -82,10 +104,17 @@ export function StudioDetailDialog({
                   </div>
                 )}
 
-                {studio.parentStudioId && (
+                {studio.parentStudioName && (
                   <div className="text-sm">
                     <span className="text-muted-foreground">Parent Studio: </span>
-                    <span className="font-medium">{studio.parentStudioId}</span>
+                    <span className="font-medium">{studio.parentStudioName}</span>
+                  </div>
+                )}
+
+                {studio.networkName && (
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Network: </span>
+                    <span className="font-medium">{studio.networkName}</span>
                   </div>
                 )}
 
@@ -109,6 +138,7 @@ export function StudioDetailDialog({
               subscription={subscriptionStatus?.subscription}
               onClose={onClose}
               onSubscribe={() => onSubscribe(studio)}
+              onUnsubscribe={() => setShowUnsubscribeDialog(true)}
             />
           </>
         ) : (
@@ -117,6 +147,14 @@ export function StudioDetailDialog({
           </div>
         )}
       </DialogContent>
+
+      <UnsubscribeConfirmDialog
+        open={showUnsubscribeDialog}
+        onOpenChange={setShowUnsubscribeDialog}
+        entityType="studio"
+        entityName={studio?.name || "this studio"}
+        onConfirm={handleUnsubscribe}
+      />
     </Dialog>
   );
 }

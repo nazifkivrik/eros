@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Select,
   SelectContent,
@@ -158,12 +157,14 @@ export default function LogsPage() {
           </CardContent>
         </Card>
       ) : logs?.data?.length === 0 ? (
-        <Alert>
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            No logs found matching the selected filters.
-          </AlertDescription>
-        </Alert>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3 text-muted-foreground">
+              <AlertCircle className="h-5 w-5" />
+              <p>No logs found matching the selected filters.</p>
+            </div>
+          </CardContent>
+        </Card>
       ) : (
         <div className="space-y-2">
           {logs?.data?.map((log: any) => (

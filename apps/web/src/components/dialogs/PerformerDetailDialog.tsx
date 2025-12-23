@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { usePerformerDetails } from "@/hooks/useSearch";
-import { useCheckSubscription } from "@/hooks/useSubscriptions";
+import { useCheckSubscription, useDeleteSubscription } from "@/hooks/useSubscriptions";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, MapPin, Users, Check } from "lucide-react";
 import { ImageCarousel } from "./ImageCarousel";
 import { SubscriptionFooter } from "./SubscriptionFooter";
+import { UnsubscribeConfirmDialog } from "./UnsubscribeConfirmDialog";
 import { formatDate } from "@/lib/dialog-utils";
 
 interface PerformerDetailDialogProps {
@@ -27,12 +29,26 @@ export function PerformerDetailDialog({
   onClose,
   onSubscribe,
 }: PerformerDetailDialogProps) {
+  const [showUnsubscribeDialog, setShowUnsubscribeDialog] = useState(false);
+
   const { data: performer, isLoading } = usePerformerDetails(
     performerId || ""
   );
 
   const { data: subscriptionStatus, isLoading: isCheckingSubscription } =
     useCheckSubscription("performer", performerId || "");
+
+  const deleteSubscription = useDeleteSubscription();
+
+  const handleUnsubscribe = (deleteAssociatedScenes: boolean, removeFiles: boolean) => {
+    if (subscriptionStatus?.subscription?.id) {
+      deleteSubscription.mutate({
+        id: subscriptionStatus.subscription.id,
+        deleteAssociatedScenes,
+        removeFiles,
+      });
+    }
+  };
 
   return (
     <Dialog open={!!performerId} onOpenChange={(open) => !open && onClose()}>
@@ -86,11 +102,17 @@ export function PerformerDetailDialog({
                   </div>
                 )}
 
-                {(performer.careerStartDate || performer.careerEndDate) && (
+                {performer.birthplace && (
                   <div className="flex items-center gap-2">
                     <MapPin className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">
-                      Career:{" "}
+                    <span className="text-sm">{performer.birthplace}</span>
+                  </div>
+                )}
+
+                {(performer.careerStartDate || performer.careerEndDate) && (
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Career: </span>
+                    <span className="font-medium">
                       {performer.careerStartDate
                         ? new Date(performer.careerStartDate).getFullYear()
                         : "?"}
@@ -103,30 +125,85 @@ export function PerformerDetailDialog({
                 )}
 
                 {performer.careerLength && (
-                  <div>
-                    <h3 className="text-sm font-medium text-muted-foreground">Career Length</h3>
-                    <p className="text-sm mt-1">{performer.careerLength}</p>
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Career Length: </span>
+                    <span className="font-medium">{performer.careerLength}</span>
+                  </div>
+                )}
+
+                {(performer.ethnicity || performer.nationality) && (
+                  <div className="text-sm">
+                    {performer.ethnicity && (
+                      <>
+                        <span className="text-muted-foreground">Ethnicity: </span>
+                        <span className="font-medium">{performer.ethnicity}</span>
+                      </>
+                    )}
+                    {performer.ethnicity && performer.nationality && <span className="mx-2">•</span>}
+                    {performer.nationality && (
+                      <>
+                        <span className="text-muted-foreground">Nationality: </span>
+                        <span className="font-medium">{performer.nationality}</span>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {(performer.hairColor || performer.eyeColor) && (
+                  <div className="text-sm">
+                    {performer.hairColor && (
+                      <>
+                        <span className="text-muted-foreground">Hair: </span>
+                        <span className="font-medium capitalize">{performer.hairColor}</span>
+                      </>
+                    )}
+                    {performer.hairColor && performer.eyeColor && <span className="mx-2">•</span>}
+                    {performer.eyeColor && (
+                      <>
+                        <span className="text-muted-foreground">Eyes: </span>
+                        <span className="font-medium capitalize">{performer.eyeColor}</span>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {(performer.height || performer.weight) && (
+                  <div className="text-sm">
+                    {performer.height && (
+                      <>
+                        <span className="text-muted-foreground">Height: </span>
+                        <span className="font-medium">{performer.height} cm</span>
+                      </>
+                    )}
+                    {performer.height && performer.weight && <span className="mx-2">•</span>}
+                    {performer.weight && (
+                      <>
+                        <span className="text-muted-foreground">Weight: </span>
+                        <span className="font-medium">{performer.weight} kg</span>
+                      </>
+                    )}
                   </div>
                 )}
 
                 {performer.measurements && (
-                  <div>
-                    <h3 className="text-sm font-medium text-muted-foreground">Measurements</h3>
-                    <p className="text-sm mt-1">{performer.measurements}</p>
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Measurements: </span>
+                    <span className="font-medium">{performer.measurements}</span>
+                    {performer.cupSize && <span className="font-medium"> ({performer.cupSize})</span>}
                   </div>
                 )}
 
                 {performer.tattoos && (
-                  <div>
-                    <h3 className="text-sm font-medium text-muted-foreground">Tattoos</h3>
-                    <p className="text-sm mt-1">{performer.tattoos}</p>
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Tattoos: </span>
+                    <span className="font-medium">{performer.tattoos}</span>
                   </div>
                 )}
 
                 {performer.piercings && (
-                  <div>
-                    <h3 className="text-sm font-medium text-muted-foreground">Piercings</h3>
-                    <p className="text-sm mt-1">{performer.piercings}</p>
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Piercings: </span>
+                    <span className="font-medium">{performer.piercings}</span>
                   </div>
                 )}
 
@@ -158,6 +235,7 @@ export function PerformerDetailDialog({
               subscription={subscriptionStatus?.subscription}
               onClose={onClose}
               onSubscribe={() => onSubscribe(performer)}
+              onUnsubscribe={() => setShowUnsubscribeDialog(true)}
             />
           </>
         ) : (
@@ -166,6 +244,14 @@ export function PerformerDetailDialog({
           </div>
         )}
       </DialogContent>
+
+      <UnsubscribeConfirmDialog
+        open={showUnsubscribeDialog}
+        onOpenChange={setShowUnsubscribeDialog}
+        entityType="performer"
+        entityName={performer?.name || "this performer"}
+        onConfirm={handleUnsubscribe}
+      />
     </Dialog>
   );
 }

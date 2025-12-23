@@ -28,6 +28,19 @@ export interface StashDBSettings {
   enabled: boolean;
 }
 
+export interface TPDBSettings {
+  apiUrl: string;
+  apiKey: string;
+  enabled: boolean;
+}
+
+export interface MetadataSettings {
+  primarySource: "stashdb" | "tpdb";
+  enableMultiSource: boolean;
+  autoLinkOnMatch: boolean;
+  hashLookupEnabled: boolean;
+}
+
 export interface ProwlarrSettings {
   apiUrl: string;
   apiKey: string;
@@ -80,12 +93,18 @@ export interface JobSchedulerSettings {
     enabled: boolean;
     schedule: string;
   };
+  hashGeneration: {
+    enabled: boolean;
+    schedule: string;
+  };
 }
 
 export interface AppSettings {
   general: GeneralSettings;
   fileManagement: FileManagementSettings;
   stashdb: StashDBSettings;
+  tpdb: TPDBSettings;
+  metadata: MetadataSettings;
   prowlarr: ProwlarrSettings;
   qbittorrent: QBittorrentSettings;
   ai: AISettings;
@@ -96,8 +115,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   general: {
     appName: "Eros",
     downloadPath: "/downloads",
-    scenesPath: "/scenes",
-    incompletePath: "/incomplete",
+    scenesPath: "/app/media/scenes",
+    incompletePath: "/app/media/incomplete",
     enableNotifications: true,
     minIndexersForMetadataLess: 2,
     groupingThreshold: 0.7, // 70% match required for truncated title merging
@@ -114,6 +133,17 @@ export const DEFAULT_SETTINGS: AppSettings = {
     apiUrl: "https://stashdb.org/graphql",
     apiKey: "",
     enabled: false,
+  },
+  tpdb: {
+    apiUrl: "https://api.theporndb.net",
+    apiKey: "",
+    enabled: false,
+  },
+  metadata: {
+    primarySource: "tpdb",
+    enableMultiSource: false,
+    autoLinkOnMatch: true,
+    hashLookupEnabled: true,
   },
   prowlarr: {
     apiUrl: "",
@@ -163,6 +193,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     qbittorrentCleanup: {
       enabled: true,
       schedule: "0 4 * * *", // Daily at 4 AM
+    },
+    hashGeneration: {
+      enabled: true,
+      schedule: "0 5 * * *", // Daily at 5 AM
     },
   },
 };

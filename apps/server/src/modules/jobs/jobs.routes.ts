@@ -19,8 +19,25 @@ const jobsRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async () => {
-      const jobs = app.scheduler.getJobs();
+      const jobs = await app.scheduler.getJobs();
       return { jobs };
+    }
+  );
+
+  // Get job history
+  app.get(
+    "/history",
+    {
+      schema: {
+        response: {
+          200: JobsListResponseSchema,
+        },
+      },
+    },
+    async (request) => {
+      const { limit } = request.query as { limit?: number };
+      const history = await app.scheduler.getJobHistory(limit || 50);
+      return { jobs: history };
     }
   );
 

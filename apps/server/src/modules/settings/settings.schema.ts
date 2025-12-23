@@ -25,6 +25,17 @@ export const SettingsSchema: z.ZodType<AppSettings> = z.object({
     apiKey: z.string(),
     enabled: z.boolean(),
   }),
+  tpdb: z.object({
+    apiUrl: z.string(),
+    apiKey: z.string(),
+    enabled: z.boolean(),
+  }),
+  metadata: z.object({
+    primarySource: z.enum(["stashdb", "tpdb"]),
+    enableMultiSource: z.boolean(),
+    autoLinkOnMatch: z.boolean(),
+    hashLookupEnabled: z.boolean(),
+  }),
   prowlarr: z.object({
     apiUrl: z.string(),
     apiKey: z.string(),
@@ -41,9 +52,47 @@ export const SettingsSchema: z.ZodType<AppSettings> = z.object({
     model: z.string(),
     threshold: z.number(),
   }),
+  jobs: z.object({
+    subscriptionSearch: z.object({
+      enabled: z.boolean(),
+      schedule: z.string(),
+    }),
+    metadataRefresh: z.object({
+      enabled: z.boolean(),
+      schedule: z.string(),
+    }),
+    torrentMonitor: z.object({
+      enabled: z.boolean(),
+      schedule: z.string(),
+    }),
+    cleanup: z.object({
+      enabled: z.boolean(),
+      schedule: z.string(),
+    }),
+    metadataDiscovery: z.object({
+      enabled: z.boolean(),
+      schedule: z.string(),
+    }),
+    missingScenesSearch: z.object({
+      enabled: z.boolean(),
+      schedule: z.string(),
+    }),
+    unifiedSync: z.object({
+      enabled: z.boolean(),
+      schedule: z.string(),
+    }),
+    qbittorrentCleanup: z.object({
+      enabled: z.boolean(),
+      schedule: z.string(),
+    }),
+    hashGeneration: z.object({
+      enabled: z.boolean(),
+      schedule: z.string(),
+    }),
+  }),
 });
 
-export const ServiceNameSchema = z.enum(["stashdb", "prowlarr", "qbittorrent"]);
+export const ServiceNameSchema = z.enum(["stashdb", "tpdb", "prowlarr", "qbittorrent"]);
 
 export const TestServiceParamsSchema = z.object({
   service: ServiceNameSchema,

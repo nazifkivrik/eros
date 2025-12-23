@@ -7,11 +7,13 @@ import { Check } from "lucide-react";
 interface SubscriptionFooterProps {
   isSubscribed: boolean;
   subscription?: {
+    id?: string;
     qualityProfile?: { name: string };
     autoDownload: boolean;
   };
   onClose: () => void;
   onSubscribe: () => void;
+  onUnsubscribe?: () => void;
 }
 
 export function SubscriptionFooter({
@@ -19,6 +21,7 @@ export function SubscriptionFooter({
   subscription,
   onClose,
   onSubscribe,
+  onUnsubscribe,
 }: SubscriptionFooterProps) {
   return (
     <DialogFooter>
@@ -31,12 +34,23 @@ export function SubscriptionFooter({
         </Button>
       )}
       {isSubscribed && subscription && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Check className="h-4 w-4 text-green-600" />
-          <span>
-            Subscribed with {subscription.qualityProfile?.name || 'profile'}
-            {subscription.autoDownload && ' - Auto Download'}
-          </span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Check className="h-4 w-4 text-green-600" />
+            <span>
+              Subscribed with {subscription.qualityProfile?.name || 'profile'}
+              {subscription.autoDownload && ' - Auto Download'}
+            </span>
+          </div>
+          {onUnsubscribe && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={onUnsubscribe}
+            >
+              Unsubscribe
+            </Button>
+          )}
         </div>
       )}
     </DialogFooter>

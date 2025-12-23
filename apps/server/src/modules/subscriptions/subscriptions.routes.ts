@@ -20,8 +20,8 @@ import {
 } from "./subscriptions.schema.js";
 
 const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
-  const appWithDb = app as FastifyInstance & { db: Database };
-  const subscriptionService = createSubscriptionService(appWithDb.db);
+  const appWithDb = app as FastifyInstance & { db: Database; tpdb?: any };
+  const subscriptionService = createSubscriptionService(appWithDb.db, appWithDb.tpdb);
 
   // Get all subscriptions
   app.get(
@@ -153,8 +153,11 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request) => {
       const { id } = request.params;
-      const { deleteAssociatedScenes } = request.query as { deleteAssociatedScenes: boolean };
-      await subscriptionService.deleteSubscription(id, deleteAssociatedScenes);
+      const { deleteAssociatedScenes, removeFiles } = request.query as {
+        deleteAssociatedScenes: boolean;
+        removeFiles: boolean;
+      };
+      await subscriptionService.deleteSubscription(id, deleteAssociatedScenes, removeFiles);
       return { success: true };
     }
   );

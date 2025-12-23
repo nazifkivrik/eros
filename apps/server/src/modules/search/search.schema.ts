@@ -9,7 +9,7 @@ export const ImageSchema = z.object({
 export const PerformerSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
-  disambiguation: z.string().nullable(),
+  disambiguation: z.string().nullable().optional(),
 });
 
 export const StudioSummarySchema = z.object({
@@ -19,31 +19,49 @@ export const StudioSummarySchema = z.object({
 
 export const PerformerSchema = z.object({
   id: z.string(),
-  stashdbId: z.string(),
+  stashdbId: z.string().nullable(),
   name: z.string(),
   aliases: z.array(z.string()),
   disambiguation: z.string().nullable(),
   gender: z.string().nullable(),
   birthdate: z.string().nullable(),
+  birthplace: z.string().nullable().optional(),
+  ethnicity: z.string().nullable().optional(),
+  nationality: z.string().nullable().optional(),
+  hairColor: z.string().nullable().optional(),
+  eyeColor: z.string().nullable().optional(),
+  height: z.union([z.number(), z.string()]).nullable().optional(),
+  weight: z.union([z.number(), z.string()]).nullable().optional(),
+  cupSize: z.string().nullable().optional(),
+  fakeBoobs: z.boolean().optional(),
   deathDate: z.string().nullable(),
   careerStartDate: z.string().nullable(),
   careerEndDate: z.string().nullable(),
+  careerLength: z.string().nullable().optional(),
+  bio: z.string().nullable().optional(),
+  measurements: z.string().nullable().optional(),
+  tattoos: z.string().nullable().optional(),
+  piercings: z.string().nullable().optional(),
   images: z.array(ImageSchema),
 });
 
 export const StudioSchema = z.object({
   id: z.string(),
-  stashdbId: z.string(),
+  stashdbId: z.string().nullable(),
   name: z.string(),
   aliases: z.array(z.string()),
   parentStudioId: z.string().nullable(),
+  parentStudioName: z.string().nullable().optional(),
+  networkId: z.string().nullable().optional(),
+  networkName: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
   images: z.array(ImageSchema),
   url: z.string().nullable(),
 });
 
 export const SceneSchema = z.object({
   id: z.string(),
-  stashdbId: z.string(),
+  stashdbId: z.string().nullable(),
   title: z.string(),
   date: z.string().nullable(),
   details: z.string().nullable(),
