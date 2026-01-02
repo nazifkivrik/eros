@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { IdParamsSchema } from "../../schemas/common.schema.js";
 
 export const LogLevelSchema = z.enum(["error", "warning", "info", "debug"]);
 
@@ -42,9 +43,7 @@ export const LogsQuerySchema = z
     return cleaned;
   });
 
-export const LogParamsSchema = z.object({
-  id: z.string(),
-});
+export const LogParamsSchema = IdParamsSchema;
 
 export const CleanupQuerySchema = z.object({
   daysToKeep: z.coerce.number().optional().default(30),
@@ -57,8 +56,4 @@ export const LogsListResponseSchema = z.object({
 
 export const CleanupResponseSchema = z.object({
   deletedCount: z.number(),
-});
-
-export const ErrorResponseSchema = z.object({
-  error: z.string(),
 });

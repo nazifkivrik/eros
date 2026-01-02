@@ -21,7 +21,10 @@ interface CreateLogInput {
 }
 
 export class LogsService {
-  constructor(private db: Database) {}
+  private db: Database;
+  constructor({ db }: { db: Database }) {
+    this.db = db;
+  }
 
   /**
    * Create a log entry
@@ -97,7 +100,7 @@ export class LogsService {
     const countQuery = this.db
       .select({ count: logs.id })
       .from(logs);
-    
+
     if (whereClause) {
       countQuery.where(whereClause);
     }
@@ -204,5 +207,5 @@ export class LogsService {
 export function createLogsService(
   db: Database
 ): LogsService {
-  return new LogsService(db);
+  return new LogsService({ db });
 }

@@ -16,11 +16,12 @@ import {
   downloadQueue,
 } from "@repo/database";
 import { nanoid } from "nanoid";
+import type { Subscription } from "@repo/shared-types";
 import type { TPDBService } from "./tpdb/tpdb.service.js";
 import { EntityResolverService } from "./entity-resolver.service.js";
 import { logger } from "../utils/logger.js";
 
-interface CreateSubscriptionInput {
+export interface CreateSubscriptionInput {
   entityType: "performer" | "studio" | "scene";
   entityId: string;
   qualityProfileId: string;
@@ -29,29 +30,16 @@ interface CreateSubscriptionInput {
   includeAliases: boolean;
 }
 
-interface Subscription {
-  id: string;
-  entityType: string;
-  entityId: string;
-  qualityProfileId: string;
-  autoDownload: boolean;
-  includeMetadataMissing: boolean;
-  includeAliases: boolean;
-  status: string;
-  monitored: boolean;
-  searchCutoffDate: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export class SubscriptionService {
   private entityResolver: EntityResolverService;
 
-  constructor(
-    private db: Database,
-    private tpdb?: TPDBService
-  ) {
-    this.entityResolver = new EntityResolverService(db, tpdb);
+  private db: Database;
+  private tpdb?: TPDBService;
+
+  constructor({ db, tpdb }: { db: Database; tpdb?: TPDBService }) {
+    this.db = db;
+    this.tpdb = tpdb;
+    this.entityResolver = new EntityResolverService({ db, tpdb });
   }
 
   /**
@@ -755,14 +743,14 @@ export class SubscriptionService {
       ),
     });
 
-    return subscription || null;
+    return subscription as Subscription | null;
   }
 
   /**
    * Get all subscriptions
    */
   async getAllSubscriptions(): Promise<Subscription[]> {
-    return await this.db.query.subscriptions.findMany();
+    return await this.db.query.subscriptions.findMany() as Subscription[];
   }
 
   /**
@@ -926,7 +914,7 @@ export class SubscriptionService {
       throw new Error("Subscription not found");
     }
 
-    return updated;
+    return updated as Subscription;
   }
 
   /**
@@ -1341,5 +1329,5 @@ export function createSubscriptionService(
   db: Database,
   tpdb?: TPDBService
 ): SubscriptionService {
-  return new SubscriptionService(db, tpdb);
+  return new SubscriptionService({ db, tpdb });
 }

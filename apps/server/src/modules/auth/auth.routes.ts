@@ -1,21 +1,28 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { eq } from "drizzle-orm";
-import argon2 from "argon2";
-import { users } from "@repo/database/schema";
+import { ErrorResponseSchema } from "../../schemas/common.schema.js";
 import {
   LoginSchema,
   LoginResponseSchema,
   LogoutResponseSchema,
   StatusResponseSchema,
-  ErrorResponseSchema,
 } from "./auth.schema.js";
 
+/**
+ * Auth Routes
+ * Pure HTTP routing - delegates to controller
+ * Clean Architecture: Route → Controller → Service → Repository
+ */
 const authRoutes: FastifyPluginAsyncZod = async (app) => {
+  // Get controller from DI container
+  const { authController } = app.container;
   // Login
   app.post(
     "/login",
     {
       schema: {
+        tags: ["auth"],
+        summary: "User login",
+        description: "Authenticate a user with username and password",
         body: LoginSchema,
         response: {
           200: LoginResponseSchema,
@@ -24,30 +31,14 @@ const authRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
-      const { username, password } = request.body;
-
-      // Find user by username
-      const user = await app.db
-        .select()
-        .from(users)
-        .where(eq(users.username, username))
-        .limit(1);
-
-      if (user.length === 0) {
-        return reply.code(401).send({ error: "Invalid username or password" });
+      try {
+        return await authController.login(request.body, request);
+      } catch (error) {
+        if (error instanceof Error && error.message === "Invalid username or password") {
+          return reply.code(401).send({ error: "Invalid username or password" });
+        }
+        throw error;
       }
-
-      // Verify password using Argon2
-      const isValidPassword = await argon2.verify(user[0].passwordHash, password);
-
-      if (!isValidPassword) {
-        return reply.code(401).send({ error: "Invalid username or password" });
-      }
-
-      request.session.authenticated = true;
-      request.session.userId = user[0].id;
-
-      return { success: true, message: "Logged in successfully" };
     }
   );
 
@@ -56,14 +47,16 @@ const authRoutes: FastifyPluginAsyncZod = async (app) => {
     "/logout",
     {
       schema: {
+        tags: ["auth"],
+        summary: "User logout",
+        description: "Destroy the current user session",
         response: {
           200: LogoutResponseSchema,
         },
       },
     },
     async (request) => {
-      await request.session.destroy();
-      return { success: true, message: "Logged out successfully" };
+      return await authController.logout(request);
     }
   );
 
@@ -72,16 +65,16 @@ const authRoutes: FastifyPluginAsyncZod = async (app) => {
     "/status",
     {
       schema: {
+        tags: ["auth"],
+        summary: "Check authentication status",
+        description: "Get the current authentication status and user ID if authenticated",
         response: {
           200: StatusResponseSchema,
         },
       },
     },
     async (request) => {
-      return {
-        authenticated: request.session.authenticated ?? false,
-        userId: request.session.userId ?? null,
-      };
+      return await authController.getStatus(request);
     }
   );
 };

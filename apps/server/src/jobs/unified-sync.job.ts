@@ -10,18 +10,15 @@
 import type { FastifyInstance } from "fastify";
 import { eq, inArray } from "drizzle-orm";
 import { downloadQueue, sceneExclusions, sceneFiles, subscriptions } from "@repo/database";
-import { createLogsService } from "../services/logs.service.js";
-import { createSettingsService } from "../services/settings.service.js";
-import { createFileManagerService } from "../services/file-manager.service.js";
 import { nanoid } from "nanoid";
 
 export async function unifiedSyncJob(app: FastifyInstance) {
   app.log.info("Starting unified sync job");
 
   try {
-    const settingsService = createSettingsService(app.db);
+    // Get services from DI container
+    const { settingsService, logsService } = app.container;
     const settings = await settingsService.getSettings();
-    const logsService = createLogsService(app.db);
 
     // Run both qBittorrent and filesystem checks
     await checkQBittorrentSync(app, settings, logsService);
@@ -42,7 +39,9 @@ async function checkQBittorrentSync(
   settings: any,
   logsService: any
 ) {
-  if (!app.qbittorrent) {
+  const { qbittorrentService } = app.container;
+
+  if (!qbittorrentService) {
     app.log.warn("qBittorrent not configured, skipping qBittorrent sync");
     return;
   }
@@ -58,7 +57,7 @@ async function checkQBittorrentSync(
   }
 
   // Get all torrents from qBittorrent
-  const torrents = await app.qbittorrent.getTorrents();
+  const torrents = await qbittorrentService.getTorrents();
   const qbitHashes = new Set(torrents.map((t) => t.hash));
 
   app.log.info(
@@ -92,7 +91,7 @@ async function checkQBittorrentSync(
         );
 
         try {
-          await app.qbittorrent.addTorrent({
+          await qbittorrentService.addTorrent({
             magnetLinks: [`magnet:?xt=urn:btih:${removed.torrentHash}`],
             category: "eros",
             paused: false,
@@ -184,14 +183,11 @@ async function checkFilesystemSync(
   settings: any,
   logsService: any
 ) {
-  const fileManager = createFileManagerService(
-    app.db,
-    settings.general.scenesPath,
-    settings.general.incompletePath
-  );
+  // Get FileManagerService from container
+  const { fileManagerService } = app.container;
 
   // Scan filesystem for missing scenes
-  const scanResult = await fileManager.scanFilesystem();
+  const scanResult = await fileManagerService.scanFilesystem();
 
   app.log.info(
     `Found ${scanResult.missingScenes.length} missing scenes in filesystem`

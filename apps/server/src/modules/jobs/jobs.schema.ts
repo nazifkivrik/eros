@@ -33,7 +33,3 @@ export const TriggerJobResponseSchema = z.object({
   success: z.boolean(),
   message: z.string(),
 });
-
-export const ErrorResponseSchema = z.object({
-  error: z.string(),
-});

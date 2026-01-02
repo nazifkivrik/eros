@@ -3,22 +3,33 @@
  * Finds the best match for a torrent title among candidate scenes
  */
 
-import type { AIMatchingService } from "../ai-matching.service";
-import type { LogsService } from "../logs.service";
+import type { AIMatchingService } from "../ai-matching.service.js";
+import type { LogsService } from "../logs.service.js";
 import {
   type MatchResult,
   type MatchSettings,
   type SceneMetadata,
   type MatchCandidate,
-} from "./match-types";
-import { TitleNormalizer } from "./title-normalizer";
-import { DateExtractor } from "./date-extractor";
+} from "./match-types.js";
+import { TitleNormalizer } from "./title-normalizer.js";
+import { DateExtractor } from "./date-extractor.js";
 
 export class SceneMatcher {
-  constructor(
-    private aiMatchingService: AIMatchingService,
-    private logsService: LogsService
-  ) {}
+  private aiMatchingService: AIMatchingService;
+  private logsService: LogsService;
+
+  constructor({
+    aiMatchingService,
+    logsService,
+  }: {
+    aiMatchingService: AIMatchingService;
+    logsService: LogsService;
+  }) {
+    this.aiMatchingService = aiMatchingService;
+    this.logsService = logsService;
+  }
+  // ... (rest of class)
+
 
   /**
    * Find the best matching scene for a torrent title
@@ -304,5 +315,5 @@ export function createSceneMatcher(
   aiMatchingService: AIMatchingService,
   logsService: LogsService
 ): SceneMatcher {
-  return new SceneMatcher(aiMatchingService, logsService);
+  return new SceneMatcher({ aiMatchingService, logsService });
 }

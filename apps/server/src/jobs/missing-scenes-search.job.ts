@@ -8,16 +8,12 @@
 import type { FastifyInstance } from "fastify";
 import { eq, and, inArray } from "drizzle-orm";
 import { scenes, performersScenes, subscriptions, downloadQueue } from "@repo/database";
-import { createLogsService } from "../services/logs.service.js";
-import { getJobProgressService } from "../services/job-progress.service.js";
-import { createQBittorrentService } from "../services/qbittorrent.service.js";
-import { createSettingsService } from "../services/settings.service.js";
-import { createProwlarrService } from "../services/prowlarr.service.js";
 import { nanoid } from "nanoid";
 
 export async function missingScenesSearchJob(app: FastifyInstance) {
-  const progressService = getJobProgressService();
-  const logsService = createLogsService(app.db);
+  // Get services from DI container
+  const { jobProgressService, logsService } = app.container;
+  const progressService = jobProgressService;
 
   app.log.info("Starting missing scenes search job");
 
@@ -145,40 +141,25 @@ export async function missingScenesSearchJob(app: FastifyInstance) {
       { sceneCount: missingScenes.length }
     );
 
-    // Step 6: Get Prowlarr settings
-    const settingsService = createSettingsService(app.db);
+    // Step 6: Get services from DI container
+    const { settingsService, prowlarrService, qbittorrentService } = app.container;
     const settings = await settingsService.getSettings();
 
-    if (!settings.prowlarr.enabled || !settings.prowlarr.apiUrl) {
+    if (!prowlarrService || !settings.prowlarr.enabled || !settings.prowlarr.apiUrl) {
       app.log.error("[MissingScenesSearch] Prowlarr not configured, aborting");
       progressService.emitFailed(
         "missing-scenes-search",
         "Prowlarr not configured",
-        { error: "Prowlarr API URL or key missing" }
+        { error: "Prowlarr API URL or key missing or service not available" }
       );
       return;
     }
 
-    const prowlarrService = createProwlarrService({
-      baseUrl: settings.prowlarr.apiUrl,
-      apiKey: settings.prowlarr.apiKey,
-    });
-
-    // Step 7: Get qBittorrent service
-    let qbittorrentService = null;
-    if (settings.qbittorrent.enabled && settings.qbittorrent.url) {
-      try {
-        qbittorrentService = createQBittorrentService({
-          url: settings.qbittorrent.url,
-          username: settings.qbittorrent.username,
-          password: settings.qbittorrent.password,
-        });
-        app.log.info("[MissingScenesSearch] qBittorrent service initialized");
-      } catch (error) {
-        app.log.error(`[MissingScenesSearch] Failed to initialize qBittorrent: ${error}`);
-      }
-    } else {
+    // Step 7: Check qBittorrent service
+    if (!qbittorrentService || !settings.qbittorrent.enabled || !settings.qbittorrent.url) {
       app.log.warn("[MissingScenesSearch] qBittorrent not configured, torrents will only be added to queue");
+    } else {
+      app.log.info("[MissingScenesSearch] qBittorrent service available");
     }
 
     // Step 8: Search each scene individually

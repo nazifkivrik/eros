@@ -30,10 +30,19 @@ export type QualityProfileItem = {
 };
 
 export class DownloadService {
-  constructor(
-    private db: Database,
-    private aiService: AIMatchingService | null = null
-  ) {}
+  private db: Database;
+  private aiMatchingService: AIMatchingService | null = null;
+
+  constructor({
+    db,
+    aiMatchingService = null,
+  }: {
+    db: Database;
+    aiMatchingService?: AIMatchingService | null;
+  }) {
+    this.db = db;
+    this.aiMatchingService = aiMatchingService;
+  }
 
   /**
    * Select best torrent based on quality profile
@@ -155,7 +164,7 @@ export class DownloadService {
     expectedTitle: string
   ): Promise<number> {
     // Use AI matching if available
-    if (this.aiService) {
+    if (this.aiMatchingService) {
       try {
         return await this.calculateMatchScoreAI(torrentTitle, expectedTitle);
       } catch (error) {
@@ -175,16 +184,16 @@ export class DownloadService {
     torrentTitle: string,
     expectedTitle: string
   ): Promise<number> {
-    if (!this.aiService) {
+    if (!this.aiMatchingService) {
       throw new Error("AI service not available");
     }
 
     // Preprocess both titles
-    const processedTorrent = this.aiService.preprocessText(torrentTitle);
-    const processedExpected = this.aiService.preprocessText(expectedTitle);
+    const processedTorrent = this.aiMatchingService.preprocessText(torrentTitle);
+    const processedExpected = this.aiMatchingService.preprocessText(expectedTitle);
 
     // Calculate semantic similarity (returns 0-1)
-    const similarity = await this.aiService.calculateSimilarity(
+    const similarity = await this.aiMatchingService.calculateSimilarity(
       processedTorrent,
       processedExpected
     );
@@ -328,7 +337,7 @@ export class DownloadService {
 
 export function createDownloadService(
   db: Database,
-  aiService: AIMatchingService | null = null
+  aiMatchingService: AIMatchingService | null = null
 ): DownloadService {
-  return new DownloadService(db, aiService);
+  return new DownloadService({ db, aiMatchingService });
 }

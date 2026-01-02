@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { IdParamsSchema } from "../../schemas/common.schema.js";
 
 export const ImageSchema = z.object({
   url: z.string(),
@@ -28,9 +29,7 @@ export const PerformerResponseSchema = z.object({
   updatedAt: z.string(),
 });
 
-export const PerformerParamsSchema = z.object({
-  id: z.string(),
-});
+export const PerformerParamsSchema = IdParamsSchema;
 
 export const PerformerListQuerySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(20),
@@ -61,12 +60,4 @@ export const UpdatePerformerSchema = z.object({
 export const PerformerListResponseSchema = z.object({
   data: z.array(PerformerResponseSchema),
   total: z.number(),
-});
-
-export const SuccessResponseSchema = z.object({
-  success: z.boolean(),
-});
-
-export const ErrorResponseSchema = z.object({
-  error: z.string(),
 });

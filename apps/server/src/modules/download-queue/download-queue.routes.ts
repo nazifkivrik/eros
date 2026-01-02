@@ -1,9 +1,9 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
-import { downloadQueue, scenes } from "@repo/database";
-import { nanoid } from "nanoid";
-import type { DownloadStatus } from "@repo/shared-types";
+import {
+  ErrorResponseSchema,
+  SuccessResponseSchema,
+} from "../../schemas/common.schema.js";
 import {
   DownloadQueueWithSceneSchema,
   AddToQueueSchema,
@@ -12,14 +12,25 @@ import {
   UnifiedDownloadSchema,
 } from "./download-queue.schema.js";
 
+/**
+ * Download Queue Routes
+ * Pure HTTP routing - delegates to controller
+ * Clean Architecture: Route → Controller → Service → Repository
+ */
 const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
+  // Get controller from DI container
+  const { downloadQueueController } = app.container;
+
   // Get all download queue items
   app.get(
     "/",
     {
       schema: {
+        tags: ["download-queue"],
+        summary: "List download queue",
+        description: "Get all download queue items, optionally filtered by status (queued, downloading, completed, failed, paused, seeding)",
         querystring: z.object({
-          status: DownloadStatusSchema.optional(),
+          status: DownloadStatusSchema.optional().describe("Filter by download status"),
         }),
         response: {
           200: z.object({
@@ -29,29 +40,7 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request) => {
-      const { status } = request.query;
-
-      const items = await app.db.query.downloadQueue.findMany({
-        where: status ? eq(downloadQueue.status, status) : undefined,
-        with: {
-          scene: {
-            columns: {
-              id: true,
-              title: true,
-              externalIds: true,
-              images: true,
-            },
-          },
-        },
-        orderBy: (downloadQueue, { desc }) => [desc(downloadQueue.addedAt)],
-      });
-
-      return {
-        data: items.map((item) => ({
-          ...item,
-          status: item.status as DownloadStatus,
-        })),
-      };
+      return await downloadQueueController.list(request.query);
     }
   );
 
@@ -60,42 +49,27 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
+        tags: ["download-queue"],
+        summary: "Get download queue item",
+        description: "Retrieve detailed information about a specific download queue item including associated scene details",
         params: z.object({
-          id: z.string(),
+          id: z.string().describe("Download queue item ID"),
         }),
         response: {
           200: DownloadQueueWithSceneSchema,
-          404: z.object({
-            error: z.string(),
-          }),
+          404: ErrorResponseSchema,
         },
       },
     },
     async (request, reply) => {
-      const { id } = request.params;
-
-      const item = await app.db.query.downloadQueue.findFirst({
-        where: eq(downloadQueue.id, id),
-        with: {
-          scene: {
-            columns: {
-              id: true,
-              title: true,
-              externalIds: true,
-              images: true,
-            },
-          },
-        },
-      });
-
-      if (!item) {
-        return reply.code(404).send({ error: "Download queue item not found" });
+      try {
+        return await downloadQueueController.getById(request.params);
+      } catch (error) {
+        if (error instanceof Error && error.message === "Download queue item not found") {
+          return reply.code(404).send({ error: error.message });
+        }
+        throw error;
       }
-
-      return {
-        ...item,
-        status: item.status as DownloadStatus,
-      };
     }
   );
 
@@ -104,97 +78,28 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
     "/",
     {
       schema: {
+        tags: ["download-queue"],
+        summary: "Add to download queue",
+        description: "Add a new scene to the download queue and optionally start downloading via qBittorrent",
         body: AddToQueueSchema,
         response: {
           201: DownloadQueueWithSceneSchema,
-          400: z.object({
-            error: z.string(),
-          }),
+          400: ErrorResponseSchema,
         },
       },
     },
     async (request, reply) => {
-      const { sceneId, title, size, seeders, quality, magnetLink } =
-        request.body;
-
-      // Check if scene exists
-      const scene = await app.db.query.scenes.findFirst({
-        where: eq(scenes.id, sceneId),
-      });
-
-      if (!scene) {
-        return reply.code(400).send({ error: "Scene not found" });
-      }
-
-      // Check if already in queue
-      const existing = await app.db.query.downloadQueue.findFirst({
-        where: and(
-          eq(downloadQueue.sceneId, sceneId),
-          eq(downloadQueue.status, "queued")
-        ),
-      });
-
-      if (existing) {
-        return reply
-          .code(400)
-          .send({ error: "Scene already in download queue" });
-      }
-
-      const id = nanoid();
-      const now = new Date().toISOString();
-
-      const newItem = {
-        id,
-        sceneId,
-        torrentHash: null,
-        title,
-        size,
-        seeders,
-        quality,
-        status: "queued" as const,
-        addedAt: now,
-        completedAt: null,
-      };
-
-      await app.db.insert(downloadQueue).values(newItem);
-
-      // If magnetLink provided, add to qBittorrent
-      if (magnetLink && app.qbittorrent) {
-        try {
-          await app.qbittorrent.addTorrent({
-            magnetLinks: [magnetLink],
-            category: "eros",
-            paused: false,
-          });
-
-          app.log.info({ sceneId, title }, "Added torrent to qBittorrent");
-        } catch (error) {
-          app.log.error(
-            { error, sceneId, title },
-            "Failed to add torrent to qBittorrent"
-          );
+      try {
+        const created = await downloadQueueController.create(request.body);
+        return reply.code(201).send(created);
+      } catch (error) {
+        if (error instanceof Error) {
+          if (error.message === "Scene not found" || error.message === "Scene already in download queue") {
+            return reply.code(400).send({ error: error.message });
+          }
         }
+        throw error;
       }
-
-      // Fetch with scene info
-      const created = await app.db.query.downloadQueue.findFirst({
-        where: eq(downloadQueue.id, id),
-        with: {
-          scene: {
-            columns: {
-              id: true,
-              title: true,
-              externalIds: true,
-              images: true,
-            },
-          },
-        },
-      });
-
-      return reply.code(201).send({
-        ...created!,
-        status: created!.status as DownloadStatus,
-      });
     }
   );
 
@@ -203,53 +108,28 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
+        tags: ["download-queue"],
+        summary: "Update download queue item",
+        description: "Update status or other properties of a download queue item",
         params: z.object({
-          id: z.string(),
+          id: z.string().describe("Download queue item ID"),
         }),
         body: UpdateQueueItemSchema,
         response: {
           200: DownloadQueueWithSceneSchema,
-          404: z.object({
-            error: z.string(),
-          }),
+          404: ErrorResponseSchema,
         },
       },
     },
     async (request, reply) => {
-      const { id } = request.params;
-      const updates = request.body;
-
-      const existing = await app.db.query.downloadQueue.findFirst({
-        where: eq(downloadQueue.id, id),
-      });
-
-      if (!existing) {
-        return reply.code(404).send({ error: "Download queue item not found" });
+      try {
+        return await downloadQueueController.update(request.params, request.body);
+      } catch (error) {
+        if (error instanceof Error && error.message === "Download queue item not found") {
+          return reply.code(404).send({ error: error.message });
+        }
+        throw error;
       }
-
-      await app.db
-        .update(downloadQueue)
-        .set(updates)
-        .where(eq(downloadQueue.id, id));
-
-      const updated = await app.db.query.downloadQueue.findFirst({
-        where: eq(downloadQueue.id, id),
-        with: {
-          scene: {
-            columns: {
-              id: true,
-              title: true,
-              externalIds: true,
-              images: true,
-            },
-          },
-        },
-      });
-
-      return {
-        ...updated!,
-        status: updated!.status as DownloadStatus,
-      };
     }
   );
 
@@ -258,56 +138,34 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
+        tags: ["download-queue"],
+        summary: "Remove from download queue",
+        description: "Remove a download queue item and optionally delete the associated torrent from qBittorrent",
         params: z.object({
-          id: z.string(),
+          id: z.string().describe("Download queue item ID"),
         }),
         querystring: z.object({
           deleteTorrent: z
             .string()
             .transform((val) => val === "true")
-            .optional(),
+            .optional()
+            .describe("Whether to also delete the torrent from qBittorrent"),
         }),
         response: {
-          200: z.object({
-            success: z.boolean(),
-          }),
-          404: z.object({
-            error: z.string(),
-          }),
+          200: SuccessResponseSchema,
+          404: ErrorResponseSchema,
         },
       },
     },
     async (request, reply) => {
-      const { id } = request.params;
-      const { deleteTorrent = false } = request.query;
-
-      const item = await app.db.query.downloadQueue.findFirst({
-        where: eq(downloadQueue.id, id),
-      });
-
-      if (!item) {
-        return reply.code(404).send({ error: "Download queue item not found" });
-      }
-
-      // Remove from qBittorrent if torrent hash exists
-      if (item.torrentHash && deleteTorrent && app.qbittorrent) {
-        try {
-          await app.qbittorrent.removeTorrent(item.torrentHash, deleteTorrent);
-          app.log.info(
-            { torrentHash: item.torrentHash },
-            "Removed torrent from qBittorrent"
-          );
-        } catch (error) {
-          app.log.error(
-            { error, torrentHash: item.torrentHash },
-            "Failed to remove torrent from qBittorrent"
-          );
+      try {
+        return await downloadQueueController.remove(request.params, request.query);
+      } catch (error) {
+        if (error instanceof Error && error.message === "Download queue item not found") {
+          return reply.code(404).send({ error: error.message });
         }
+        throw error;
       }
-
-      await app.db.delete(downloadQueue).where(eq(downloadQueue.id, id));
-
-      return { success: true };
     }
   );
 
@@ -316,44 +174,27 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id/pause",
     {
       schema: {
+        tags: ["download-queue"],
+        summary: "Pause download",
+        description: "Pause an active download in qBittorrent and update queue status",
         params: z.object({
-          id: z.string(),
+          id: z.string().describe("Download queue item ID"),
         }),
         response: {
-          200: z.object({
-            success: z.boolean(),
-          }),
-          404: z.object({
-            error: z.string(),
-          }),
+          200: SuccessResponseSchema,
+          404: ErrorResponseSchema,
         },
       },
     },
     async (request, reply) => {
-      const { id } = request.params;
-
-      const item = await app.db.query.downloadQueue.findFirst({
-        where: eq(downloadQueue.id, id),
-      });
-
-      if (!item) {
-        return reply.code(404).send({ error: "Download queue item not found" });
-      }
-
-      if (item.torrentHash && app.qbittorrent) {
-        try {
-          await app.qbittorrent.pauseTorrent(item.torrentHash);
-        } catch (error) {
-          app.log.error({ error }, "Failed to pause torrent");
+      try {
+        return await downloadQueueController.pause(request.params);
+      } catch (error) {
+        if (error instanceof Error && error.message === "Download queue item not found") {
+          return reply.code(404).send({ error: error.message });
         }
+        throw error;
       }
-
-      await app.db
-        .update(downloadQueue)
-        .set({ status: "paused" })
-        .where(eq(downloadQueue.id, id));
-
-      return { success: true };
     }
   );
 
@@ -362,6 +203,9 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
     "/unified",
     {
       schema: {
+        tags: ["download-queue"],
+        summary: "Get unified downloads",
+        description: "Get enriched download queue with real-time torrent progress, speeds, and status from qBittorrent merged with database records",
         response: {
           200: z.object({
             downloads: z.array(UnifiedDownloadSchema),
@@ -370,85 +214,7 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async () => {
-      // Get all download queue items
-      const queueItems = await app.db.query.downloadQueue.findMany({
-        with: {
-          scene: {
-            columns: {
-              id: true,
-              title: true,
-              images: true,
-            },
-            with: {
-              site: {
-                columns: {
-                  name: true,
-                },
-              },
-            },
-          },
-        },
-        orderBy: (downloadQueue, { desc }) => [desc(downloadQueue.addedAt)],
-      });
-
-      // Get torrents from qBittorrent if available
-      let torrentsMap = new Map<string, unknown>();
-      if (app.qbittorrent) {
-        try {
-          const torrents = await app.qbittorrent.getTorrents();
-          torrentsMap = new Map(torrents.map((t) => [t.hash, t]));
-        } catch (error: unknown) {
-          app.log.error({ error }, "Failed to fetch torrents from qBittorrent");
-        }
-      }
-
-      // Merge data from DB and qBittorrent
-      const unifiedDownloads = queueItems.map((item) => {
-        const torrent = item.qbitHash ? (torrentsMap.get(item.qbitHash) as Record<string, unknown> | undefined) : null;
-        const scene = item.scene;
-        const studio = scene?.site;
-
-        // Determine unified status
-        let status: DownloadStatus = item.status as DownloadStatus;
-        if (torrent) {
-          const torrentState = torrent.state as string | undefined;
-          const torrentProgress = torrent.progress as number | undefined;
-
-          if (torrentState === "pausedDL") {
-            status = "paused";
-          } else if (torrentState?.includes("DL") || torrentState === "metaDL") {
-            status = "downloading";
-          } else if (torrentState?.includes("UP") || torrentState === "uploading") {
-            status = "seeding";
-          } else if (torrentProgress !== undefined && torrentProgress >= 1.0) {
-            status = "completed";
-          }
-        }
-
-        return {
-          id: item.id,
-          sceneId: item.sceneId,
-          sceneTitle: scene?.title || item.title,
-          scenePoster: scene?.images?.[0]?.url || null,
-          sceneStudio: studio?.name || null,
-          qbitHash: item.qbitHash,
-          status,
-          progress: torrent ? (torrent.progress as number | undefined) ?? null : (item.status === "completed" ? 1 : null),
-          downloadSpeed: torrent ? (torrent.dlspeed as number | undefined) ?? null : null,
-          uploadSpeed: torrent ? (torrent.upspeed as number | undefined) ?? null : null,
-          eta: torrent ? (torrent.eta as number | undefined) ?? null : null,
-          ratio: torrent ? (torrent.ratio as number | undefined) ?? null : null,
-          size: item.size,
-          seeders: (torrent?.num_seeds as number | undefined) || item.seeders,
-          leechers: (torrent?.num_leechs as number | undefined) || 0,
-          quality: item.quality,
-          priority: (torrent?.priority as number | undefined) || null,
-          addedAt: item.addedAt,
-          completedAt: item.completedAt,
-        };
-      });
-
-      return { downloads: unifiedDownloads };
+      return await downloadQueueController.getUnifiedDownloads();
     }
   );
 
@@ -457,44 +223,27 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id/resume",
     {
       schema: {
+        tags: ["download-queue"],
+        summary: "Resume download",
+        description: "Resume a paused download in qBittorrent and update queue status",
         params: z.object({
-          id: z.string(),
+          id: z.string().describe("Download queue item ID"),
         }),
         response: {
-          200: z.object({
-            success: z.boolean(),
-          }),
-          404: z.object({
-            error: z.string(),
-          }),
+          200: SuccessResponseSchema,
+          404: ErrorResponseSchema,
         },
       },
     },
     async (request, reply) => {
-      const { id } = request.params;
-
-      const item = await app.db.query.downloadQueue.findFirst({
-        where: eq(downloadQueue.id, id),
-      });
-
-      if (!item) {
-        return reply.code(404).send({ error: "Download queue item not found" });
-      }
-
-      if (item.torrentHash && app.qbittorrent) {
-        try {
-          await app.qbittorrent.resumeTorrent(item.torrentHash);
-        } catch (error) {
-          app.log.error({ error }, "Failed to resume torrent");
+      try {
+        return await downloadQueueController.resume(request.params);
+      } catch (error) {
+        if (error instanceof Error && error.message === "Download queue item not found") {
+          return reply.code(404).send({ error: error.message });
         }
+        throw error;
       }
-
-      await app.db
-        .update(downloadQueue)
-        .set({ status: "downloading" })
-        .where(eq(downloadQueue.id, id));
-
-      return { success: true };
     }
   );
 };

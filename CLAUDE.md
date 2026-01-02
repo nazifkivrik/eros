@@ -150,12 +150,143 @@ docker-compose down
 
 ## Architecture Principles
 
-### Layered Architecture (Backend)
+### Clean Architecture (Backend) - MANDATORY FOR ALL NEW ENDPOINTS
 
-Strictly enforce separation of concerns:
-- **Controllers/Route Handlers**: HTTP request parsing, validation (Zod), response formatting only
-- **Services**: Business logic, framework-agnostic
-- **Repositories/DAL**: Database interaction only
+**The backend follows Clean Architecture with strict layered separation. ALL new endpoints MUST follow this pattern:**
+
+```
+Route → Controller → Service → Repository → Database/External API
+```
+
+#### Layer Responsibilities:
+
+1. **Routes (Fastify plugins)** - `src/modules/{module}/{module}.routes.ts`
+   - Pure HTTP routing only
+   - Get controller from DI container: `const { moduleController } = app.container`
+   - Delegate all logic to controller
+   - Define OpenAPI/Swagger schemas
+   - Handle HTTP error codes (404, 400, etc.)
+   - **NO business logic, NO database access, NO service calls directly**
+
+2. **Controllers** - `src/interfaces/controllers/{module}.controller.ts`
+   - HTTP request/response handling
+   - Request validation using Zod schemas
+   - Call service methods
+   - Format responses
+   - Error handling and mapping
+   - **HTTP concerns only** (sessions, SSE setup, plugin reloading)
+   - **NO business logic, NO database access**
+
+3. **Services** - `src/application/services/{module}.service.ts`
+   - Business logic layer
+   - Framework-agnostic (no Fastify dependencies)
+   - Orchestrates multiple repositories
+   - Handles external API calls
+   - Implements business rules and validation
+   - **NO HTTP concerns, NO direct database access**
+
+4. **Repositories** - `src/infrastructure/repositories/{module}.repository.ts`
+   - Data access layer only
+   - Direct database queries using Drizzle ORM
+   - CRUD operations
+   - Complex queries with joins
+   - **NO business logic, pure data access**
+   - Return `null` for not found, not throw errors
+
+5. **Dependency Injection** - `src/container/`
+   - All components registered in Awilix container
+   - Constructor injection for all dependencies
+   - Three registration blocks: Repositories → Services → Controllers
+
+#### Example Implementation:
+
+```typescript
+// 1. Repository (Infrastructure Layer)
+export class UsersRepository {
+  constructor(private db: Database) {}
+
+  async findById(id: string) {
+    const user = await this.db.query.users.findFirst({
+      where: eq(users.id, id),
+    });
+    return user || null;
+  }
+}
+
+// 2. Service (Application Layer)
+export class UsersService {
+  constructor(
+    private usersRepo: UsersRepository,
+    private logger: Logger
+  ) {}
+
+  async getUserById(id: string) {
+    const user = await this.usersRepo.findById(id);
+    if (!user) {
+      throw new Error("User not found");
+    }
+    // Business logic here
+    return user;
+  }
+}
+
+// 3. Controller (Interface Layer)
+export class UsersController {
+  constructor(
+    private usersService: UsersService,
+    private logger: Logger
+  ) {}
+
+  async getById(params: { id: string }) {
+    return await this.usersService.getUserById(params.id);
+  }
+}
+
+// 4. Routes (HTTP Layer)
+const usersRoutes: FastifyPluginAsyncZod = async (app) => {
+  const { usersController } = app.container;
+
+  app.get("/:id", {
+    schema: {
+      params: z.object({ id: z.string() }),
+      response: { 200: UserSchema, 404: ErrorResponseSchema },
+    },
+  }, async (request, reply) => {
+    try {
+      return await usersController.getById(request.params);
+    } catch (error) {
+      if (error instanceof Error && error.message === "User not found") {
+        return reply.code(404).send({ error: error.message });
+      }
+      throw error;
+    }
+  });
+};
+
+// 5. DI Registration (container/index.ts)
+container.register({
+  usersRepository: asClass(UsersRepository).scoped(),
+  usersService: asClass(UsersService).scoped(),
+  usersController: asClass(UsersController).scoped(),
+});
+```
+
+#### Important Design Decisions:
+
+- **No Repository needed**: If module only uses external APIs (e.g., Torrents uses QBittorrentService)
+- **HTTP concerns stay in Controller**: Session management, SSE setup, Fastify plugin reloading
+- **External service delegation**: Services can delegate to external APIs (TPDB, StashDB, etc.)
+- **Naming conflicts**: Use prefixes like `newLogsService` during migration to avoid conflicts
+- **Error handling**: Repositories return `null`, Services throw errors, Controllers map to HTTP codes
+
+### Legacy Code Migration (In Progress)
+
+**DO NOT** create new endpoints using the old pattern:
+- ❌ Direct database access in routes
+- ❌ Factory functions like `createService(app.db)`
+- ❌ Business logic in route handlers
+
+**Always use Clean Architecture for new code.**
 
 ### Component Architecture (Frontend)
 

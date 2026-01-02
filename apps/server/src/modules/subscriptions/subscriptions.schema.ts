@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { IdParamsSchema } from "../../schemas/common.schema.js";
 import { QualityItemSchema } from "../quality-profiles/quality-profiles.schema.js";
 import { PerformerSchema, StudioSchema, SceneSchema } from "../search/search.schema.js";
 
@@ -64,9 +65,7 @@ export const UpdateSubscriptionSchema = z.object({
   monitored: z.boolean().optional(),
 });
 
-export const SubscriptionParamsSchema = z.object({
-  id: z.string(),
-});
+export const SubscriptionParamsSchema = IdParamsSchema;
 
 export const EntityTypeParamsSchema = z.object({
   entityType: EntityTypeSchema,
@@ -88,14 +87,6 @@ export const SubscriptionListResponseSchema = z.object({
 
 export const SubscriptionsByTypeResponseSchema = z.object({
   data: z.array(SubscriptionSchema),
-});
-
-export const SuccessResponseSchema = z.object({
-  success: z.boolean(),
-});
-
-export const ErrorResponseSchema = z.object({
-  error: z.string(),
 });
 
 export const CheckSubscriptionResponseSchema = z.object({

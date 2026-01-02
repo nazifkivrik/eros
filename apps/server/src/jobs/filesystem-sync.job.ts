@@ -7,28 +7,19 @@
 import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { sceneFiles, sceneExclusions, downloadQueue, scenes } from "@repo/database";
-import { createFileManagerService } from "../services/file-manager.service.js";
-import { createLogsService } from "../services/logs.service.js";
-import { createSettingsService } from "../services/settings.service.js";
-import { createProwlarrService } from "../services/prowlarr.service.js";
-import { createQBittorrentService } from "../services/qbittorrent.service.js";
 import { nanoid } from "nanoid";
 
 export async function filesystemSyncJob(app: FastifyInstance) {
   app.log.info("Starting filesystem sync job");
 
   try {
-    const settingsService = createSettingsService(app.db);
+    // Get services from DI container
+    const { settingsService, fileManagerService, logsService } = app.container;
+
     const settings = await settingsService.getSettings();
-    const fileManager = createFileManagerService(
-      app.db,
-      settings.general.scenesPath,
-      settings.general.incompletePath
-    );
-    const logsService = createLogsService(app.db);
 
     // Scan filesystem for missing scenes
-    const scanResult = await fileManager.scanFilesystem();
+    const scanResult = await fileManagerService.scanFilesystem();
 
     app.log.info(
       `Found ${scanResult.missingScenes.length} missing scenes`
@@ -91,17 +82,12 @@ export async function filesystemSyncJob(app: FastifyInstance) {
           );
 
           // Search for torrents if Prowlarr is configured
-          if (settings.prowlarr.enabled && settings.prowlarr.apiUrl) {
+          if (settings.prowlarr.enabled && settings.prowlarr.apiUrl && app.container.prowlarrService) {
             try {
-              const prowlarrService = createProwlarrService({
-                baseUrl: settings.prowlarr.apiUrl,
-                apiKey: settings.prowlarr.apiKey,
-              });
-
-              const searchResults = await prowlarrService.searchIndexers(scene.title);
+              const searchResults = await app.container.prowlarrService.searchIndexers(scene.title);
 
               if (searchResults.length > 0) {
-                const mappedResults = prowlarrService.mapSearchResults(searchResults);
+                const mappedResults = app.container.prowlarrService.mapSearchResults(searchResults);
 
                 // Select best torrent (highest seeders)
                 const bestTorrent = mappedResults.reduce((best, current) => {
@@ -115,18 +101,12 @@ export async function filesystemSyncJob(app: FastifyInstance) {
 
                 // Add to qBittorrent if configured
                 let qbittorrentStatus = "queued";
-                if (settings.qbittorrent.enabled && settings.qbittorrent.url && bestTorrent.downloadUrl) {
+                if (settings.qbittorrent.enabled && settings.qbittorrent.url && bestTorrent.downloadUrl && app.container.qbittorrentService) {
                   try {
-                    const qbittorrentService = createQBittorrentService({
-                      url: settings.qbittorrent.url,
-                      username: settings.qbittorrent.username,
-                      password: settings.qbittorrent.password,
-                    });
-
                     const downloadPath = settings.general.incompletePath || "/media/incomplete";
                     const isMagnet = bestTorrent.downloadUrl.startsWith("magnet:");
 
-                    const success = await qbittorrentService.addTorrent({
+                    const success = await app.container.qbittorrentService.addTorrent({
                       magnetLinks: isMagnet ? [bestTorrent.downloadUrl] : undefined,
                       urls: !isMagnet ? [bestTorrent.downloadUrl] : undefined,
                       savePath: downloadPath,

@@ -9,10 +9,11 @@
 import type { FastifyInstance } from "fastify";
 import { eq, isNull, or } from "drizzle-orm";
 import { subscriptions, performers, studios, scenes } from "@repo/database";
-import { getJobProgressService } from "../services/job-progress.service.js";
 
 export async function metadataRefreshJob(app: FastifyInstance) {
-  const progressService = getJobProgressService();
+  // Get services from DI container
+  const { jobProgressService } = app.container;
+  const progressService = jobProgressService;
 
   progressService.emitStarted("metadata-refresh", "Starting metadata refresh job");
   app.log.info("Starting metadata refresh job");
@@ -102,17 +103,13 @@ export async function metadataRefreshJob(app: FastifyInstance) {
 
       let folderCount = 0;
 
-      // Debug: Check if fileManager is available
-      app.log.info({
-        hasFileManager: !!app.fileManager,
-        fileManagerType: typeof app.fileManager,
-        fileManagerKeys: app.fileManager ? Object.keys(app.fileManager) : []
-      }, "FileManager availability check");
+      // Get FileManagerService from container
+      const { fileManagerService } = app.container;
 
       for (const sceneId of allScenesToProcess) {
         try {
           // Create folder structure with NFO and poster
-          await app.fileManager.setupSceneFiles(sceneId);
+          await fileManagerService.setupSceneFiles(sceneId);
           folderCount++;
 
           if (folderCount % 10 === 0) {
@@ -181,8 +178,7 @@ async function refreshScenes(
   totalTasks: number,
   baseCount: number
 ) {
-  const { createSettingsService } = await import("../services/settings.service.js");
-  const settingsService = createSettingsService(app.db);
+  const { settingsService } = app.container;
   const settings = await settingsService.getSettings();
 
   for (let i = 0; i < sceneIds.length; i++) {
@@ -209,7 +205,7 @@ async function refreshScenes(
       let source: "tpdb" | "stashdb" | null = null;
 
       // STRATEGY 1: Hash-based lookup (TPDB only, most accurate)
-      if (settings.metadata.hashLookupEnabled && settings.tpdb.enabled && app.tpdb) {
+      if (settings.metadata.hashLookupEnabled && settings.tpdb.enabled && app.container.tpdbService) {
         metadata = await tryHashLookup(app, scene);
         if (metadata) {
           source = "tpdb";
@@ -220,9 +216,9 @@ async function refreshScenes(
       // STRATEGY 2: Use existing ID to refresh (subscribed scenes)
       if (!metadata) {
         const tpdbId = scene.externalIds.find(e => e.source === 'tpdb')?.id;
-        if (tpdbId && settings.tpdb.enabled && app.tpdb) {
+        if (tpdbId && settings.tpdb.enabled && app.container.tpdbService) {
           const contentType = scene.contentType || "scene";
-          metadata = await app.tpdb.getSceneById(tpdbId, contentType);
+          metadata = await app.container.tpdbService.getSceneById(tpdbId, contentType);
           source = "tpdb";
         }
         // StashDB support removed - TPDB-only mode
@@ -272,6 +268,7 @@ async function refreshScenes(
 
 async function tryHashLookup(app: FastifyInstance, scene: any) {
   if (!scene.sceneFiles || scene.sceneFiles.length === 0) return null;
+  if (!app.container.tpdbService) return null;
 
   for (const file of scene.sceneFiles) {
     if (!file.fileHashes || file.fileHashes.length === 0) continue;
@@ -281,7 +278,7 @@ async function tryHashLookup(app: FastifyInstance, scene: any) {
     // Try OSHASH first
     if (hashes.oshash) {
       try {
-        const result = await app.tpdb.getSceneByHash(hashes.oshash, "OSHASH");
+        const result = await app.container.tpdbService.getSceneByHash(hashes.oshash, "OSHASH");
         if (result) {
           app.log.info({ oshash: hashes.oshash, tpdbId: result.id }, "Found via OSHASH");
           return result;
@@ -294,7 +291,7 @@ async function tryHashLookup(app: FastifyInstance, scene: any) {
     // Fallback to PHASH
     if (hashes.phash) {
       try {
-        const result = await app.tpdb.getSceneByHash(hashes.phash, "PHASH");
+        const result = await app.container.tpdbService.getSceneByHash(hashes.phash, "PHASH");
         if (result) {
           app.log.info({ phash: hashes.phash, tpdbId: result.id }, "Found via PHASH");
           return result;

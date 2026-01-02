@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 export const LoginSchema = z.object({
-  username: z.string().min(1),
-  password: z.string().min(1),
+  username: z.string().min(1).describe("Username for authentication"),
+  password: z.string().min(1).describe("Password for authentication"),
 });
 
 export const LoginResponseSchema = z.object({
@@ -16,10 +16,6 @@ export const LogoutResponseSchema = z.object({
 });
 
 export const StatusResponseSchema = z.object({
-  authenticated: z.boolean(),
-  userId: z.string().nullable(),
-});
-
-export const ErrorResponseSchema = z.object({
-  error: z.string(),
+  authenticated: z.boolean().describe("Whether the user is authenticated"),
+  userId: z.string().nullable().describe("User ID if authenticated"),
 });

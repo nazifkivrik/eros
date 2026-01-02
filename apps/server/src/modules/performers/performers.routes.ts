@@ -1,8 +1,9 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { performers } from "@repo/database";
-import { nanoid } from "nanoid";
+import {
+  ErrorResponseSchema,
+  SuccessResponseSchema,
+} from "../../schemas/common.schema.js";
 import {
   PerformerResponseSchema,
   PerformerParamsSchema,
@@ -10,16 +11,25 @@ import {
   CreatePerformerSchema,
   UpdatePerformerSchema,
   PerformerListResponseSchema,
-  SuccessResponseSchema,
-  ErrorResponseSchema,
 } from "./performers.schema.js";
 
+/**
+ * Performers Routes
+ * Pure HTTP routing - delegates to controller
+ * Clean Architecture: Route → Controller → Service → Repository
+ */
 const performersRoutes: FastifyPluginAsyncZod = async (app) => {
+  // Get controller from DI container
+  const { performersController } = app.container;
+
   // List performers
   app.get(
     "/",
     {
       schema: {
+        tags: ["performers"],
+        summary: "List performers",
+        description: "Get a paginated list of performers with limit and offset",
         querystring: PerformerListQuerySchema,
         response: {
           200: PerformerListResponseSchema,
@@ -27,22 +37,7 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request) => {
-      const { limit, offset } = request.query;
-
-      const data = await app.db.query.performers.findMany({
-        limit,
-        offset,
-      });
-
-      // Get total count
-      const totalResult = await app.db
-        .select({ count: performers.id })
-        .from(performers);
-
-      return {
-        data,
-        total: totalResult.length,
-      };
+      return await performersController.list(request.query);
     }
   );
 
@@ -51,6 +46,9 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
+        tags: ["performers"],
+        summary: "Get performer by ID",
+        description: "Retrieve detailed information about a specific performer",
         params: PerformerParamsSchema,
         response: {
           200: PerformerResponseSchema,
@@ -59,17 +57,15 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
-      const { id } = request.params;
-
-      const performer = await app.db.query.performers.findFirst({
-        where: eq(performers.id, id),
-      });
-
-      if (!performer) {
-        return reply.code(404).send({ error: "Performer not found" });
+      try {
+        const performer = await performersController.getById(request.params);
+        return performer;
+      } catch (error) {
+        if (error instanceof Error && error.message === "Performer not found") {
+          return reply.code(404).send({ error: "Performer not found" });
+        }
+        throw error;
       }
-
-      return performer;
     }
   );
 
@@ -78,6 +74,9 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
     "/",
     {
       schema: {
+        tags: ["performers"],
+        summary: "Create performer",
+        description: "Add a new performer to the database",
         body: CreatePerformerSchema,
         response: {
           201: PerformerResponseSchema,
@@ -85,33 +84,8 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
-      const data = request.body;
-
-      const id = nanoid();
-      const now = new Date().toISOString();
-
-      const newPerformer = {
-        id,
-        tpdbId: data.tpdbId || null,
-        slug: data.name.toLowerCase().replace(/\s+/g, "-"),
-        name: data.name,
-        fullName: data.name,
-        rating: 0,
-        aliases: data.aliases,
-        disambiguation: data.disambiguation || null,
-        gender: data.gender || null,
-        birthdate: data.birthdate || null,
-        deathDate: data.deathDate || null,
-        images: data.images,
-        fakeBoobs: false,
-        sameSexOnly: false,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      await app.db.insert(performers).values(newPerformer);
-
-      return reply.code(201).send(newPerformer);
+      const created = await performersController.create(request.body);
+      return reply.code(201).send(created);
     }
   );
 
@@ -120,6 +94,9 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
+        tags: ["performers"],
+        summary: "Update performer",
+        description: "Update information for an existing performer",
         params: PerformerParamsSchema,
         body: UpdatePerformerSchema,
         response: {
@@ -129,32 +106,15 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
-      const { id } = request.params;
-      const updates = request.body;
-
-      const existing = await app.db.query.performers.findFirst({
-        where: eq(performers.id, id),
-      });
-
-      if (!existing) {
-        return reply.code(404).send({ error: "Performer not found" });
+      try {
+        const updated = await performersController.update(request.params, request.body);
+        return updated;
+      } catch (error) {
+        if (error instanceof Error && error.message === "Performer not found") {
+          return reply.code(404).send({ error: "Performer not found" });
+        }
+        throw error;
       }
-
-      const now = new Date().toISOString();
-
-      await app.db
-        .update(performers)
-        .set({
-          ...updates,
-          updatedAt: now,
-        })
-        .where(eq(performers.id, id));
-
-      const updated = await app.db.query.performers.findFirst({
-        where: eq(performers.id, id),
-      });
-
-      return updated!;
     }
   );
 
@@ -163,6 +123,9 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
+        tags: ["performers"],
+        summary: "Delete performer",
+        description: "Delete a performer and optionally their associated scenes and files",
         params: PerformerParamsSchema,
         querystring: z.object({
           deleteAssociatedScenes: z.boolean().optional().default(false),
@@ -175,44 +138,15 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
-      const { id } = request.params;
-      const { deleteAssociatedScenes, removeFiles } = request.query;
-
-      const existing = await app.db.query.performers.findFirst({
-        where: eq(performers.id, id),
-      });
-
-      if (!existing) {
-        return reply.code(404).send({ error: "Performer not found" });
+      try {
+        await performersController.delete(request.params, request.query);
+        return { success: true };
+      } catch (error) {
+        if (error instanceof Error && error.message === "Performer not found") {
+          return reply.code(404).send({ error: "Performer not found" });
+        }
+        throw error;
       }
-
-      // Check if performer has a subscription
-      const subscription = await app.db.query.subscriptions.findFirst({
-        where: and(
-          eq(subscriptions.entityType, "performer"),
-          eq(subscriptions.entityId, id)
-        ),
-      });
-
-      // If subscription exists, delete it using subscription service
-      // This will handle scene deletion, download queue cleanup, and torrent removal
-      if (subscription) {
-        const { createSettingsService } = await import("../../services/settings.service.js");
-        const { createSubscriptionService } = await import("../../services/subscription.service.js");
-        const settingsService = createSettingsService(app.db);
-        const settings = await settingsService.getSettings();
-
-        const tpdbService = settings.tpdb.enabled ? app.tpdb : undefined;
-        const subscriptionService = createSubscriptionService(app.db, tpdbService);
-
-        await subscriptionService.deleteSubscription(subscription.id, deleteAssociatedScenes, removeFiles);
-        app.log.info({ performerId: id, subscriptionId: subscription.id }, "Deleted performer subscription");
-      }
-
-      // Delete performer (cascade deletes will handle performersScenes junction table)
-      await app.db.delete(performers).where(eq(performers.id, id));
-
-      return { success: true };
     }
   );
 };

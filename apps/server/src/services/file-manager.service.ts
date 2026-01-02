@@ -4,40 +4,27 @@ import type { Database } from "@repo/database";
 import { eq } from "drizzle-orm";
 import { scenes, performers, studios, sceneFiles, sceneExclusions } from "@repo/database";
 import { constants } from "fs";
+import type { NFOMetadata } from "@repo/shared-types";
 import type { QBittorrentService } from "./qbittorrent.service.js";
 import { createTorrentParserService } from "./parser.service.js";
 import { logger } from "../utils/logger.js";
-
-export type SceneMetadata = {
-  id: string;
-  stashdbId: string | null;
-  title: string;
-  date: string | null;
-  details: string | null;
-  duration: number | null;
-  director: string | null;
-  code: string | null;
-  urls: string[];
-  images: Array<{ url: string; width?: number; height?: number }>;
-  performers: Array<{
-    id: string;
-    name: string;
-  }>;
-  studios: Array<{
-    id: string;
-    name: string;
-  }>;
-};
 
 export class FileManagerService {
   private scenesPath: string;
   private incompletePath: string;
 
-  constructor(
-    private db: Database,
-    scenesPath: string,
-    incompletePath: string
-  ) {
+  private db: Database;
+
+  constructor({
+    db,
+    scenesPath,
+    incompletePath,
+  }: {
+    db: Database;
+    scenesPath: string;
+    incompletePath: string;
+  }) {
+    this.db = db;
     this.scenesPath = scenesPath;
     this.incompletePath = incompletePath;
   }
@@ -172,7 +159,7 @@ export class FileManagerService {
   /**
    * Get scene with full metadata (performers, studios)
    */
-  private async getSceneWithMetadata(sceneId: string): Promise<SceneMetadata | null> {
+  private async getSceneWithMetadata(sceneId: string): Promise<NFOMetadata | null> {
     const scene = await this.db.query.scenes.findFirst({
       where: eq(scenes.id, sceneId),
     });
@@ -233,10 +220,13 @@ export class FileManagerService {
   /**
    * Build NFO XML content (Kodi format)
    */
-  private buildNFOContent(scene: SceneMetadata): string {
+  private buildNFOContent(scene: NFOMetadata): string {
     const performers = scene.performers.map((p) => `    <actor>\n      <name>${this.escapeXML(p.name)}</name>\n    </actor>`).join("\n");
 
     const studio = scene.studios[0]?.name || "";
+
+    // Get StashDB ID from externalIds if available
+    const stashdbId = scene.externalIds.find((e) => e.source === "stashdb")?.id || null;
 
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <movie>
@@ -245,10 +235,8 @@ export class FileManagerService {
   ${scene.date ? `<premiered>${scene.date}</premiered>` : ""}
   ${scene.date ? `<releasedate>${scene.date}</releasedate>` : ""}
   ${studio ? `<studio>${this.escapeXML(studio)}</studio>` : ""}
-  ${scene.director ? `<director>${this.escapeXML(scene.director)}</director>` : ""}
-  ${scene.details ? `<plot>${this.escapeXML(scene.details)}</plot>` : ""}
   ${scene.code ? `<id>${this.escapeXML(scene.code)}</id>` : ""}
-  ${scene.stashdbId ? `<uniqueid type="stashdb">${scene.stashdbId}</uniqueid>` : ""}
+  ${stashdbId ? `<uniqueid type="stashdb">${stashdbId}</uniqueid>` : ""}
   ${scene.duration ? `<runtime>${Math.floor(scene.duration / 60)}</runtime>` : ""}
   ${performers}
 </movie>`;
@@ -743,5 +731,5 @@ export function createFileManagerService(
   scenesPath: string,
   incompletePath: string
 ): FileManagerService {
-  return new FileManagerService(db, scenesPath, incompletePath);
+  return new FileManagerService({ db, scenesPath, incompletePath });
 }

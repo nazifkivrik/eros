@@ -7,21 +7,21 @@
 import type { FastifyInstance } from "fastify";
 import { eq, inArray } from "drizzle-orm";
 import { downloadQueue, sceneExclusions } from "@repo/database";
-import { createLogsService } from "../services/logs.service.js";
-import { createSettingsService } from "../services/settings.service.js";
 
 export async function qbittorrentSyncJob(app: FastifyInstance) {
   app.log.info("Starting qBittorrent sync job");
 
-  if (!app.qbittorrent) {
+  // Get services from DI container
+  const { qbittorrentService } = app.container;
+
+  if (!qbittorrentService) {
     app.log.warn("qBittorrent not configured, skipping sync job");
     return;
   }
 
   try {
-    const settingsService = createSettingsService(app.db);
+    const { settingsService, logsService } = app.container;
     const settings = await settingsService.getSettings();
-    const logsService = createLogsService(app.db);
 
     // Get all download queue items that are downloading or paused
     const activeDownloads = await app.db.query.downloadQueue.findMany({
@@ -34,7 +34,7 @@ export async function qbittorrentSyncJob(app: FastifyInstance) {
     }
 
     // Get all torrents from qBittorrent
-    const torrents = await app.qbittorrent.getTorrents();
+    const torrents = await qbittorrentService.getTorrents();
     const qbitHashes = new Set(torrents.map((t) => t.hash));
 
     app.log.info(
@@ -68,7 +68,7 @@ export async function qbittorrentSyncJob(app: FastifyInstance) {
           );
 
           try {
-            await app.qbittorrent.addTorrent({
+            await qbittorrentService.addTorrent({
               magnetLinks: [`magnet:?xt=urn:btih:${removed.torrentHash}`],
               category: "eros",
               paused: false,

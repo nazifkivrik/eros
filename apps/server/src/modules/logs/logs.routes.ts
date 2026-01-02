@@ -1,5 +1,5 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { createLogsService } from "../../services/logs.service.js";
+import { ErrorResponseSchema } from "../../schemas/common.schema.js";
 import {
   LogSchema,
   LogsQuerySchema,
@@ -7,17 +7,25 @@ import {
   CleanupQuerySchema,
   LogsListResponseSchema,
   CleanupResponseSchema,
-  ErrorResponseSchema,
 } from "./logs.schema.js";
 
+/**
+ * Logs Routes
+ * Pure HTTP routing - delegates to controller
+ * Clean Architecture: Route → Controller → Service → Repository
+ */
 const logsRoutes: FastifyPluginAsyncZod = async (app) => {
-  const logsService = createLogsService(app.db);
+  // Get controller from DI container
+  const { logsController } = app.container;
 
   // Get logs with filtering
   app.get(
     "/",
     {
       schema: {
+        tags: ["logs"],
+        summary: "Get application logs",
+        description: "Retrieve logs with optional filtering by level, event type, and entity IDs",
         querystring: LogsQuerySchema,
         response: {
           200: LogsListResponseSchema,
@@ -25,9 +33,7 @@ const logsRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request) => {
-      const filters = request.query as any;
-      const result = await logsService.getLogs(filters);
-      return result;
+      return await logsController.list(request.query);
     }
   );
 
@@ -36,6 +42,9 @@ const logsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
+        tags: ["logs"],
+        summary: "Get log by ID",
+        description: "Retrieve a specific log entry by its ID",
         params: LogParamsSchema,
         response: {
           200: LogSchema,
@@ -43,16 +52,16 @@ const logsRoutes: FastifyPluginAsyncZod = async (app) => {
         },
       },
     },
-
     async (request, reply) => {
-      const { id } = request.params;
-      const log = await logsService.getLog(id);
-
-      if (!log) {
-        return reply.code(404).send({ error: "Log not found" });
+      try {
+        const log = await logsController.getById(request.params);
+        return log;
+      } catch (error) {
+        if (error instanceof Error && error.message === "Log not found") {
+          return reply.code(404).send({ error: "Log not found" });
+        }
+        throw error;
       }
-
-      return log;
     }
   );
 
@@ -61,6 +70,9 @@ const logsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/cleanup",
     {
       schema: {
+        tags: ["logs"],
+        summary: "Cleanup old logs",
+        description: "Delete logs older than the specified number of days",
         querystring: CleanupQuerySchema,
         response: {
           200: CleanupResponseSchema,
@@ -68,9 +80,7 @@ const logsRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request) => {
-      const { daysToKeep } = request.query as any;
-      const deletedCount = await logsService.deleteOldLogs(daysToKeep);
-      return { deletedCount };
+      return await logsController.cleanup(request.query);
     }
   );
 };

@@ -12,12 +12,27 @@ import type { LogsService } from "./logs.service.js";
 import { logger } from "../utils/logger.js";
 
 export class TorrentCompletionService {
-  constructor(
-    private db: Database,
-    private fileManager: FileManagerService,
-    private qbittorrent: QBittorrentService,
-    private logger: LogsService
-  ) {}
+  private db: Database;
+  private fileManager: FileManagerService;
+  private logsService: LogsService;
+  private qbittorrent?: QBittorrentService;
+
+  constructor({
+    db,
+    fileManagerService,
+    logsService,
+    qbittorrent,
+  }: {
+    db: Database;
+    fileManagerService: FileManagerService;
+    logsService: LogsService;
+    qbittorrent?: QBittorrentService;
+  }) {
+    this.db = db;
+    this.fileManager = fileManagerService;
+    this.logsService = logsService;
+    this.qbittorrent = qbittorrent;
+  }
 
   /**
    * Handle torrent completion
@@ -25,13 +40,23 @@ export class TorrentCompletionService {
    */
   async handleTorrentCompleted(qbitHash: string): Promise<void> {
     try {
+      // Check if qBittorrent is configured
+      if (!this.qbittorrent) {
+        await this.logsService.error(
+          "torrent",
+          "qBittorrent not configured, cannot process completed torrent",
+          { qbitHash }
+        );
+        return;
+      }
+
       // 1. Find download queue item by qbitHash
       const queueItem = await this.db.query.downloadQueue.findFirst({
         where: eq(downloadQueue.qbitHash, qbitHash),
       });
 
       if (!queueItem) {
-        await this.logger.warning(
+        await this.logsService.warning(
           "torrent",
           `No download queue item found for qBit hash: ${qbitHash}`,
           { qbitHash }
@@ -43,7 +68,7 @@ export class TorrentCompletionService {
       const torrentInfo = await this.qbittorrent.getTorrentProperties(qbitHash);
 
       if (!torrentInfo) {
-        await this.logger.error(
+        await this.logsService.error(
           "torrent",
           `Failed to get torrent info from qBittorrent for hash: ${qbitHash}`,
           { qbitHash, sceneId: queueItem.sceneId },
@@ -56,7 +81,7 @@ export class TorrentCompletionService {
       const sourcePath = torrentInfo.save_path || torrentInfo.content_path;
 
       if (!sourcePath) {
-        await this.logger.error(
+        await this.logsService.error(
           "torrent",
           "No save path found in torrent info",
           { qbitHash, sceneId: queueItem.sceneId },
@@ -65,7 +90,7 @@ export class TorrentCompletionService {
         return;
       }
 
-      await this.logger.info(
+      await this.logsService.info(
         "torrent",
         `Processing completed torrent for scene: ${queueItem.sceneId}`,
         {
@@ -79,7 +104,7 @@ export class TorrentCompletionService {
 
       // 4. Move files to scenes folder and generate metadata using qBittorrent API
       // This preserves seeding by letting qBittorrent track the file location
-      await this.logger.info(
+      await this.logsService.info(
         "torrent",
         `Calling moveCompletedTorrentViaQBit for scene: ${queueItem.sceneId}`,
         { qbitHash, sceneId: queueItem.sceneId },
@@ -92,7 +117,7 @@ export class TorrentCompletionService {
         this.qbittorrent
       );
 
-      await this.logger.info(
+      await this.logsService.info(
         "torrent",
         `moveCompletedTorrentViaQBit succeeded for scene: ${queueItem.sceneId}`,
         {
@@ -103,7 +128,7 @@ export class TorrentCompletionService {
         { sceneId: queueItem.sceneId }
       );
 
-      await this.logger.info(
+      await this.logsService.info(
         "torrent",
         `Files moved to: ${moveResult.destinationPath}`,
         {
@@ -159,7 +184,7 @@ export class TorrentCompletionService {
         })
         .where(eq(downloadQueue.id, queueItem.id));
 
-      await this.logger.info(
+      await this.logsService.info(
         "torrent",
         `Successfully processed completed torrent for scene: ${queueItem.sceneId}`,
         {
@@ -170,7 +195,7 @@ export class TorrentCompletionService {
         { sceneId: queueItem.sceneId }
       );
     } catch (error) {
-      await this.logger.error(
+      await this.logsService.error(
         "torrent",
         `Error processing completed torrent: ${error instanceof Error ? error.message : String(error)}`,
         {
@@ -222,8 +247,13 @@ export class TorrentCompletionService {
 export function createTorrentCompletionService(
   db: Database,
   fileManager: FileManagerService,
-  qbittorrent: QBittorrentService,
-  logger: LogsService
+  logsService: LogsService,
+  qbittorrent?: QBittorrentService
 ): TorrentCompletionService {
-  return new TorrentCompletionService(db, fileManager, qbittorrent, logger);
+  return new TorrentCompletionService({
+    db,
+    fileManagerService: fileManager,
+    logsService,
+    qbittorrent,
+  });
 }

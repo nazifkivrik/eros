@@ -7,20 +7,16 @@
 import type { FastifyInstance } from "fastify";
 import { eq, inArray } from "drizzle-orm";
 import { downloadQueue } from "@repo/database";
-import { getSpeedProfileService } from "../services/speed-profile.service.js";
-import { createTorrentCompletionService } from "../services/torrent-completion.service.js";
-import { createFileManagerService } from "../services/file-manager.service.js";
-import { createLogsService } from "../services/logs.service.js";
-import { createSettingsService } from "../services/settings.service.js";
-import { getJobProgressService } from "../services/job-progress.service.js";
 
 export async function torrentMonitorJob(app: FastifyInstance) {
-  const progressService = getJobProgressService();
+  // Get services from DI container
+  const { jobProgressService, qbittorrentService } = app.container;
+  const progressService = jobProgressService;
 
   progressService.emitStarted("torrent-monitor", "Starting torrent monitor job");
   app.log.info("Starting torrent monitor job");
 
-  if (!app.qbittorrent) {
+  if (!qbittorrentService) {
     app.log.warn("qBittorrent not configured, skipping torrent monitor job");
     progressService.emitCompleted("torrent-monitor", "Skipped: qBittorrent not configured");
     return;
@@ -28,7 +24,7 @@ export async function torrentMonitorJob(app: FastifyInstance) {
 
   try {
     // Get all torrents from qBittorrent
-    const torrents = await app.qbittorrent.getTorrents();
+    const torrents = await qbittorrentService.getTorrents();
 
     progressService.emitProgress(
       "torrent-monitor",
@@ -71,21 +67,8 @@ export async function torrentMonitorJob(app: FastifyInstance) {
       "Hash map created for torrent monitoring"
     );
 
-    // Initialize services for torrent completion
-    const settingsService = createSettingsService(app.db);
-    const settings = await settingsService.getSettings();
-    const fileManager = createFileManagerService(
-      app.db,
-      settings.general.scenesPath,
-      settings.general.incompletePath
-    );
-    const logsService = createLogsService(app.db);
-    const completionService = createTorrentCompletionService(
-      app.db,
-      fileManager,
-      app.qbittorrent,
-      logsService
-    );
+    // Get services from DI container
+    const { torrentCompletionService } = app.container;
 
     let processedCount = 0;
     for (const torrent of torrents) {
@@ -122,10 +105,10 @@ export async function torrentMonitorJob(app: FastifyInstance) {
           );
 
           // Move to bottom of queue
-          await app.qbittorrent.setTorrentPriority(torrent.hash, "bottom");
+          await qbittorrentService.setTorrentPriority(torrent.hash, "bottom");
 
           // Pause stalled torrent
-          await app.qbittorrent.pauseTorrent(torrent.hash);
+          await qbittorrentService.pauseTorrent(torrent.hash);
 
           // Update status in database
           await app.db
@@ -171,7 +154,7 @@ export async function torrentMonitorJob(app: FastifyInstance) {
               "Calling handleTorrentCompleted"
             );
 
-            await completionService.handleTorrentCompleted(torrent.hash);
+            await torrentCompletionService.handleTorrentCompleted(torrent.hash);
 
             app.log.info(
               { torrentHash: torrent.hash, sceneId: queueItem.sceneId },
@@ -237,7 +220,7 @@ export async function torrentMonitorJob(app: FastifyInstance) {
  * Apply speed profile limits to all torrents
  */
 async function applySpeedProfiles(app: FastifyInstance) {
-  const speedProfileService = getSpeedProfileService();
+  const { speedProfileService, qbittorrentService } = app.container;
 
   if (!speedProfileService) {
     return;
@@ -260,8 +243,8 @@ async function applySpeedProfiles(app: FastifyInstance) {
 
   try {
     // Apply global speed limits to qBittorrent
-    if (app.qbittorrent) {
-      await app.qbittorrent.setGlobalSpeedLimits(
+    if (qbittorrentService) {
+      await qbittorrentService.setGlobalSpeedLimits(
         limits.downloadLimit,
         limits.uploadLimit
       );

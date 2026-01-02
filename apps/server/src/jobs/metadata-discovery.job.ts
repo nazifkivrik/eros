@@ -52,8 +52,13 @@ async function discoverMetadataForScene(
     "Attempting to discover metadata"
   );
 
-  // Search StashDB using the scene title
-  const searchResults = await app.stashdb.searchScenes(scene.title);
+  // Search StashDB using the scene title (if available)
+  if (!app.container.stashdbService) {
+    app.log.warn("StashDB service not available, skipping metadata discovery");
+    return;
+  }
+
+  const searchResults = await app.container.stashdbService.searchScenes(scene.title);
 
   if (searchResults.length === 0) {
     app.log.info(
@@ -84,7 +89,7 @@ async function discoverMetadataForScene(
   );
 
   // Get full scene details from StashDB
-  const fullScene = await app.stashdb.getSceneById(bestMatch.id);
+  const fullScene = await app.container.stashdbService!.getSceneById(bestMatch.id);
 
   if (!fullScene) {
     app.log.warn(
@@ -124,10 +129,10 @@ async function findBestMatch(
   results: any[]
 ): Promise<any | null> {
   // Use AI matching if available
-  if (app.ai) {
+  if (app.container.aiMatchingService) {
     try {
       const candidates = results.map((r) => r.title);
-      const match = await app.ai.findBestMatch(queryTitle, candidates, 0.8);
+      const match = await app.container.aiMatchingService.findBestMatch(queryTitle, candidates, 0.8);
 
       if (match) {
         return results[match.index];

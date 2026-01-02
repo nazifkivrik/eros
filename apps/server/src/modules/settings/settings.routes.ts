@@ -1,28 +1,35 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { createSettingsService } from "../../services/settings.service.js";
-import { createQBittorrentService } from "../../services/qbittorrent.service.js";
 import {
   SettingsSchema,
   TestServiceParamsSchema,
   TestServiceResponseSchema,
 } from "./settings.schema.js";
 
+/**
+ * Settings Routes
+ * Pure HTTP routing - delegates to controller
+ * Clean Architecture: Route → Controller → Service → Repository
+ */
 const settingsRoutes: FastifyPluginAsyncZod = async (app) => {
-  const settingsService = createSettingsService(app.db);
+  // Get controller from DI container
+  const { settingsController } = app.container;
 
   // Get settings
   app.get(
     "/",
     {
       schema: {
+        tags: ["settings"],
+        summary: "Get settings",
+        description: "Retrieve all application settings including qBittorrent, Prowlarr, TPDB, StashDB, and AI configuration",
         response: {
           200: SettingsSchema,
         },
       },
     },
     async () => {
-      return await settingsService.getSettings();
+      return await settingsController.getSettings();
     }
   );
 
@@ -31,6 +38,9 @@ const settingsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/",
     {
       schema: {
+        tags: ["settings"],
+        summary: "Update settings",
+        description: "Update application settings and automatically reload affected plugins (qBittorrent, TPDB, StashDB)",
         body: SettingsSchema,
         response: {
           200: SettingsSchema,
@@ -38,59 +48,7 @@ const settingsRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request) => {
-      const updatedSettings = await settingsService.updateSettings(request.body);
-
-      // Reload StashDB plugin with new settings
-      if (updatedSettings.stashdb?.apiKey) {
-        const { StashDBService } = await import("../../services/stashdb.service.js");
-        const stashdb = new StashDBService({
-          apiUrl: "https://stashdb.org/graphql",
-          apiKey: updatedSettings.stashdb.apiKey,
-        });
-        // Directly reassign the decorator value (plugin already initialized it)
-        app.stashdb = stashdb;
-        app.log.info("StashDB plugin reloaded with new API key");
-      }
-
-      // Reload TPDB plugin with new settings
-      if (updatedSettings.tpdb?.apiKey) {
-        const { TPDBService } = await import("../../services/tpdb/tpdb.service.js");
-        const tpdb = new TPDBService({
-          apiUrl: updatedSettings.tpdb.apiUrl || "https://api.theporndb.net",
-          apiKey: updatedSettings.tpdb.apiKey,
-        });
-        app.tpdb = tpdb;
-        app.log.info("TPDB plugin reloaded with new API key");
-      }
-
-      // Reload qBittorrent plugin with new settings
-      if (updatedSettings.qbittorrent?.enabled && updatedSettings.qbittorrent?.url) {
-        const { QBittorrentService } = await import("../../services/qbittorrent.service.js");
-        const qbittorrent = new QBittorrentService({
-          url: updatedSettings.qbittorrent.url,
-          username: updatedSettings.qbittorrent.username || "admin",
-          password: updatedSettings.qbittorrent.password || "adminadmin",
-        });
-
-        try {
-          const connected = await qbittorrent.testConnection();
-          if (connected) {
-            // Directly reassign the decorator value (plugin already initialized it)
-            app.qbittorrent = qbittorrent;
-            app.log.info("qBittorrent plugin reloaded and connected");
-          } else {
-            app.qbittorrent = null;
-            app.log.warn("qBittorrent plugin reloaded but connection failed");
-          }
-        } catch (error) {
-          app.qbittorrent = null;
-          app.log.error({ error }, "Failed to reload qBittorrent plugin");
-        }
-      } else {
-        app.qbittorrent = null;
-      }
-
-      return updatedSettings;
+      return await settingsController.updateSettings(request.body, app);
     }
   );
 
@@ -99,6 +57,9 @@ const settingsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/test/:service",
     {
       schema: {
+        tags: ["settings"],
+        summary: "Test service connection",
+        description: "Test connection to configured external services (qBittorrent, Prowlarr, TPDB, StashDB)",
         params: TestServiceParamsSchema,
         response: {
           200: TestServiceResponseSchema,
@@ -106,8 +67,7 @@ const settingsRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request) => {
-      const { service } = request.params;
-      return await settingsService.testConnection(service);
+      return await settingsController.testConnection(request.params);
     }
   );
 
@@ -116,29 +76,23 @@ const settingsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/test/tpdb",
     {
       schema: {
+        tags: ["settings"],
+        summary: "Test TPDB connection",
+        description: "Test TPDB connection with provided API URL and key before saving to settings",
         body: z.object({
-          apiUrl: z.string().url(),
-          apiKey: z.string().min(1),
+          apiUrl: z.string().url().describe("TPDB API URL"),
+          apiKey: z.string().min(1).describe("TPDB API key"),
         }),
         response: {
           200: z.object({
-            success: z.boolean(),
-            message: z.string(),
+            success: z.boolean().describe("Whether the connection test succeeded"),
+            message: z.string().describe("Success or error message"),
           }),
         },
       },
     },
-    async (request, reply) => {
-      const { apiUrl, apiKey } = request.body;
-
-      const isConnected = await settingsService.testTPDBConnectionPublic(apiUrl, apiKey);
-
-      return reply.send({
-        success: isConnected,
-        message: isConnected
-          ? "Successfully connected to TPDB"
-          : "Failed to connect to TPDB. Check your API URL and key.",
-      });
+    async (request) => {
+      return await settingsController.testTPDBConnection(request.body);
     }
   );
 
@@ -147,51 +101,22 @@ const settingsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/qbittorrent/status",
     {
       schema: {
+        tags: ["settings"],
+        summary: "Get qBittorrent status",
+        description: "Check qBittorrent connection status and retrieve current download/upload statistics",
         response: {
           200: z.object({
-            connected: z.boolean(),
-            torrentsCount: z.number().optional(),
-            downloadSpeed: z.number().optional(),
-            uploadSpeed: z.number().optional(),
-            error: z.string().optional(),
+            connected: z.boolean().describe("Whether qBittorrent is connected"),
+            torrentsCount: z.number().optional().describe("Total number of active torrents"),
+            downloadSpeed: z.number().optional().describe("Current download speed in bytes/s"),
+            uploadSpeed: z.number().optional().describe("Current upload speed in bytes/s"),
+            error: z.string().optional().describe("Error message if connection failed"),
           }),
         },
       },
     },
     async () => {
-      const settings = await settingsService.getSettings();
-      const qbConfig = settings.qbittorrent;
-
-      if (!qbConfig.enabled || !qbConfig.url) {
-        return {
-          connected: false,
-          error: "qBittorrent not configured",
-        };
-      }
-
-      try {
-        const qbService = createQBittorrentService({
-          url: qbConfig.url,
-          username: qbConfig.username,
-          password: qbConfig.password,
-        });
-
-        const torrents = await qbService.getTorrents();
-        const downloadSpeed = torrents.reduce((sum, t) => sum + (t.dlspeed || 0), 0);
-        const uploadSpeed = torrents.reduce((sum, t) => sum + (t.upspeed || 0), 0);
-
-        return {
-          connected: true,
-          torrentsCount: torrents.length,
-          downloadSpeed,
-          uploadSpeed,
-        };
-      } catch (error) {
-        return {
-          connected: false,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-      }
+      return await settingsController.getQBittorrentStatus();
     }
   );
 };

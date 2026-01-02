@@ -26,8 +26,8 @@ export type SpeedProfileSettings = {
 export class SpeedProfileService {
   private settings: SpeedProfileSettings;
 
-  constructor(settings?: SpeedProfileSettings) {
-    this.settings = settings || this.getDefaultSettings();
+  constructor() {
+    this.settings = this.getDefaultSettings();
   }
 
   /**
@@ -226,12 +226,12 @@ export class SpeedProfileService {
 let speedProfileServiceInstance: SpeedProfileService | null = null;
 
 export function createSpeedProfileService(
-  settings?: SpeedProfileSettings
+  speedProfileSettings?: SpeedProfileSettings
 ): SpeedProfileService {
   if (!speedProfileServiceInstance) {
-    speedProfileServiceInstance = new SpeedProfileService(settings);
-  } else if (settings) {
-    speedProfileServiceInstance.updateSettings(settings);
+    speedProfileServiceInstance = new SpeedProfileService(speedProfileSettings);
+  } else if (speedProfileSettings) {
+    speedProfileServiceInstance.updateSettings(speedProfileSettings);
   }
   return speedProfileServiceInstance;
 }

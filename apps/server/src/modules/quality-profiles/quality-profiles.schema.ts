@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { IdParamsSchema } from "../../schemas/common.schema.js";
 
 export const QualityItemSchema = z.object({
   quality: z.enum([
@@ -28,9 +29,7 @@ export const QualityProfileResponseSchema = z.object({
   updatedAt: z.string(),
 });
 
-export const QualityProfileParamsSchema = z.object({
-  id: z.string(),
-});
+export const QualityProfileParamsSchema = IdParamsSchema;
 
 export const CreateQualityProfileSchema = z.object({
   name: z.string().min(1),
@@ -44,8 +43,4 @@ export const UpdateQualityProfileSchema = z.object({
 
 export const QualityProfileListResponseSchema = z.object({
   data: z.array(QualityProfileResponseSchema),
-});
-
-export const ErrorResponseSchema = z.object({
-  error: z.string(),
 });

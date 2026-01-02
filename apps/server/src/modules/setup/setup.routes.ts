@@ -1,23 +1,30 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { SetupService } from "./setup.service.js";
 import { SetupDataSchema, SetupStatusResponseSchema } from "./setup.schema.js";
 
+/**
+ * Setup Routes
+ * Pure HTTP routing - delegates to controller
+ * Clean Architecture: Route → Controller → Service → Repository
+ */
 const setupRoutes: FastifyPluginAsyncZod = async (app) => {
-  const setupService = new SetupService(app.db);
+  // Get controller from DI container
+  const { setupController } = app.container;
 
   // Get setup status
   app.get(
     "/status",
     {
       schema: {
+        tags: ["setup"],
+        summary: "Get setup status",
+        description: "Check if initial setup has been completed",
         response: {
           200: SetupStatusResponseSchema,
         },
       },
     },
-    async (_request, reply) => {
-      const status = await setupService.getSetupStatus();
-      return reply.code(200).send(status);
+    async () => {
+      return await setupController.getStatus();
     }
   );
 
@@ -26,16 +33,17 @@ const setupRoutes: FastifyPluginAsyncZod = async (app) => {
     "/",
     {
       schema: {
+        tags: ["setup"],
+        summary: "Complete initial setup",
+        description: "Perform initial application setup with admin user credentials",
         body: SetupDataSchema,
         response: {
           200: SetupStatusResponseSchema,
         },
       },
     },
-    async (request, reply) => {
-      await setupService.completeSetup(request.body);
-      const status = await setupService.getSetupStatus();
-      return reply.code(200).send(status);
+    async (request) => {
+      return await setupController.completeSetup(request.body);
     }
   );
 };

@@ -1,35 +1,36 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
+import { SuccessResponseSchema, ErrorResponseSchema } from "../../schemas/common.schema.js";
 import {
   TorrentHashParamsSchema,
   TorrentPrioritySchema,
   RemoveTorrentQuerySchema,
   TorrentListResponseSchema,
-  SuccessResponseSchema,
 } from "./torrents.schema.js";
 
+/**
+ * Torrents Routes
+ * Pure HTTP routing - delegates to controller
+ * Clean Architecture: Route → Controller → Service → External API (qBittorrent)
+ */
 const torrentsRoutes: FastifyPluginAsyncZod = async (app) => {
+  // Get controller from DI container
+  const { torrentsController } = app.container;
+
   // Get all torrents
   app.get(
     "/",
     {
       schema: {
+        tags: ["torrents"],
+        summary: "List torrents",
+        description: "Get all active torrents from qBittorrent with their current status and progress",
         response: {
           200: TorrentListResponseSchema,
         },
       },
     },
     async () => {
-      if (!app.qbittorrent) {
-        return { torrents: [], total: 0 };
-      }
-
-      const torrents = await app.qbittorrent.getTorrents();
-      const mapped = torrents.map((t) => app.qbittorrent!.mapTorrentInfo(t));
-
-      return {
-        torrents: mapped,
-        total: mapped.length,
-      };
+      return await torrentsController.list();
     }
   );
 
@@ -38,43 +39,30 @@ const torrentsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:hash/pause",
     {
       schema: {
+        tags: ["torrents"],
+        summary: "Pause torrent",
+        description: "Pause a torrent by its info hash",
         params: TorrentHashParamsSchema,
         response: {
           200: SuccessResponseSchema,
-          400: SuccessResponseSchema,
-          404: SuccessResponseSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
         },
       },
     },
     async (request, reply) => {
-      if (!app.qbittorrent) {
-        return reply.code(400).send({
-          success: false,
-          message: "qBittorrent not configured",
-        });
-      }
-
-      const { hash } = request.params;
-
       try {
-        const success = await app.qbittorrent.pauseTorrent(hash);
-
-        if (!success) {
-          return reply.code(404).send({
-            success: false,
-            message: `Torrent ${hash} not found`,
-          });
-        }
-
-        return {
-          success: true,
-          message: `Torrent ${hash} paused`,
-        };
+        return await torrentsController.pause(request.params);
       } catch (error) {
-        return reply.code(400).send({
-          success: false,
-          message: error instanceof Error ? error.message : "Unknown error",
-        });
+        if (error instanceof Error) {
+          if (error.message === "qBittorrent not configured") {
+            return reply.code(400).send({ error: error.message });
+          }
+          if (error.message.includes("not found")) {
+            return reply.code(404).send({ error: error.message });
+          }
+        }
+        throw error;
       }
     }
   );
@@ -84,43 +72,30 @@ const torrentsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:hash/resume",
     {
       schema: {
+        tags: ["torrents"],
+        summary: "Resume torrent",
+        description: "Resume a paused torrent by its info hash",
         params: TorrentHashParamsSchema,
         response: {
           200: SuccessResponseSchema,
-          400: SuccessResponseSchema,
-          404: SuccessResponseSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
         },
       },
     },
     async (request, reply) => {
-      if (!app.qbittorrent) {
-        return reply.code(400).send({
-          success: false,
-          message: "qBittorrent not configured",
-        });
-      }
-
-      const { hash } = request.params;
-
       try {
-        const success = await app.qbittorrent.resumeTorrent(hash);
-
-        if (!success) {
-          return reply.code(404).send({
-            success: false,
-            message: `Torrent ${hash} not found`,
-          });
-        }
-
-        return {
-          success: true,
-          message: `Torrent ${hash} resumed`,
-        };
+        return await torrentsController.resume(request.params);
       } catch (error) {
-        return reply.code(400).send({
-          success: false,
-          message: error instanceof Error ? error.message : "Unknown error",
-        });
+        if (error instanceof Error) {
+          if (error.message === "qBittorrent not configured") {
+            return reply.code(400).send({ error: error.message });
+          }
+          if (error.message.includes("not found")) {
+            return reply.code(404).send({ error: error.message });
+          }
+        }
+        throw error;
       }
     }
   );
@@ -130,48 +105,31 @@ const torrentsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:hash",
     {
       schema: {
+        tags: ["torrents"],
+        summary: "Remove torrent",
+        description: "Remove a torrent from qBittorrent, optionally deleting associated files",
         params: TorrentHashParamsSchema,
         querystring: RemoveTorrentQuerySchema,
         response: {
           200: SuccessResponseSchema,
-          400: SuccessResponseSchema,
-          404: SuccessResponseSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
         },
       },
     },
     async (request, reply) => {
-      if (!app.qbittorrent) {
-        return reply.code(400).send({
-          success: false,
-          message: "qBittorrent not configured",
-        });
-      }
-
-      const { hash } = request.params;
-      const { deleteFiles } = request.query;
-
       try {
-        const success = await app.qbittorrent.removeTorrent(
-          hash,
-          deleteFiles || false
-        );
-
-        if (!success) {
-          return reply.code(404).send({
-            success: false,
-            message: `Torrent ${hash} not found`,
-          });
-        }
-
-        return {
-          success: true,
-          message: `Torrent ${hash} removed${deleteFiles ? " with files" : ""}`,
-        };
+        return await torrentsController.remove(request.params, request.query);
       } catch (error) {
-        return reply.code(400).send({
-          success: false,
-          message: error instanceof Error ? error.message : "Unknown error",
-        });
+        if (error instanceof Error) {
+          if (error.message === "qBittorrent not configured") {
+            return reply.code(400).send({ error: error.message });
+          }
+          if (error.message.includes("not found")) {
+            return reply.code(404).send({ error: error.message });
+          }
+        }
+        throw error;
       }
     }
   );
@@ -181,48 +139,34 @@ const torrentsRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:hash/priority",
     {
       schema: {
+        tags: ["torrents"],
+        summary: "Change torrent priority",
+        description: "Update the download priority of a torrent (top, bottom, increase, decrease)",
         params: TorrentHashParamsSchema,
         body: TorrentPrioritySchema,
         response: {
           200: SuccessResponseSchema,
-          400: SuccessResponseSchema,
-          404: SuccessResponseSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
         },
       },
     },
     async (request, reply) => {
-      if (!app.qbittorrent) {
-        return reply.code(400).send({
-          success: false,
-          message: "qBittorrent not configured",
-        });
-      }
-
-      const { hash } = request.params;
-      const { priority } = request.body;
-
       try {
-        const success = await app.qbittorrent.setTorrentPriority(
-          hash,
-          priority
+        return await torrentsController.setPriority(
+          request.params,
+          request.body
         );
-
-        if (!success) {
-          return reply.code(404).send({
-            success: false,
-            message: `Torrent ${hash} not found`,
-          });
-        }
-
-        return {
-          success: true,
-          message: `Torrent ${hash} priority changed to ${priority}`,
-        };
       } catch (error) {
-        return reply.code(400).send({
-          success: false,
-          message: error instanceof Error ? error.message : "Unknown error",
-        });
+        if (error instanceof Error) {
+          if (error.message === "qBittorrent not configured") {
+            return reply.code(400).send({ error: error.message });
+          }
+          if (error.message.includes("not found")) {
+            return reply.code(404).send({ error: error.message });
+          }
+        }
+        throw error;
       }
     }
   );

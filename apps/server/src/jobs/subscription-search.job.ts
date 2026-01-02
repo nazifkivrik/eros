@@ -13,15 +13,12 @@ import {
   downloadQueue,
   scenes,
 } from "@repo/database";
-import { createTorrentSearchService } from "../services/torrent-search.service.js";
-import { createLogsService } from "../services/logs.service.js";
-import { getJobProgressService } from "../services/job-progress.service.js";
-import { createQBittorrentService } from "../services/qbittorrent.service.js";
-import { createSettingsService } from "../services/settings.service.js";
 import { nanoid } from "nanoid";
 
 export async function subscriptionSearchJob(app: FastifyInstance) {
-  const progressService = getJobProgressService();
+  // Get services from DI container
+  const { jobProgressService } = app.container;
+  const progressService = jobProgressService;
   app.log.info("Starting subscription search job");
 
   try {
@@ -102,8 +99,9 @@ async function processSubscription(
   current: number,
   total: number
 ) {
-  const logsService = createLogsService(app.db);
-  const progressService = getJobProgressService();
+  // Get services from DI container
+  const { logsService, jobProgressService } = app.container;
+  const progressService = jobProgressService;
 
   // Get entity details (performer or studio)
   let entity = null;
@@ -199,7 +197,7 @@ async function processSubscription(
 
   // Search for torrents using the new service with detailed logging
   try {
-    const torrentSearchService = createTorrentSearchService(app.db);
+    const { torrentSearchService } = app.container;
 
     app.log.info(`[Subscription Search] Searching for ${entityName}`);
 
@@ -254,7 +252,7 @@ async function processSubscription(
       );
 
       // Get qBittorrent settings
-      const settingsService = createSettingsService(app.db);
+      const { settingsService, qbittorrentService } = app.container;
       const settings = await settingsService.getSettings();
       const qbittorrentConfig = settings.qbittorrent;
 
@@ -262,23 +260,7 @@ async function processSubscription(
         `[Subscription Search] qBittorrent config: enabled=${qbittorrentConfig.enabled}, url=${qbittorrentConfig.url}`
       );
 
-      let qbittorrentService = null;
-      if (qbittorrentConfig.enabled && qbittorrentConfig.url) {
-        try {
-          qbittorrentService = createQBittorrentService({
-            url: qbittorrentConfig.url,
-            username: qbittorrentConfig.username,
-            password: qbittorrentConfig.password,
-          });
-          app.log.info(
-            `[Subscription Search] ✅ qBittorrent service initialized successfully`
-          );
-        } catch (error) {
-          app.log.error(
-            `[Subscription Search] ❌ Failed to initialize qBittorrent service: ${error instanceof Error ? error.message : "Unknown error"}`
-          );
-        }
-      } else {
+      if (!qbittorrentService || !qbittorrentConfig.enabled || !qbittorrentConfig.url) {
         app.log.warn(
           `[Subscription Search] ⚠️ qBittorrent not configured, torrents will only be added to database queue`
         );
@@ -329,12 +311,7 @@ async function processSubscription(
         // Create scene folder structure
         // For metadata-less scenes from torrent search, use simplified NFO (no poster)
         try {
-          const { createFileManagerService } = await import("../services/file-manager.service.js");
-          const fileManagerService = createFileManagerService(
-            app.db,
-            settings.general.scenesPath || "/media/scenes",
-            settings.general.incompletePath || "/media/incomplete"
-          );
+          const { fileManagerService } = app.container;
           const { folderPath } = await fileManagerService.setupSceneFilesSimplified(sceneId);
           app.log.info(
             `[Subscription Search] ✅ Created scene folder with simplified metadata: ${folderPath}`

@@ -1,31 +1,39 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { z } from "zod";
-import { eq } from "drizzle-orm";
-import { qualityProfiles } from "@repo/database";
-import { nanoid } from "nanoid";
+import {
+  ErrorResponseSchema,
+  SuccessResponseSchema,
+} from "../../schemas/common.schema.js";
 import {
   QualityProfileResponseSchema,
   QualityProfileParamsSchema,
   CreateQualityProfileSchema,
   UpdateQualityProfileSchema,
   QualityProfileListResponseSchema,
-  ErrorResponseSchema,
 } from "./quality-profiles.schema.js";
 
+/**
+ * Quality Profiles Routes
+ * Pure HTTP routing - delegates to controller
+ * Clean Architecture: Route → Controller → Service → Repository
+ */
 const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
+  // Get controller from DI container
+  const { qualityProfilesController } = app.container;
   // List quality profiles
   app.get(
     "/",
     {
       schema: {
+        tags: ["quality-profiles"],
+        summary: "List quality profiles",
+        description: "Get all quality profiles with their configured quality and source preferences",
         response: {
           200: QualityProfileListResponseSchema,
         },
       },
     },
     async () => {
-      const data = await app.db.query.qualityProfiles.findMany();
-      return { data: data as unknown as Array<z.infer<typeof QualityProfileResponseSchema>> };
+      return await qualityProfilesController.list();
     }
   );
 
@@ -34,6 +42,9 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
+        tags: ["quality-profiles"],
+        summary: "Get quality profile by ID",
+        description: "Retrieve detailed information about a specific quality profile including its items and preferences",
         params: QualityProfileParamsSchema,
         response: {
           200: QualityProfileResponseSchema,
@@ -42,17 +53,15 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
-      const { id } = request.params;
-
-      const profile = await app.db.query.qualityProfiles.findFirst({
-        where: eq(qualityProfiles.id, id),
-      });
-
-      if (!profile) {
-        return reply.code(404).send({ error: "Quality profile not found" });
+      try {
+        const profile = await qualityProfilesController.getById(request.params);
+        return profile;
+      } catch (error) {
+        if (error instanceof Error && error.message === "Quality profile not found") {
+          return reply.code(404).send({ error: "Quality profile not found" });
+        }
+        throw error;
       }
-
-      return profile as unknown as z.infer<typeof QualityProfileResponseSchema>;
     }
   );
 
@@ -61,6 +70,9 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
     "/",
     {
       schema: {
+        tags: ["quality-profiles"],
+        summary: "Create quality profile",
+        description: "Add a new quality profile with quality and source preferences. Items are automatically sorted from best to worst quality",
         body: CreateQualityProfileSchema,
         response: {
           201: QualityProfileResponseSchema,
@@ -69,35 +81,8 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
-      const { name, items } = request.body;
-
-      // Define quality order (best to worst)
-      const qualityOrder = ["2160p", "1080p", "720p", "480p", "any"];
-      const sourceOrder = ["bluray", "webdl", "webrip", "hdtv", "dvd", "any"];
-
-      // Auto-sort items from best to worst
-      const sortedItems = [...items].sort((a, b) => {
-        const qualityDiff = qualityOrder.indexOf(a.quality) - qualityOrder.indexOf(b.quality);
-        if (qualityDiff !== 0) return qualityDiff;
-        
-        // If quality is same, sort by source
-        return sourceOrder.indexOf(a.source) - sourceOrder.indexOf(b.source);
-      });
-
-      const id = nanoid();
-      const now = new Date().toISOString();
-
-      const newProfile = {
-        id,
-        name,
-        items: sortedItems,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      await app.db.insert(qualityProfiles).values(newProfile);
-
-      return reply.code(201).send(newProfile);
+      const profile = await qualityProfilesController.create(request.body);
+      return reply.code(201).send(profile);
     }
   );
 
@@ -106,6 +91,9 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
+        tags: ["quality-profiles"],
+        summary: "Update quality profile",
+        description: "Update an existing quality profile's name or items. Items are automatically sorted from best to worst quality",
         params: QualityProfileParamsSchema,
         body: UpdateQualityProfileSchema,
         response: {
@@ -116,46 +104,15 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
-      const { id } = request.params;
-      const { name, items } = request.body;
-
-      const existing = await app.db.query.qualityProfiles.findFirst({
-        where: eq(qualityProfiles.id, id),
-      });
-
-      if (!existing) {
-        return reply.code(404).send({ error: "Quality profile not found" });
+      try {
+        const updated = await qualityProfilesController.update(request.params, request.body);
+        return updated;
+      } catch (error) {
+        if (error instanceof Error && error.message === "Quality profile not found") {
+          return reply.code(404).send({ error: "Quality profile not found" });
+        }
+        throw error;
       }
-
-      // Define quality order (best to worst)
-      const qualityOrder = ["2160p", "1080p", "720p", "480p", "any"];
-      const sourceOrder = ["bluray", "webdl", "webrip", "hdtv", "dvd", "any"];
-
-      // Auto-sort items from best to worst
-      const sortedItems = [...items].sort((a, b) => {
-        const qualityDiff = qualityOrder.indexOf(a.quality) - qualityOrder.indexOf(b.quality);
-        if (qualityDiff !== 0) return qualityDiff;
-        
-        // If quality is same, sort by source
-        return sourceOrder.indexOf(a.source) - sourceOrder.indexOf(b.source);
-      });
-
-      const now = new Date().toISOString();
-
-      await app.db
-        .update(qualityProfiles)
-        .set({
-          name,
-          items: sortedItems,
-          updatedAt: now,
-        })
-        .where(eq(qualityProfiles.id, id));
-
-      const updated = await app.db.query.qualityProfiles.findFirst({
-        where: eq(qualityProfiles.id, id),
-      });
-
-      return updated as unknown as z.infer<typeof QualityProfileResponseSchema>;
     }
   );
 
@@ -164,29 +121,25 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
     "/:id",
     {
       schema: {
+        tags: ["quality-profiles"],
+        summary: "Delete quality profile",
+        description: "Delete a quality profile by ID. This will affect any subscriptions using this profile",
         params: QualityProfileParamsSchema,
         response: {
-          200: z.object({
-            success: z.boolean(),
-          }),
+          200: SuccessResponseSchema,
           404: ErrorResponseSchema,
         },
       },
     },
     async (request, reply) => {
-      const { id } = request.params;
-
-      const existing = await app.db.query.qualityProfiles.findFirst({
-        where: eq(qualityProfiles.id, id),
-      });
-
-      if (!existing) {
-        return reply.code(404).send({ error: "Quality profile not found" });
+      try {
+        return await qualityProfilesController.delete(request.params);
+      } catch (error) {
+        if (error instanceof Error && error.message === "Quality profile not found") {
+          return reply.code(404).send({ error: "Quality profile not found" });
+        }
+        throw error;
       }
-
-      await app.db.delete(qualityProfiles).where(eq(qualityProfiles.id, id));
-
-      return { success: true };
     }
   );
 };

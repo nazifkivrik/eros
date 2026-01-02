@@ -9,7 +9,10 @@ import { appSettings } from "@repo/database";
 import { DEFAULT_SETTINGS, type AppSettings } from "@repo/shared-types";
 
 export class SettingsService {
-  constructor(private db: Database) {}
+  private db: Database;
+  constructor({ db }: { db: Database }) {
+    this.db = db;
+  }
 
 
   /**
@@ -23,17 +26,6 @@ export class SettingsService {
     if (setting) {
       // Deep merge saved settings over DEFAULT_SETTINGS to ensure all required fields exist
       const savedSettings = setting.value as Partial<AppSettings>;
-
-      // Debug log
-      app.log.info(
-        {
-          hasStashdb: !!savedSettings.stashdb,
-          stashdbEnabled: savedSettings.stashdb?.enabled,
-          hasApiKey: !!savedSettings.stashdb?.apiKey,
-          apiKeyLength: savedSettings.stashdb?.apiKey?.length,
-        },
-        "[SettingsService] Loaded from DB"
-      );
 
       return {
         general: {
@@ -138,7 +130,6 @@ export class SettingsService {
       });
     }
 
-    app.log.info("[SettingsService] Settings updated successfully");
     return settings;
   }
 
@@ -363,5 +354,5 @@ export class SettingsService {
 export function createSettingsService(
   db: Database
 ): SettingsService {
-  return new SettingsService(db);
+  return new SettingsService({ db });
 }

@@ -7,21 +7,21 @@
 import type { FastifyInstance } from "fastify";
 import { eq, and, lt } from "drizzle-orm";
 import { downloadQueue } from "@repo/database";
-import { createLogsService } from "../services/logs.service.js";
-import { createSettingsService } from "../services/settings.service.js";
 
 export async function qbittorrentCleanupJob(app: FastifyInstance) {
   app.log.info("Starting qBittorrent cleanup job");
 
-  if (!app.qbittorrent) {
+  // Get services from DI container
+  const { qbittorrentService } = app.container;
+
+  if (!qbittorrentService) {
     app.log.warn("qBittorrent not configured, skipping cleanup job");
     return;
   }
 
   try {
-    const settingsService = createSettingsService(app.db);
+    const { settingsService, logsService } = app.container;
     const settings = await settingsService.getSettings();
-    const logsService = createLogsService(app.db);
 
     const daysToKeep = settings.fileManagement.removeFromQbitAfterDays;
 
@@ -63,7 +63,7 @@ export async function qbittorrentCleanupJob(app: FastifyInstance) {
     for (const torrent of torrentsToRemove) {
       try {
         // Remove from qBittorrent (keep files on disk)
-        await app.qbittorrent.removeTorrent(torrent.qbitHash!, false);
+        await qbittorrentService.removeTorrent(torrent.qbitHash!, false);
 
         // Clear qbitHash from database
         await app.db

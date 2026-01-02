@@ -11,10 +11,13 @@ import type { TPDBService } from "./tpdb/tpdb.service";
 import { logger } from "../utils/logger.js";
 
 export class EntityResolverService {
-  constructor(
-    private db: Database,
-    private tpdb?: TPDBService
-  ) {}
+  private db: Database;
+  private tpdb?: TPDBService;
+
+  constructor({ db, tpdb }: { db: Database; tpdb?: TPDBService }) {
+    this.db = db;
+    this.tpdb = tpdb;
+  }
 
   /**
    * Resolve performer entity ID
@@ -195,5 +198,5 @@ export function createEntityResolverService(
   db: Database,
   tpdb?: TPDBService
 ): EntityResolverService {
-  return new EntityResolverService(db, tpdb);
+  return new EntityResolverService({ db, tpdb });
 }

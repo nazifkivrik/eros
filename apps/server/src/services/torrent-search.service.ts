@@ -4,9 +4,9 @@
  */
 
 import type { Database } from "@repo/database";
-import { createLogsService } from "./logs.service.js";
-import { createSettingsService } from "./settings.service.js";
-import { createAIMatchingService } from "./ai-matching.service.js";
+import type { LogsService } from "./logs.service.js";
+import type { SettingsService } from "./settings.service.js";
+import type { AIMatchingService } from "./ai-matching.service.js";
 import { SceneMatcher } from "./matching/scene-matcher.service.js";
 import { logger } from "../utils/logger.js";
 import type { MatchSettings, SceneMetadata as MatchSceneMetadata } from "./matching/match-types.js";
@@ -41,14 +41,26 @@ interface SceneMetadata {
 }
 
 export class TorrentSearchService {
-  private logsService;
-  private settingsService;
-  private aiMatchingService;
+  private db: Database;
+  private logsService: LogsService;
+  private settingsService: SettingsService;
+  private aiMatchingService: AIMatchingService;
 
-  constructor(private db: Database) {
-    this.logsService = createLogsService(db);
-    this.settingsService = createSettingsService(db);
-    this.aiMatchingService = createAIMatchingService();
+  constructor({
+    db,
+    logsService,
+    settingsService,
+    aiMatchingService,
+  }: {
+    db: Database;
+    logsService: LogsService;
+    settingsService: SettingsService;
+    aiMatchingService: AIMatchingService;
+  }) {
+    this.db = db;
+    this.logsService = logsService;
+    this.settingsService = settingsService;
+    this.aiMatchingService = aiMatchingService;
   }
 
   /**
@@ -115,11 +127,11 @@ export class TorrentSearchService {
       // Step 6: Process Unmatched Results (metadata-less scenes)
       const unmatchedTorrents = includeMetadataMissing
         ? await this.processUnmatchedResults(
-            unmatched,
-            qualityProfileId,
-            entityType,
-            entityId
-          )
+          unmatched,
+          qualityProfileId,
+          entityType,
+          entityId
+        )
         : [];
 
       const allSelectedTorrents = [...matchedTorrents, ...unmatchedTorrents];
@@ -807,7 +819,10 @@ export class TorrentSearchService {
     }
 
     // 3. Initialize SceneMatcher
-    const matcher = new SceneMatcher(this.aiMatchingService, this.logsService);
+    const matcher = new SceneMatcher({
+      aiMatchingService: this.aiMatchingService,
+      logsService: this.logsService,
+    });
 
     // 4. Find BEST match for each group (not first match)
     const matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }> = [];
@@ -1166,7 +1181,15 @@ export class TorrentSearchService {
 
 // Export factory function
 export function createTorrentSearchService(
-  db: Database
+  db: Database,
+  logsService: LogsService,
+  settingsService: SettingsService,
+  aiMatchingService: AIMatchingService
 ): TorrentSearchService {
-  return new TorrentSearchService(db);
+  return new TorrentSearchService({
+    db,
+    logsService,
+    settingsService,
+    aiMatchingService,
+  });
 }
