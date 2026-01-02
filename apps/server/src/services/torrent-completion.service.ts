@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import type { FileManagerService } from "./file-manager.service.js";
 import type { QBittorrentService } from "./qbittorrent.service.js";
 import type { LogsService } from "./logs.service.js";
+import { logger } from "../utils/logger.js";
 
 export class TorrentCompletionService {
   constructor(
@@ -212,7 +213,7 @@ export class TorrentCompletionService {
 
       return largestFile?.path || null;
     } catch (error) {
-      console.error(`Error finding media file in ${directoryPath}:`, error);
+      logger.error({ error, directoryPath }, "Error finding media file");
       return null;
     }
   }

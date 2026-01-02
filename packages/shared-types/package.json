@@ -16,6 +16,9 @@
     "lint": "eslint .",
     "clean": "rm -rf dist .turbo node_modules"
   },
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
     "tsup": "^8.3.5",

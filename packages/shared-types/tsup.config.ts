@@ -10,7 +10,8 @@ export default defineConfig({
   splitting: false,
   treeshake: true,
   target: "node20",
-  skipNodeModulesBundle: true,
+  // Bundle zod to avoid runtime dependency issues in Docker
+  noExternal: ["zod"],
   keepNames: true,
   shims: false,
 });

@@ -2,6 +2,7 @@ import type { Database } from "@repo/database";
 import { eq } from "drizzle-orm";
 import { qualityProfiles } from "@repo/database";
 import type { AIMatchingService } from "./ai-matching.service.js";
+import { logger } from "../utils/logger.js";
 
 export type TorrentResult = {
   title: string;
@@ -159,7 +160,7 @@ export class DownloadService {
         return await this.calculateMatchScoreAI(torrentTitle, expectedTitle);
       } catch (error) {
         // Fall back to Levenshtein if AI fails
-        console.error("AI matching failed, falling back to Levenshtein:", error);
+        logger.error({ error }, "AI matching failed, falling back to Levenshtein");
       }
     }
 

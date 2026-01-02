@@ -4,7 +4,7 @@
  */
 
 import { EventEmitter } from "events";
-import type { JobProgressEvent } from "@repo/shared-types";
+import type { JobProgressEvent, JobName } from "@repo/shared-types";
 
 export class JobProgressService extends EventEmitter {
   private static instance: JobProgressService;
@@ -24,7 +24,7 @@ export class JobProgressService extends EventEmitter {
   /**
    * Emit job started event
    */
-  emitStarted(jobName: string, message: string, data?: Record<string, any>) {
+  emitStarted(jobName: JobName, message: string, data?: Record<string, any>) {
     const event: JobProgressEvent = {
       jobName,
       status: "started",
@@ -39,7 +39,7 @@ export class JobProgressService extends EventEmitter {
    * Emit job progress event
    */
   emitProgress(
-    jobName: string,
+    jobName: JobName,
     message: string,
     current: number,
     total: number,
@@ -64,7 +64,7 @@ export class JobProgressService extends EventEmitter {
    * Emit job completed event
    */
   emitCompleted(
-    jobName: string,
+    jobName: JobName,
     message: string,
     data?: Record<string, any>
   ) {
@@ -81,7 +81,7 @@ export class JobProgressService extends EventEmitter {
   /**
    * Emit job failed event
    */
-  emitFailed(jobName: string, message: string, data?: Record<string, any>) {
+  emitFailed(jobName: JobName, message: string, data?: Record<string, any>) {
     const event: JobProgressEvent = {
       jobName,
       status: "failed",

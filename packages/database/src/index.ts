@@ -24,3 +24,4 @@ export function createDatabase(path: string) {
 
 export * from "./schema.js";
 export type Database = ReturnType<typeof createDatabase>;
+export type DatabaseInstance = Database;

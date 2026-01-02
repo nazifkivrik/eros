@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { Studio } from "@repo/shared-types";
 import { useStudioDetails } from "@/hooks/useSearch";
 import { useCheckSubscription, useDeleteSubscription } from "@/hooks/useSubscriptions";
 import {
@@ -20,7 +21,7 @@ import { UnsubscribeConfirmDialog } from "./UnsubscribeConfirmDialog";
 interface StudioDetailDialogProps {
   studioId: string | null;
   onClose: () => void;
-  onSubscribe: (studio: any) => void;
+  onSubscribe: (studio: Studio) => void;
 }
 
 export function StudioDetailDialog({
@@ -63,7 +64,7 @@ export function StudioDetailDialog({
           <DialogDescription>
             {isLoading
               ? "Loading studio details"
-              : studio?.disambiguation || "Studio details and information"}
+              : studio?.description || "Studio details and information"}
           </DialogDescription>
         </DialogHeader>
 
@@ -104,30 +105,17 @@ export function StudioDetailDialog({
                   </div>
                 )}
 
-                {studio.parentStudioName && (
+                {studio.parentStudioId && (
                   <div className="text-sm">
-                    <span className="text-muted-foreground">Parent Studio: </span>
-                    <span className="font-medium">{studio.parentStudioName}</span>
+                    <span className="text-muted-foreground">Parent Studio ID: </span>
+                    <span className="font-medium">{studio.parentStudioId}</span>
                   </div>
                 )}
 
-                {studio.networkName && (
+                {studio.networkId && (
                   <div className="text-sm">
-                    <span className="text-muted-foreground">Network: </span>
-                    <span className="font-medium">{studio.networkName}</span>
-                  </div>
-                )}
-
-                {studio.aliases && studio.aliases.length > 0 && (
-                  <div>
-                    <h3 className="font-medium mb-2">Aliases</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {studio.aliases.map((alias: string, idx: number) => (
-                        <Badge key={idx} variant="secondary">
-                          {alias}
-                        </Badge>
-                      ))}
-                    </div>
+                    <span className="text-muted-foreground">Network ID: </span>
+                    <span className="font-medium">{studio.networkId}</span>
                   </div>
                 )}
               </div>
@@ -135,7 +123,7 @@ export function StudioDetailDialog({
 
             <SubscriptionFooter
               isSubscribed={subscriptionStatus?.subscribed || false}
-              subscription={subscriptionStatus?.subscription}
+              subscription={subscriptionStatus?.subscription ?? undefined}
               onClose={onClose}
               onSubscribe={() => onSubscribe(studio)}
               onUnsubscribe={() => setShowUnsubscribeDialog(true)}

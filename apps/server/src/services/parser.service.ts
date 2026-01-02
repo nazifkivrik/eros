@@ -3,11 +3,11 @@
  * Parses torrent titles to extract quality, resolution, codec, and other metadata
  */
 
-import type { Quality } from "@repo/shared-types";
+import type { Resolution } from "@repo/shared-types";
 
 interface ParsedTorrent {
   title: string;
-  quality: Quality | null;
+  quality: Resolution | null;
   resolution: string | null;
   codec: string | null;
   source: string | null;
@@ -69,62 +69,27 @@ export class TorrentParserService {
   }
 
   /**
-   * Extract quality from title
+   * Extract quality (resolution) from title
    */
-  private extractQuality(title: string): Quality | null {
+  private extractQuality(title: string): Resolution | null {
     // 2160p (4K)
     if (title.includes("2160p")) {
-      if (title.includes("bluray") || title.includes("blu-ray")) {
-        return "2160p_bluray";
-      }
-      if (
-        title.includes("webdl") ||
-        title.includes("web-dl") ||
-        title.includes("webrip")
-      ) {
-        return "2160p_webdl";
-      }
-      return "2160p_webdl"; // Default to webdl for 2160p
+      return "2160p";
     }
 
     // 1080p
     if (title.includes("1080p")) {
-      if (title.includes("bluray") || title.includes("blu-ray")) {
-        return "1080p_bluray";
-      }
-      if (
-        title.includes("webdl") ||
-        title.includes("web-dl") ||
-        title.includes("webrip")
-      ) {
-        return "1080p_webdl";
-      }
-      return "1080p_webdl"; // Default to webdl for 1080p
+      return "1080p";
     }
 
     // 720p
     if (title.includes("720p")) {
-      if (title.includes("bluray") || title.includes("blu-ray")) {
-        return "720p_bluray";
-      }
-      if (
-        title.includes("webdl") ||
-        title.includes("web-dl") ||
-        title.includes("webrip")
-      ) {
-        return "720p_webdl";
-      }
-      return "720p_webdl"; // Default to webdl for 720p
+      return "720p";
     }
 
     // 480p
     if (title.includes("480p")) {
-      return "480p_webdl";
-    }
-
-    // DVD
-    if (title.includes("dvd") && !title.includes("dvdrip")) {
-      return "dvd";
+      return "480p";
     }
 
     return "any";
@@ -283,7 +248,7 @@ export class TorrentParserService {
    */
   selectBestTorrent(
     torrents: ParsedTorrent[],
-    qualityProfile: Array<{ quality: Quality; order: number }>
+    qualityProfile: Array<{ quality: Resolution; order: number }>
   ): ParsedTorrent | null {
     if (torrents.length === 0) return null;
 

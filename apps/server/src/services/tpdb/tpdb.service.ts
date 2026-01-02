@@ -1,13 +1,24 @@
 import type {
-  TPDBConfig,
-  TPDBContentType,
-  TPDBResponse,
-  TPDBScene,
   TPDBPerformer,
+  TPDBScene,
   TPDBSite,
-} from "./tpdb.types.js";
-import type { Gender } from "@repo/shared-types";
-import { deduplicateScenes } from "../../utils/scene-deduplicator.js";
+  TPDBPaginatedResponse,
+  TPDBSingleResponse,
+} from "@repo/shared-types";
+import type { Performer, Scene, Studio } from "@repo/shared-types";
+import {
+  mapTPDBPerformerToPerformer,
+  mapTPDBSceneToScene,
+  mapTPDBSiteToStudio,
+} from "./tpdb.mappers.js";
+import { logger } from "../../utils/logger.js";
+
+export type TPDBConfig = {
+  apiUrl: string;
+  apiKey: string;
+};
+
+export type TPDBContentType = "scene" | "jav" | "movie";
 
 export class TPDBService {
   private baseUrl: string;
@@ -37,37 +48,40 @@ export class TPDBService {
   }
 
   // Scene Methods
-  async searchScenes(query: string, options?: {
-    limit?: number;
-    page?: number;
-    contentType?: TPDBContentType;
-    deduplicate?: boolean;
-  }) {
+  async searchScenes(
+    query: string,
+    options?: {
+      limit?: number;
+      page?: number;
+      contentType?: TPDBContentType;
+    }
+  ): Promise<Omit<Scene, "createdAt" | "updatedAt">[]> {
     const contentType = options?.contentType || "scene";
-    const endpoint = `/${contentType}s?q=${encodeURIComponent(query)}&per_page=${options?.limit || 20}&page=${options?.page || 1}`;
+    const endpoint = `/${contentType}s?q=${encodeURIComponent(query)}&per_page=${
+      options?.limit || 20
+    }&page=${options?.page || 1}`;
 
-    const response = await this.request<TPDBResponse<TPDBScene[]>>(endpoint);
-    const mappedScenes = response.data.map(s => this.mapScene(s, contentType));
-
-    // Apply deduplication if requested (default: true)
-    const shouldDeduplicate = options?.deduplicate !== false;
-    return shouldDeduplicate ? deduplicateScenes(mappedScenes) : mappedScenes;
+    const response = await this.request<TPDBPaginatedResponse<TPDBScene>>(endpoint);
+    return response.data.map((scene) => mapTPDBSceneToScene(scene));
   }
 
-  async getSceneById(id: string, contentType: TPDBContentType = "scene") {
+  async getSceneById(
+    id: string,
+    contentType: TPDBContentType = "scene"
+  ): Promise<Omit<Scene, "createdAt" | "updatedAt">> {
     const endpoint = `/${contentType}s/${id}`;
-    const response = await this.request<TPDBResponse<TPDBScene>>(endpoint);
-    return this.mapScene(response.data, contentType);
+    const response = await this.request<TPDBSingleResponse<TPDBScene>>(endpoint);
+    return mapTPDBSceneToScene(response.data);
   }
 
-  async getSceneByHash(hash: string, _hashType: "OSHASH" | "PHASH") {
+  async getSceneByHash(hash: string, _hashType: "OSHASH" | "PHASH"): Promise<Omit<Scene, "createdAt" | "updatedAt"> | null> {
     // Try all content types
     for (const contentType of ["scene", "jav", "movie"] as TPDBContentType[]) {
       try {
         const endpoint = `/${contentType}s/hash/${hash}`;
-        const response = await this.request<TPDBResponse<TPDBScene>>(endpoint);
+        const response = await this.request<TPDBSingleResponse<TPDBScene>>(endpoint);
         if (response.data) {
-          return this.mapScene(response.data, contentType);
+          return mapTPDBSceneToScene(response.data);
         }
       } catch (error) {
         // Continue to next content type
@@ -78,25 +92,27 @@ export class TPDBService {
   }
 
   // Performer Methods
-  async searchPerformers(query: string, limit = 20) {
+  async searchPerformers(
+    query: string,
+    limit = 20
+  ): Promise<Omit<Performer, "createdAt" | "updatedAt">[]> {
     const endpoint = `/performers?q=${encodeURIComponent(query)}&per_page=${limit}`;
-    const response = await this.request<TPDBResponse<TPDBPerformer[]>>(endpoint);
-    return response.data.map(p => this.mapPerformer(p));
+    const response = await this.request<TPDBPaginatedResponse<TPDBPerformer>>(endpoint);
+    return response.data.map((performer) => mapTPDBPerformerToPerformer(performer));
   }
 
-  async getPerformerById(id: string) {
+  async getPerformerById(id: string): Promise<Omit<Performer, "createdAt" | "updatedAt">> {
     const endpoint = `/performers/${id}`;
-    const response = await this.request<TPDBResponse<TPDBPerformer>>(endpoint);
-    return this.mapPerformer(response.data);
+    const response = await this.request<TPDBSingleResponse<TPDBPerformer>>(endpoint);
+    return mapTPDBPerformerToPerformer(response.data);
   }
 
   async getPerformerScenes(
     id: string,
     contentType?: TPDBContentType,
-    page = 1,
-    deduplicate = true
+    page = 1
   ): Promise<{
-    scenes: ReturnType<typeof this.mapScene>[];
+    scenes: Omit<Scene, "createdAt" | "updatedAt">[];
     pagination?: {
       currentPage: number;
       lastPage: number;
@@ -106,33 +122,30 @@ export class TPDBService {
     };
   }> {
     const type = contentType || "scene";
-    // JAV endpoint is special: /performers/{id}/javs (not /javs)
-    const endpoint = type === 'jav'
-      ? `/performers/${id}/jav?page=${page}`
-      : `/performers/${id}/${type}?page=${page}`;
+    // TPDB uses plural endpoints: /performers/{id}/scenes, /performers/{id}/javs, /performers/{id}/movies
+    const endpoint = `/performers/${id}/${type}s?page=${page}`;
 
     try {
-      const response = await this.request<TPDBResponse<TPDBScene[]>>(endpoint);
+      const response = await this.request<TPDBPaginatedResponse<TPDBScene>>(endpoint);
 
-      const mappedScenes = response.data.map(s => this.mapScene(s, type));
-
-      // Apply deduplication by default
-      const scenes = deduplicate ? deduplicateScenes(mappedScenes) : mappedScenes;
+      const scenes = response.data.map((scene) => mapTPDBSceneToScene(scene));
 
       // Transform pagination metadata
       let pagination;
       if (response.meta) {
-        const hasMore = response.meta.current_page < response.meta.last_page;
+        const hasMore = response.meta.current_page < response.meta.last;
 
         pagination = {
           currentPage: response.meta.current_page,
-          lastPage: response.meta.last_page,
+          lastPage: response.meta.last,
           perPage: response.meta.per_page,
           total: response.meta.total,
           hasMore,
         };
 
-        console.log(`[TPDB] ${type}s page ${page}: ${scenes.length} scenes (${response.meta.current_page}/${response.meta.last_page} pages, ${response.meta.total} total)`);
+        logger.info(
+          `[TPDB] ${type}s page ${page}: ${scenes.length} scenes (${response.meta.current_page}/${response.meta.last} pages, ${response.meta.total} total)`
+        );
       }
 
       return {
@@ -141,10 +154,10 @@ export class TPDBService {
       };
     } catch (error) {
       // If 404, performer has no content of this type - return empty (this is normal)
-      if (error instanceof Error && error.message.includes('404')) {
+      if (error instanceof Error && error.message.includes("404")) {
         // Only log for non-JAV types or if debugging
-        if (type !== 'jav') {
-          console.log(`[TPDB] No ${type}s found for performer ${id}`);
+        if (type !== "jav") {
+          logger.info(`[TPDB] No ${type}s found for performer ${id}`);
         }
         return { scenes: [] };
       }
@@ -154,16 +167,16 @@ export class TPDBService {
   }
 
   // Site Methods (equivalent to Studios)
-  async searchSites(query: string) {
+  async searchSites(query: string): Promise<Omit<Studio, "createdAt" | "updatedAt">[]> {
     const endpoint = `/sites?q=${encodeURIComponent(query)}`;
-    const response = await this.request<TPDBResponse<TPDBSite[]>>(endpoint);
-    return response.data.map(s => this.mapSite(s));
+    const response = await this.request<TPDBPaginatedResponse<TPDBSite>>(endpoint);
+    return response.data.map((site) => mapTPDBSiteToStudio(site));
   }
 
-  async getSiteById(id: string) {
+  async getSiteById(id: string): Promise<Omit<Studio, "createdAt" | "updatedAt">> {
     const endpoint = `/sites/${id}`;
-    const response = await this.request<TPDBResponse<TPDBSite>>(endpoint);
-    return this.mapSite(response.data);
+    const response = await this.request<TPDBSingleResponse<TPDBSite>>(endpoint);
+    return mapTPDBSiteToStudio(response.data);
   }
 
   async testConnection(): Promise<boolean> {
@@ -173,172 +186,6 @@ export class TPDBService {
     } catch {
       return false;
     }
-  }
-
-  // Mappers
-  private mapScene(scene: TPDBScene, contentType: TPDBContentType) {
-    // Handle posters - TPDB returns it as an object, not an array
-    const posterImages: Array<{ url: string }> = [];
-    if (scene.posters && typeof scene.posters === 'object') {
-      if ('large' in scene.posters && scene.posters.large) {
-        posterImages.push({ url: scene.posters.large });
-      }
-      if ('medium' in scene.posters && scene.posters.medium) {
-        posterImages.push({ url: scene.posters.medium });
-      }
-    }
-
-    return {
-      id: String(scene.id || scene.uuid), // Ensure ID is string
-      stashdbId: null, // Not from TPDB
-      tpdbId: String(scene.id),
-      title: scene.title,
-      date: scene.date || null,
-      details: scene.description || null,
-      duration: scene.duration || null,
-      director: scene.director || null,
-      code: scene.code || null,
-      tpdbContentType: contentType,
-      urls: scene.url ? [scene.url] : [],
-      images: [
-        ...(scene.background?.full ? [{ url: scene.background.full }] : []),
-        ...posterImages,
-      ],
-      performers:
-        scene.performers?.map(p => ({
-          id: String(p.id || p._id), // Ensure ID is string
-          name: p.name,
-          disambiguation: p.parent?.disambiguation || null,
-        })) || [],
-      studio: scene.site
-        ? {
-            id: String(scene.site.id || scene.site.uuid), // Ensure ID is string
-            stashdbId: null, // Not from TPDB
-            name: scene.site.name,
-          }
-        : null,
-      tags: scene.tags?.map(t => t.name) || [],
-      hashes: scene.hashes,
-    };
-  }
-
-  private mapPerformer(performer: TPDBPerformer) {
-    // Format body modifications to string
-    const formatBodyMods = (mods?: Array<{ location: string; description?: string }>) => {
-      if (!mods || mods.length === 0) return null;
-      return mods
-        .map((m) => `${m.location}${m.description ? `: ${m.description}` : ""}`)
-        .join(", ");
-    };
-
-    // Format measurements
-    const formatMeasurements = () => {
-      if (!performer.measurements) return null;
-      const parts = [];
-      if (performer.measurements.chest) parts.push(String(performer.measurements.chest));
-      if (performer.measurements.waist) parts.push(String(performer.measurements.waist));
-      if (performer.measurements.hip) parts.push(String(performer.measurements.hip));
-      return parts.length > 0 ? parts.join("-") : null;
-    };
-
-    // Calculate career length
-    const careerLength = performer.career_start_year && performer.career_end_year
-      ? `${performer.career_end_year - performer.career_start_year} years`
-      : performer.career_start_year
-      ? `${new Date().getFullYear() - performer.career_start_year}+ years`
-      : null;
-
-    // Handle performer posters - can be object or array
-    const performerImages: Array<{ url: string }> = [];
-
-    // Add main images first
-    if (performer.image) performerImages.push({ url: performer.image });
-    if (performer.thumbnail && performer.thumbnail !== performer.image) {
-      performerImages.push({ url: performer.thumbnail });
-    }
-
-    // Then add posters
-    if (performer.posters) {
-      if (Array.isArray(performer.posters)) {
-        performerImages.push(...performer.posters.map(p => ({ url: p.url })));
-      } else if (typeof performer.posters === 'object') {
-        if ('large' in performer.posters && performer.posters.large) {
-          performerImages.push({ url: performer.posters.large });
-        }
-        if ('medium' in performer.posters && performer.posters.medium) {
-          performerImages.push({ url: performer.posters.medium });
-        }
-      }
-    }
-
-    return {
-      id: String(performer.id || performer._id),
-      stashdbId: null,
-      tpdbId: String(performer.id || performer._id),
-      name: performer.name,
-      aliases: performer.parent?.name ? [performer.parent.name] : [],
-      disambiguation: performer.parent?.disambiguation || null,
-      gender: this.mapGender(performer.extras?.gender),
-      birthdate: performer.extras?.birthday || performer.birth_date || null,
-      birthplace: performer.extras?.birthplace || null,
-      ethnicity: performer.extras?.ethnicity || null,
-      nationality: performer.extras?.nationality || null,
-      hairColor: performer.extras?.hair_colour || null,
-      eyeColor: performer.extras?.eye_colour || null,
-      height: performer.extras?.height || null,
-      weight: performer.extras?.weight || null,
-      cupSize: performer.extras?.cupsize || null,
-      fakeBoobs: performer.extras?.fake_boobs || false,
-      deathDate: null,
-      careerStartDate: performer.career_start_year ? String(performer.career_start_year) : null,
-      careerEndDate: performer.career_end_year ? String(performer.career_end_year) : null,
-      careerLength,
-      bio: performer.bio || null,
-      measurements: formatMeasurements(),
-      tattoos: performer.extras?.tattoos || formatBodyMods(performer.tattoos),
-      piercings: performer.extras?.piercings || formatBodyMods(performer.piercings),
-      images: performerImages,
-    };
-  }
-
-  private mapSite(site: TPDBSite) {
-    const images: Array<{ url: string }> = [];
-    if (site.logo) images.push({ url: site.logo });
-    if (site.poster && site.poster !== site.logo) images.push({ url: site.poster });
-    if (site.favicon && site.favicon !== site.logo) images.push({ url: site.favicon });
-
-    return {
-      id: String(site.id || site.uuid),
-      stashdbId: null,
-      tpdbId: String(site.id || site.uuid),
-      name: site.name,
-      aliases: site.short_name && site.short_name !== site.name ? [site.short_name] : [],
-      parentStudioId: site.parent?.id ? String(site.parent.id) : site.parent_id ? String(site.parent_id) : null,
-      parentStudioName: site.parent?.name || null,
-      networkId: site.network?.id ? String(site.network.id) : site.network_id ? String(site.network_id) : null,
-      networkName: site.network?.name || null,
-      description: site.description || null,
-      images,
-      url: site.url || null,
-    };
-  }
-
-  private mapGender(gender?: string): Gender | null {
-    if (!gender) return null;
-
-    const genderLower = gender.toLowerCase();
-    const genderMap: Record<string, Gender> = {
-      male: "male",
-      female: "female",
-      "trans male": "transgender_male",
-      "trans female": "transgender_female",
-      transgender: "transgender_female",
-      intersex: "intersex",
-      "non-binary": "non_binary",
-      nonbinary: "non_binary",
-    };
-
-    return genderMap[genderLower] || null;
   }
 }
 

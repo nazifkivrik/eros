@@ -4,7 +4,7 @@
  */
 
 import { eq, and } from "drizzle-orm";
-import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import type { Database } from "@repo/database";
 import {
   subscriptions,
   performers,
@@ -12,12 +12,13 @@ import {
   scenes,
   qualityProfiles,
   performersScenes,
-  studiosScenes,
   sceneFiles,
+  downloadQueue,
 } from "@repo/database";
 import { nanoid } from "nanoid";
-import type * as schema from "@repo/database";
 import type { TPDBService } from "./tpdb/tpdb.service.js";
+import { EntityResolverService } from "./entity-resolver.service.js";
+import { logger } from "../utils/logger.js";
 
 interface CreateSubscriptionInput {
   entityType: "performer" | "studio" | "scene";
@@ -44,140 +45,27 @@ interface Subscription {
 }
 
 export class SubscriptionService {
+  private entityResolver: EntityResolverService;
+
   constructor(
-    private db: BetterSQLite3Database<typeof schema>,
+    private db: Database,
     private tpdb?: TPDBService
-  ) {}
+  ) {
+    this.entityResolver = new EntityResolverService(db, tpdb);
+  }
 
   /**
    * Get local entity ID - checks local database first, then fetches from TPDB if available
+   * Delegates to EntityResolverService to eliminate code duplication
    */
   private async getLocalEntityId(
     entityType: string,
     entityId: string
   ): Promise<string | null> {
-    switch (entityType) {
-      case "performer": {
-        // Check local DB first by local ID
-        let performer = await this.db.query.performers.findFirst({
-          where: eq(performers.id, entityId),
-        });
-
-        // If not found by local ID, try by TPDB ID
-        if (!performer) {
-          performer = await this.db.query.performers.findFirst({
-            where: eq(performers.tpdbId, entityId),
-          });
-        }
-
-        // If still not found and TPDB is available, try fetching from TPDB
-        if (!performer && this.tpdb) {
-          try {
-            console.log(`[SubscriptionService] Performer ${entityId} not found locally, fetching from TPDB`);
-            const tpdbPerformer = await this.tpdb.getPerformerById(entityId);
-
-            if (tpdbPerformer) {
-              // Check once more if performer was created in the meantime (race condition)
-              performer = await this.db.query.performers.findFirst({
-                where: eq(performers.tpdbId, tpdbPerformer.id),
-              });
-
-              if (!performer) {
-                // Create performer in local DB
-                const localId = nanoid();
-                await this.db.insert(performers).values({
-                  id: localId,
-                  tpdbId: tpdbPerformer.id,
-                  name: tpdbPerformer.name,
-                  aliases: tpdbPerformer.aliases || [],
-                  disambiguation: tpdbPerformer.disambiguation,
-                  gender: tpdbPerformer.gender,
-                  birthdate: tpdbPerformer.birthdate,
-                  deathDate: tpdbPerformer.deathDate,
-                  careerStartDate: tpdbPerformer.careerStartDate,
-                  careerEndDate: tpdbPerformer.careerEndDate,
-                  careerLength: tpdbPerformer.careerLength,
-                  bio: tpdbPerformer.bio,
-                  measurements: tpdbPerformer.measurements,
-                  tattoos: tpdbPerformer.tattoos,
-                  piercings: tpdbPerformer.piercings,
-                  images: tpdbPerformer.images,
-                  createdAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                });
-                console.log(`[SubscriptionService] Created performer ${tpdbPerformer.name} with ID ${localId}`);
-                return localId;
-              }
-            }
-          } catch (error) {
-            console.error(`[SubscriptionService] Failed to fetch performer from TPDB:`, error);
-          }
-        }
-
-        return performer?.id || null;
-      }
-
-      case "studio": {
-        // Check local DB first by local ID
-        let studio = await this.db.query.studios.findFirst({
-          where: eq(studios.id, entityId),
-        });
-
-        // If not found by local ID, try by TPDB ID
-        if (!studio) {
-          studio = await this.db.query.studios.findFirst({
-            where: eq(studios.tpdbId, entityId),
-          });
-        }
-
-        // If still not found and TPDB is available, try fetching from TPDB
-        if (!studio && this.tpdb) {
-          try {
-            console.log(`[SubscriptionService] Studio ${entityId} not found locally, fetching from TPDB`);
-            const tpdbSite = await this.tpdb.getSiteById(entityId);
-
-            if (tpdbSite) {
-              // Check once more if studio was created in the meantime (race condition)
-              studio = await this.db.query.studios.findFirst({
-                where: eq(studios.tpdbId, tpdbSite.id),
-              });
-
-              if (!studio) {
-                // Create studio in local DB
-                const localId = nanoid();
-                await this.db.insert(studios).values({
-                  id: localId,
-                  tpdbId: tpdbSite.id,
-                  name: tpdbSite.name,
-                  aliases: tpdbSite.aliases || [],
-                  parentStudioId: tpdbSite.parentStudioId,
-                  url: tpdbSite.url,
-                  images: tpdbSite.images,
-                  createdAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                });
-                console.log(`[SubscriptionService] Created studio ${tpdbSite.name} with ID ${localId}`);
-                return localId;
-              }
-            }
-          } catch (error) {
-            console.error(`[SubscriptionService] Failed to fetch studio from TPDB:`, error);
-          }
-        }
-
-        return studio?.id || null;
-      }
-
-      case "scene": {
-        const scene = await this.db.query.scenes.findFirst({
-          where: eq(scenes.id, entityId),
-        });
-        return scene?.id || null;
-      }
-
-      default:
-        return null;
-    }
+    return this.entityResolver.resolveEntity(
+      entityType as "performer" | "studio" | "scene",
+      entityId
+    );
   }
 
   /**
@@ -196,7 +84,7 @@ export class SubscriptionService {
     );
 
     if (!localEntityId) {
-      console.error(
+      logger.error(
         `[SubscriptionService] Entity not found: ${input.entityType} with ID ${input.entityId}`
       );
       throw new Error(
@@ -223,7 +111,7 @@ export class SubscriptionService {
       entityName = scene?.title || localEntityId;
     }
 
-    console.log(
+    logger.info(
       `[SubscriptionService] Creating subscription for ${input.entityType}: ${entityName}`
     );
 
@@ -236,7 +124,7 @@ export class SubscriptionService {
     });
 
     if (existing) {
-      console.warn(
+      logger.warn(
         `[SubscriptionService] Subscription already exists for ${input.entityType}: ${entityName} (subscription ID: ${existing.id})`
       );
       throw new Error(`Subscription for ${entityName} already exists`);
@@ -259,11 +147,11 @@ export class SubscriptionService {
 
     try {
       await this.db.insert(subscriptions).values(subscription);
-      console.log(
+      logger.info(
         `[SubscriptionService] ✅ Created subscription for ${input.entityType}: ${entityName} (subscription ID: ${subscription.id})`
       );
     } catch (error) {
-      console.error(
+      logger.error(
         `[SubscriptionService] ❌ Failed to create subscription for ${input.entityType}: ${entityName}`,
         error
       );
@@ -302,7 +190,7 @@ export class SubscriptionService {
   ): Promise<void> {
     const now = new Date().toISOString();
 
-    console.log(
+    logger.info(
       `[SubscriptionService] Starting to subscribe to scenes for ${entityType} ${entityId}`
     );
 
@@ -320,13 +208,13 @@ export class SubscriptionService {
       });
 
       if (!performer) {
-        console.log(
+        logger.info(
           `[SubscriptionService] Performer ${entityId} not found in database`
         );
         return;
       }
 
-      console.log(
+      logger.info(
         `[SubscriptionService] Found performer: ${performer.name} (ID: ${performer.id})`
       );
 
@@ -336,7 +224,7 @@ export class SubscriptionService {
           where: eq(performersScenes.performerId, performer.id),
         });
 
-      console.log(
+      logger.info(
         `[SubscriptionService] Found ${performerSceneRecords.length} performer-scene records`
       );
 
@@ -358,37 +246,24 @@ export class SubscriptionService {
       });
 
       if (!studio) {
-        console.log(
+        logger.info(
           `[SubscriptionService] Studio ${entityId} not found in database`
         );
         return;
       }
 
-      console.log(
+      logger.info(
         `[SubscriptionService] Found studio: ${studio.name} (ID: ${studio.id})`
       );
 
-      // Find scenes by studio using junction table
-      const studioSceneRecords = await this.db.query.studiosScenes.findMany({
-        where: eq(studiosScenes.studioId, studio.id),
+      // Find scenes by studio using siteId foreign key
+      entityScenes = await this.db.query.scenes.findMany({
+        where: eq(scenes.siteId, studio.id),
       });
 
-      console.log(
-        `[SubscriptionService] Found ${studioSceneRecords.length} studio-scene records`
+      logger.info(
+        `[SubscriptionService] Found ${entityScenes.length} scenes for studio`
       );
-
-      // Get all scene IDs
-      const sceneIds = studioSceneRecords.map((ss) => ss.sceneId);
-
-      // Fetch all scenes
-      entityScenes = await Promise.all(
-        sceneIds.map((sceneId) =>
-          this.db.query.scenes.findFirst({
-            where: eq(scenes.id, sceneId),
-          })
-        )
-      );
-      entityScenes = entityScenes.filter(Boolean);
     }
 
     // Create subscriptions for each scene
@@ -423,20 +298,20 @@ export class SubscriptionService {
 
     // Bulk insert scene subscriptions
     if (filteredSubscriptions.length > 0) {
-      console.log(
+      logger.info(
         `[SubscriptionService] Creating ${filteredSubscriptions.length} scene subscriptions`
       );
       await this.db.insert(subscriptions).values(filteredSubscriptions);
 
       // Create folders and metadata for all new scene subscriptions
-      console.log(
+      logger.info(
         `[SubscriptionService] Creating folders and metadata for ${filteredSubscriptions.length} scenes`
       );
       for (const sub of filteredSubscriptions) {
         try {
           await this.createSceneFolderForSubscription(sub.entityId);
         } catch (error) {
-          console.error(
+          logger.error(
             `[SubscriptionService] Failed to create folder for scene ${sub.entityId}:`,
             error
           );
@@ -444,7 +319,7 @@ export class SubscriptionService {
         }
       }
     } else {
-      console.log(
+      logger.info(
         `[SubscriptionService] No new scene subscriptions to create (found ${entityScenes.length} scenes total)`
       );
     }
@@ -456,6 +331,7 @@ export class SubscriptionService {
 
   /**
    * Fetch scenes from TPDB and save to database
+   * Orchestrates the scene fetching and saving process
    */
   private async fetchAndSaveScenesFromTPDB(
     entityType: "performer" | "studio",
@@ -467,265 +343,36 @@ export class SubscriptionService {
 
     try {
       // Get TPDB ID from the entity
-      let tpdbId: string | null = null;
-
-      if (entityType === "performer") {
-        const performer = await this.db.query.performers.findFirst({
-          where: eq(performers.id, entityId),
-        });
-        tpdbId = performer?.tpdbId || null;
-      } else if (entityType === "studio") {
-        const studio = await this.db.query.studios.findFirst({
-          where: eq(studios.id, entityId),
-        });
-        tpdbId = studio?.tpdbId || null;
-      }
-
+      const tpdbId = await this.getTpdbIdForEntity(entityType, entityId);
       if (!tpdbId) {
-        console.log(`[SubscriptionService] No TPDB ID found for ${entityType} ${entityId}`);
+        logger.info(`[SubscriptionService] No TPDB ID found for ${entityType} ${entityId}`);
         return;
       }
 
-      console.log(`[SubscriptionService] Fetching scenes from TPDB for ${entityType} ${tpdbId}`);
+      logger.info(`[SubscriptionService] Fetching scenes from TPDB for ${entityType} ${tpdbId}`);
 
-      // Fetch scenes from TPDB
-      let tpdbScenes: any[] = [];
-      if (entityType === "performer") {
-        // Fetch from all content types and combine
-        const sceneTypes: Array<"scene" | "jav" | "movie"> = ["scene", "jav", "movie"];
-        const allScenes: any[] = [];
+      // Fetch and deduplicate scenes from TPDB
+      const tpdbScenes = await this.fetchPerformerScenesFromTPDB(
+        tpdbId,
+        entityType
+      );
 
-        for (const contentType of sceneTypes) {
-          try {
-            console.log(`[SubscriptionService] Fetching ${contentType}s for performer ${tpdbId}...`);
-
-            // Fetch all pages for this content type
-            let page = 1;
-            let hasMore = true;
-            let totalForType = 0;
-
-            while (hasMore) {
-              const result = await this.tpdb.getPerformerScenes(tpdbId, contentType, page, false);
-
-              if (result.scenes.length === 0) {
-                console.log(`[SubscriptionService]   Page ${page}: No more ${contentType}s found`);
-                hasMore = false;
-              } else {
-                console.log(`[SubscriptionService]   Page ${page}: Found ${result.scenes.length} ${contentType}s`);
-                allScenes.push(...result.scenes);
-                totalForType += result.scenes.length;
-
-                // Use pagination metadata if available
-                if (result.pagination) {
-                  hasMore = result.pagination.hasMore;
-                  console.log(`[SubscriptionService]   Progress: ${totalForType} / ${result.pagination.total} total ${contentType}s`);
-                } else {
-                  // Fallback: if no pagination metadata, check scene count
-                  // TPDB typically returns 20 scenes per page
-                  hasMore = result.scenes.length >= 20;
-                }
-
-                page++;
-              }
-            }
-
-            if (totalForType > 0) {
-              console.log(`[SubscriptionService] ✅ Total ${contentType}s fetched: ${totalForType}`);
-            } else {
-              console.log(`[SubscriptionService] No ${contentType}s found for performer ${tpdbId}`);
-            }
-          } catch (error) {
-            console.log(`[SubscriptionService] ❌ Error fetching ${contentType}s for performer ${tpdbId}:`, error);
-          }
-        }
-
-        // Apply deduplication across all content types
-        const { deduplicateScenes } = await import("../utils/scene-deduplicator.js");
-        console.log(`[SubscriptionService] Applying deduplication to ${allScenes.length} total scenes...`);
-        tpdbScenes = deduplicateScenes(allScenes);
-        const removed = allScenes.length - tpdbScenes.length;
-        console.log(`[SubscriptionService] ✅ Deduplication complete: ${tpdbScenes.length} unique scenes (removed ${removed} duplicates/trailers)`);
-      } else {
-        // TPDB doesn't have getSiteScenes, so we skip for now
-        console.log(`[SubscriptionService] Site scenes fetching not yet implemented`);
-        return;
-      }
-
-      console.log(`[SubscriptionService] Found ${tpdbScenes.length} unique scenes from TPDB`);
+      logger.info(`[SubscriptionService] Found ${tpdbScenes.length} unique scenes from TPDB`);
 
       // Save each scene to database
       for (const tpdbScene of tpdbScenes) {
         try {
-          // Advanced duplicate checking
-          let sceneId: string | null = null;
+          const sceneId = await this.saveSceneToDatabase(
+            tpdbScene,
+            entityType,
+            entityId
+          );
 
-          // 1. Check by tpdbId
-          const existingByTpdbId = await this.db.query.scenes.findFirst({
-            where: eq(scenes.tpdbId, tpdbScene.id),
-          });
-
-          if (existingByTpdbId) {
-            sceneId = existingByTpdbId.id;
-            console.log(`[SubscriptionService] Scene "${tpdbScene.title}" already exists (by tpdbId)`);
-          }
-
-          // 2. Check by title + date combination (very likely duplicate)
-          if (!sceneId && tpdbScene.title && tpdbScene.date) {
-            const existingByTitleDate = await this.db.query.scenes.findFirst({
-              where: and(
-                eq(scenes.title, tpdbScene.title),
-                eq(scenes.date, tpdbScene.date)
-              ),
-            });
-
-            if (existingByTitleDate) {
-              sceneId = existingByTitleDate.id;
-              console.log(`[SubscriptionService] Scene "${tpdbScene.title}" already exists (by title+date) - different tpdb_id detected!`);
-            }
-          }
-
-          // 3. Check by JAV code (for JAV content)
-          if (!sceneId && tpdbScene.tpdbContentType === 'jav' && tpdbScene.code) {
-            const baseCode = this.extractBaseStudioCode(tpdbScene.code);
-            if (baseCode) {
-              const allJavScenes = await this.db.query.scenes.findMany({
-                where: eq(scenes.tpdbContentType, 'jav'),
-              });
-
-              for (const javScene of allJavScenes) {
-                if (javScene.code) {
-                  const existingBaseCode = this.extractBaseStudioCode(javScene.code);
-                  if (existingBaseCode === baseCode) {
-                    sceneId = javScene.id;
-                    console.log(`[SubscriptionService] Scene "${tpdbScene.title}" already exists (by JAV code pattern: ${baseCode})`);
-                    break;
-                  }
-                }
-              }
-            }
-          }
-
-          // If no duplicate found, create new scene
-          if (!sceneId) {
-            sceneId = nanoid();
-            await this.db.insert(scenes).values({
-              id: sceneId,
-              tpdbId: tpdbScene.id,
-              tpdbContentType: tpdbScene.tpdbContentType,
-              title: tpdbScene.title,
-              date: tpdbScene.date,
-              details: tpdbScene.details,
-              duration: tpdbScene.duration,
-              director: tpdbScene.director,
-              code: tpdbScene.code,
-              urls: tpdbScene.urls,
-              images: tpdbScene.images,
-              hasMetadata: true,
-              inferredFromIndexers: false,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            });
-            console.log(`[SubscriptionService] Created scene "${tpdbScene.title}"`);
-          }
-
-          // Link the subscribed entity (performer) to the scene first
-          if (entityType === "performer") {
-            await this.db
-              .insert(performersScenes)
-              .values({
-                performerId: entityId,
-                sceneId: sceneId,
-              })
-              .onConflictDoNothing();
-          }
-
-          // Link other performers from scene to scene
-          if (tpdbScene.performers && tpdbScene.performers.length > 0) {
-            for (const tpdbPerformer of tpdbScene.performers) {
-              let performerRecord = await this.db.query.performers.findFirst({
-                where: eq(performers.tpdbId, tpdbPerformer.id),
-              });
-
-              if (!performerRecord) {
-                // Create performer if doesn't exist
-                const performerId = nanoid();
-                await this.db.insert(performers).values({
-                  id: performerId,
-                  tpdbId: tpdbPerformer.id,
-                  name: tpdbPerformer.name,
-                  aliases: [],
-                  disambiguation: tpdbPerformer.disambiguation,
-                  images: [],
-                  createdAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                });
-
-                performerRecord = await this.db.query.performers.findFirst({
-                  where: eq(performers.id, performerId),
-                });
-              }
-
-              if (performerRecord) {
-                // Link performer to scene
-                await this.db
-                  .insert(performersScenes)
-                  .values({
-                    performerId: performerRecord.id,
-                    sceneId: sceneId,
-                  })
-                  .onConflictDoNothing();
-              }
-            }
-          }
-
-          // Link the subscribed entity (studio) to the scene first
-          if (entityType === "studio") {
-            await this.db
-              .insert(studiosScenes)
-              .values({
-                studioId: entityId,
-                sceneId: sceneId,
-              })
-              .onConflictDoNothing();
-          }
-
-          // Link studio from scene metadata to scene
-          if (tpdbScene.studio) {
-            let studioRecord = await this.db.query.studios.findFirst({
-              where: eq(studios.tpdbId, tpdbScene.studio.id),
-            });
-
-            if (!studioRecord) {
-              // Create studio if doesn't exist
-              const studioId = nanoid();
-              await this.db.insert(studios).values({
-                id: studioId,
-                tpdbId: tpdbScene.studio.id,
-                name: tpdbScene.studio.name,
-                aliases: [],
-                images: [],
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              });
-
-              studioRecord = await this.db.query.studios.findFirst({
-                where: eq(studios.id, studioId),
-              });
-            }
-
-            if (studioRecord) {
-              // Link studio to scene
-              await this.db
-                .insert(studiosScenes)
-                .values({
-                  studioId: studioRecord.id,
-                  sceneId: sceneId,
-                })
-                .onConflictDoNothing();
-            }
+          if (sceneId) {
+            await this.linkSceneParticipants(sceneId, tpdbScene, entityType, entityId);
           }
         } catch (error) {
-          console.error(
+          logger.error(
             `[SubscriptionService] Failed to save scene ${tpdbScene.title}:`,
             error
           );
@@ -733,14 +380,313 @@ export class SubscriptionService {
         }
       }
 
-      console.log(`[SubscriptionService] Finished fetching scenes from TPDB`);
+      logger.info(`[SubscriptionService] Finished fetching scenes from TPDB`);
     } catch (error) {
-      console.error(
+      logger.error(
         `[SubscriptionService] Failed to fetch scenes from TPDB for ${entityType} ${entityId}:`,
         error
       );
       // Don't throw - continue with subscription
     }
+  }
+
+  /**
+   * Get TPDB ID for entity
+   */
+  private async getTpdbIdForEntity(
+    entityType: "performer" | "studio",
+    entityId: string
+  ): Promise<string | null> {
+    if (entityType === "performer") {
+      const performer = await this.db.query.performers.findFirst({
+        where: eq(performers.id, entityId),
+      });
+      return performer?.externalIds.find((e) => e.source === "tpdb")?.id || null;
+    } else {
+      const studio = await this.db.query.studios.findFirst({
+        where: eq(studios.id, entityId),
+      });
+      return studio?.externalIds.find((e) => e.source === "tpdb")?.id || null;
+    }
+  }
+
+  /**
+   * Fetch performer scenes from TPDB with pagination and deduplication
+   */
+  private async fetchPerformerScenesFromTPDB(
+    tpdbId: string,
+    entityType: "performer" | "studio"
+  ): Promise<any[]> {
+    if (!this.tpdb) {
+      return [];
+    }
+
+    if (entityType === "studio") {
+      // TPDB doesn't have getSiteScenes, so we skip for now
+      logger.info(`[SubscriptionService] Site scenes fetching not yet implemented`);
+      return [];
+    }
+
+    // Fetch from all content types and combine
+    const sceneTypes: Array<"scene" | "jav" | "movie"> = ["scene", "jav", "movie"];
+    const allScenes: any[] = [];
+
+    for (const contentType of sceneTypes) {
+      try {
+        logger.info(`[SubscriptionService] Fetching ${contentType}s for performer ${tpdbId}...`);
+
+        let page = 1;
+        let hasMore = true;
+        let totalForType = 0;
+
+        while (hasMore) {
+          const result = await this.tpdb.getPerformerScenes(tpdbId, contentType, page);
+
+          if (result.scenes.length === 0) {
+            logger.info(`[SubscriptionService]   Page ${page}: No more ${contentType}s found`);
+            hasMore = false;
+          } else {
+            logger.info(
+              `[SubscriptionService]   Page ${page}: Found ${result.scenes.length} ${contentType}s`
+            );
+            allScenes.push(...result.scenes);
+            totalForType += result.scenes.length;
+
+            // Use pagination metadata if available
+            if (result.pagination) {
+              hasMore = result.pagination.hasMore;
+              logger.info(
+                `[SubscriptionService]   Progress: ${totalForType} / ${result.pagination.total} total ${contentType}s`
+              );
+            } else {
+              // Fallback: if no pagination metadata, check scene count
+              // TPDB typically returns 20 scenes per page
+              hasMore = result.scenes.length >= 20;
+            }
+
+            page++;
+          }
+        }
+
+        if (totalForType > 0) {
+          logger.info(`[SubscriptionService] ✅ Total ${contentType}s fetched: ${totalForType}`);
+        } else {
+          logger.info(`[SubscriptionService] No ${contentType}s found for performer ${tpdbId}`);
+        }
+      } catch (error) {
+        logger.info(
+          `[SubscriptionService] ❌ Error fetching ${contentType}s for performer ${tpdbId}:`,
+          error
+        );
+      }
+    }
+
+    // Apply deduplication across all content types
+    const { deduplicateScenes } = await import("../utils/scene-deduplicator.js");
+    logger.info(
+      `[SubscriptionService] Applying deduplication to ${allScenes.length} total scenes...`
+    );
+    const uniqueScenes = deduplicateScenes(allScenes);
+    const removed = allScenes.length - uniqueScenes.length;
+    logger.info(
+      `[SubscriptionService] ✅ Deduplication complete: ${uniqueScenes.length} unique scenes (removed ${removed} duplicates/trailers)`
+    );
+
+    return uniqueScenes;
+  }
+
+  /**
+   * Save scene to database with duplicate detection
+   * Returns scene ID (existing or newly created)
+   */
+  private async saveSceneToDatabase(
+    tpdbScene: any,
+    entityType: "performer" | "studio",
+    entityId: string
+  ): Promise<string | null> {
+    // Advanced duplicate checking
+    let sceneId: string | null = null;
+
+    // 1. Check by TPDB external ID
+    const allScenes = await this.db.query.scenes.findMany();
+    const existingByTpdbId = allScenes.find((s) =>
+      s.externalIds.some((ext) => ext.source === "tpdb" && ext.id === tpdbScene.id)
+    );
+
+    if (existingByTpdbId) {
+      sceneId = existingByTpdbId.id;
+      logger.info(`[SubscriptionService] Scene "${tpdbScene.title}" already exists (by tpdbId)`);
+      return sceneId;
+    }
+
+    // 2. Check by title + date combination (very likely duplicate)
+    if (tpdbScene.title && tpdbScene.date) {
+      const existingByTitleDate = await this.db.query.scenes.findFirst({
+        where: and(eq(scenes.title, tpdbScene.title), eq(scenes.date, tpdbScene.date)),
+      });
+
+      if (existingByTitleDate) {
+        sceneId = existingByTitleDate.id;
+        logger.info(
+          `[SubscriptionService] Scene "${tpdbScene.title}" already exists (by title+date)`
+        );
+        return sceneId;
+      }
+    }
+
+    // 3. Check by JAV code (for JAV content)
+    if (tpdbScene.contentType === "jav" && tpdbScene.code) {
+      const baseCode = this.extractBaseStudioCode(tpdbScene.code);
+      if (baseCode) {
+        const allJavScenes = await this.db.query.scenes.findMany({
+          where: eq(scenes.contentType, "jav"),
+        });
+
+        for (const javScene of allJavScenes) {
+          if (javScene.code) {
+            const existingBaseCode = this.extractBaseStudioCode(javScene.code);
+            if (existingBaseCode === baseCode) {
+              sceneId = javScene.id;
+              logger.info(
+                `[SubscriptionService] Scene "${tpdbScene.title}" already exists (by JAV code: ${baseCode})`
+              );
+              return sceneId;
+            }
+          }
+        }
+      }
+    }
+
+    // Determine studio ID for the scene
+    let studioIdForScene: string | null = null;
+
+    if (entityType === "studio") {
+      studioIdForScene = entityId;
+    } else if (tpdbScene.studio) {
+      studioIdForScene = await this.getOrCreateStudio(tpdbScene.studio);
+    }
+
+    // Create new scene
+    sceneId = nanoid();
+    await this.db.insert(scenes).values({
+      id: sceneId,
+      externalIds: [{ source: "tpdb", id: tpdbScene.id }],
+      slug: tpdbScene.slug,
+      contentType: tpdbScene.contentType || "scene",
+      title: tpdbScene.title,
+      date: tpdbScene.date,
+      duration: tpdbScene.duration,
+      code: tpdbScene.code,
+      images: tpdbScene.images,
+      siteId: studioIdForScene,
+      hasMetadata: true,
+      inferredFromIndexers: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    logger.info(`[SubscriptionService] Created scene "${tpdbScene.title}"`);
+
+    return sceneId;
+  }
+
+  /**
+   * Link scene to performers and studios
+   */
+  private async linkSceneParticipants(
+    sceneId: string,
+    tpdbScene: any,
+    entityType: "performer" | "studio",
+    entityId: string
+  ): Promise<void> {
+    // Link the subscribed entity (performer) to the scene first
+    if (entityType === "performer") {
+      await this.db
+        .insert(performersScenes)
+        .values({
+          performerId: entityId,
+          sceneId: sceneId,
+        })
+        .onConflictDoNothing();
+    }
+
+    // Link other performers from scene to scene
+    if (tpdbScene.performers && tpdbScene.performers.length > 0) {
+      for (const tpdbPerformer of tpdbScene.performers) {
+        const performerId = await this.getOrCreatePerformer(tpdbPerformer);
+        if (performerId) {
+          await this.db
+            .insert(performersScenes)
+            .values({
+              performerId,
+              sceneId,
+            })
+            .onConflictDoNothing();
+        }
+      }
+    }
+  }
+
+  /**
+   * Get or create studio from TPDB data
+   */
+  private async getOrCreateStudio(tpdbStudio: any): Promise<string | null> {
+    const allStudios = await this.db.query.studios.findMany();
+    let studioRecord = allStudios.find((s) =>
+      s.externalIds.some((ext) => ext.source === "tpdb" && ext.id === tpdbStudio.id)
+    );
+
+    if (studioRecord) {
+      return studioRecord.id;
+    }
+
+    // Create studio if doesn't exist
+    const studioId = nanoid();
+    await this.db.insert(studios).values({
+      id: studioId,
+      externalIds: [{ source: "tpdb", id: tpdbStudio.id }],
+      name: tpdbStudio.name,
+      slug: tpdbStudio.name.toLowerCase().replace(/\s+/g, "-"),
+      rating: 0,
+      images: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    return studioId;
+  }
+
+  /**
+   * Get or create performer from TPDB data
+   */
+  private async getOrCreatePerformer(tpdbPerformer: any): Promise<string | null> {
+    const allPerformers = await this.db.query.performers.findMany();
+    let performerRecord = allPerformers.find((p) =>
+      p.externalIds.some((ext) => ext.source === "tpdb" && ext.id === tpdbPerformer.id)
+    );
+
+    if (performerRecord) {
+      return performerRecord.id;
+    }
+
+    // Create performer if doesn't exist
+    const performerId = nanoid();
+    await this.db.insert(performers).values({
+      id: performerId,
+      externalIds: [{ source: "tpdb", id: tpdbPerformer.id }],
+      slug: tpdbPerformer.slug || tpdbPerformer.name.toLowerCase().replace(/\s+/g, "-"),
+      name: tpdbPerformer.name,
+      fullName: tpdbPerformer.fullName || tpdbPerformer.name,
+      rating: 0,
+      aliases: [],
+      disambiguation: tpdbPerformer.disambiguation,
+      images: [],
+      fakeBoobs: false,
+      sameSexOnly: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    return performerId;
   }
 
   /**
@@ -754,7 +700,7 @@ export class SubscriptionService {
       });
 
       if (!scene) {
-        console.error(`[SubscriptionService] Scene ${sceneId} not found`);
+        logger.error(`[SubscriptionService] Scene ${sceneId} not found`);
         return;
       }
 
@@ -775,18 +721,18 @@ export class SubscriptionService {
       if (scene.hasMetadata) {
         // Full metadata: create folder, download poster, generate complete NFO
         const { folderPath } = await fileManagerService.setupSceneFiles(sceneId);
-        console.log(
+        logger.info(
           `[SubscriptionService] ✅ Created scene folder with full metadata: ${folderPath}`
         );
       } else {
         // No metadata: create folder with simplified NFO only
         const { folderPath } = await fileManagerService.setupSceneFilesSimplified(sceneId);
-        console.log(
+        logger.info(
           `[SubscriptionService] ✅ Created scene folder with simplified metadata: ${folderPath}`
         );
       }
     } catch (error) {
-      console.error(
+      logger.error(
         `[SubscriptionService] Failed to create scene folder for ${sceneId}:`,
         error
       );
@@ -821,65 +767,127 @@ export class SubscriptionService {
 
   /**
    * Get all subscriptions with entity and quality profile details
+   * OPTIMIZED: Batch fetches to avoid N+1 queries (2N+1 → 5 queries)
    */
   async getAllSubscriptionsWithDetails() {
-    const allSubscriptions = await this.db.query.subscriptions.findMany();
+    // 1. Fetch all subscriptions (1 query)
+    const allSubscriptions = await this.db.query.subscriptions.findMany({
+      with: {
+        qualityProfile: true, // Eager load quality profiles
+      },
+    });
 
-    const subscriptionsWithDetails = await Promise.all(
-      allSubscriptions.map(async (subscription) => {
-        let entity = null;
-        let entityName = "Unknown";
+    // 2. Batch fetch entities by type
+    const performerIds = allSubscriptions
+      .filter((s) => s.entityType === "performer")
+      .map((s) => s.entityId);
+    const studioIds = allSubscriptions
+      .filter((s) => s.entityType === "studio")
+      .map((s) => s.entityId);
+    const sceneIds = allSubscriptions
+      .filter((s) => s.entityType === "scene")
+      .map((s) => s.entityId);
 
-        switch (subscription.entityType) {
-          case "performer":
-            entity = await this.db.query.performers.findFirst({
-              where: eq(performers.id, subscription.entityId),
-            });
-            entityName = entity?.name || subscription.entityId;
-            break;
+    // Batch queries (3 queries total)
+    const [performersMap, studiosMap, scenesMap] = await Promise.all([
+      this.batchFetchPerformers(performerIds),
+      this.batchFetchStudios(studioIds),
+      this.batchFetchScenes(sceneIds),
+    ]);
 
-          case "studio":
-            entity = await this.db.query.studios.findFirst({
-              where: eq(studios.id, subscription.entityId),
-            });
-            entityName = entity?.name || subscription.entityId;
-            break;
+    // 3. Enrich subscriptions in memory (no queries)
+    return allSubscriptions.map((subscription) => {
+      let entity = null;
+      let entityName = "Unknown";
 
-          case "scene":
-            entity = await this.db.query.scenes.findFirst({
-              where: eq(scenes.id, subscription.entityId),
-              with: {
-                performersScenes: {
-                  with: {
-                    performer: true,
-                  },
-                },
-                studiosScenes: {
-                  with: {
-                    studio: true,
-                  },
-                },
-              },
-            });
-            entityName = entity?.title || subscription.entityId;
-            break;
+      switch (subscription.entityType) {
+        case "performer": {
+          const performer = performersMap.get(subscription.entityId);
+          if (performer) {
+            entity = {
+              ...performer,
+              sameSexOnly: performer.sameSexOnly ?? false,
+              fakeBoobs: performer.fakeBoobs ?? false,
+            };
+            entityName = performer.name;
+          }
+          break;
         }
 
-        // Get quality profile
-        const qualityProfile = await this.db.query.qualityProfiles.findFirst({
-          where: eq(qualityProfiles.id, subscription.qualityProfileId),
-        });
+        case "studio": {
+          const studio = studiosMap.get(subscription.entityId);
+          if (studio) {
+            entity = studio;
+            entityName = studio.name;
+          }
+          break;
+        }
 
-        return {
-          ...subscription,
-          entityName,
-          entity,
-          qualityProfile: qualityProfile || null,
-        };
-      })
-    );
+        case "scene": {
+          const scene = scenesMap.get(subscription.entityId);
+          if (scene) {
+            entity = {
+              ...scene,
+              directorIds: [],
+            };
+            entityName = scene.title;
+          }
+          break;
+        }
+      }
 
-    return subscriptionsWithDetails;
+      return {
+        ...subscription,
+        entityName,
+        entity,
+        qualityProfile: subscription.qualityProfile || null,
+      };
+    });
+  }
+
+  /**
+   * Batch fetch performers by IDs
+   */
+  private async batchFetchPerformers(ids: string[]): Promise<Map<string, any>> {
+    if (ids.length === 0) return new Map();
+
+    const performersList = await this.db.query.performers.findMany();
+    const filtered = performersList.filter((p) => ids.includes(p.id));
+
+    return new Map(filtered.map((p) => [p.id, p]));
+  }
+
+  /**
+   * Batch fetch studios by IDs
+   */
+  private async batchFetchStudios(ids: string[]): Promise<Map<string, any>> {
+    if (ids.length === 0) return new Map();
+
+    const studiosList = await this.db.query.studios.findMany();
+    const filtered = studiosList.filter((s) => ids.includes(s.id));
+
+    return new Map(filtered.map((s) => [s.id, s]));
+  }
+
+  /**
+   * Batch fetch scenes by IDs with performers and site
+   */
+  private async batchFetchScenes(ids: string[]): Promise<Map<string, any>> {
+    if (ids.length === 0) return new Map();
+
+    const scenesList = await this.db.query.scenes.findMany({
+      with: {
+        performersScenes: {
+          with: {
+            performer: true,
+          },
+        },
+        site: true,
+      },
+    });
+    const filtered = scenesList.filter((s) => ids.includes(s.id));
+
+    return new Map(filtered.map((s) => [s.id, s]));
   }
 
   /**
@@ -937,7 +945,7 @@ export class SubscriptionService {
     });
 
     if (!subscription) {
-      console.warn(`[SubscriptionService] Subscription not found: ${id}`);
+      logger.warn(`[SubscriptionService] Subscription not found: ${id}`);
       throw new Error("Subscription not found");
     }
 
@@ -960,7 +968,7 @@ export class SubscriptionService {
       entityName = scene?.title || subscription.entityId;
     }
 
-    console.log(
+    logger.info(
       `[SubscriptionService] Deleting subscription for ${subscription.entityType}: ${entityName} (subscription ID: ${id}, removeFiles: ${removeFiles})`
     );
 
@@ -972,7 +980,7 @@ export class SubscriptionService {
     // Delete the main subscription
     await this.db.delete(subscriptions).where(eq(subscriptions.id, id));
 
-    console.log(
+    logger.info(
       `[SubscriptionService] ✅ Deleted subscription for ${subscription.entityType}: ${entityName}`
     );
 
@@ -1023,26 +1031,13 @@ export class SubscriptionService {
       );
       entityScenes = entityScenes.filter(Boolean);
     } else if (entityType === "studio") {
-      // Find scenes by studio using junction table
-      const studioSceneRecords = await this.db.query.studiosScenes.findMany({
-        where: eq(studiosScenes.studioId, entityId),
+      // Find scenes by studio using siteId foreign key
+      entityScenes = await this.db.query.scenes.findMany({
+        where: eq(scenes.siteId, entityId),
       });
-
-      // Get all scene IDs
-      const sceneIds = studioSceneRecords.map((ss) => ss.sceneId);
-
-      // Fetch all scenes
-      entityScenes = await Promise.all(
-        sceneIds.map((sceneId) =>
-          this.db.query.scenes.findFirst({
-            where: eq(scenes.id, sceneId),
-          })
-        )
-      );
-      entityScenes = entityScenes.filter(Boolean);
     }
 
-    console.log(
+    logger.info(
       `[SubscriptionService] Processing ${entityScenes.length} scenes for ${entityType} ${entityId} (removeFiles: ${removeFiles})`
     );
 
@@ -1094,9 +1089,9 @@ export class SubscriptionService {
       where: (performersScenes, { eq }) => eq(performersScenes.sceneId, sceneId),
     });
 
-    // Get all studios for this scene
-    const studioRecords = await this.db.query.studiosScenes.findMany({
-      where: (studiosScenes, { eq }) => eq(studiosScenes.sceneId, sceneId),
+    // Get the scene to check its studio (siteId)
+    const sceneRecord = await this.db.query.scenes.findFirst({
+      where: eq(scenes.id, sceneId),
     });
 
     // Check if any of these performers/studios have active subscriptions (excluding the one being deleted)
@@ -1113,30 +1108,31 @@ export class SubscriptionService {
       });
 
       if (performerSub) {
-        console.log(
+        logger.info(
           `[SubscriptionService] Scene ${sceneId} is still subscribed through performer ${pr.performerId}, keeping files`
         );
         return false; // Scene is subscribed through another performer
       }
     }
 
-    for (const sr of studioRecords) {
-      if (excludeEntityType === "studio" && sr.studioId === excludeEntityId) {
-        continue; // Skip the studio being unsubscribed
-      }
+    // Check if scene's studio has an active subscription
+    if (sceneRecord?.siteId) {
+      if (excludeEntityType === "studio" && sceneRecord.siteId === excludeEntityId) {
+        // Skip the studio being unsubscribed
+      } else {
+        const studioSub = await this.db.query.subscriptions.findFirst({
+          where: and(
+            eq(subscriptions.entityType, "studio"),
+            eq(subscriptions.entityId, sceneRecord.siteId)
+          ),
+        });
 
-      const studioSub = await this.db.query.subscriptions.findFirst({
-        where: and(
-          eq(subscriptions.entityType, "studio"),
-          eq(subscriptions.entityId, sr.studioId)
-        ),
-      });
-
-      if (studioSub) {
-        console.log(
-          `[SubscriptionService] Scene ${sceneId} is still subscribed through studio ${sr.studioId}, keeping files`
-        );
-        return false; // Scene is subscribed through another studio
+        if (studioSub) {
+          logger.info(
+            `[SubscriptionService] Scene ${sceneId} is still subscribed through studio ${sceneRecord.siteId}, keeping files`
+          );
+          return false; // Scene is subscribed through its studio
+        }
       }
     }
 
@@ -1147,6 +1143,7 @@ export class SubscriptionService {
   /**
    * Delete scene files and folder
    * Uses file manager service to clean up filesystem
+   * Also removes torrents from qBittorrent if they exist
    */
   private async deleteSceneFilesAndFolder(sceneId: string): Promise<void> {
     try {
@@ -1154,6 +1151,40 @@ export class SubscriptionService {
       const settingsService = createSettingsService(this.db);
       const settings = await settingsService.getSettings();
 
+      // Remove torrents from qBittorrent before deleting files
+      const queueItems = await this.db.query.downloadQueue.findMany({
+        where: eq(downloadQueue.sceneId, sceneId),
+      });
+
+      if (queueItems.length > 0 && settings.qbittorrent.enabled) {
+        const { createQBittorrentService } = await import("./qbittorrent.service.js");
+        const qbittorrent = createQBittorrentService({
+          url: settings.qbittorrent.url,
+          username: settings.qbittorrent.username,
+          password: settings.qbittorrent.password,
+        });
+
+        for (const item of queueItems) {
+          if (item.torrentHash) {
+            try {
+              await qbittorrent.removeTorrent(item.torrentHash, true);
+              logger.info(`[SubscriptionService] Removed torrent ${item.torrentHash} from qBittorrent`);
+            } catch (error) {
+              logger.error(
+                `[SubscriptionService] Failed to remove torrent ${item.torrentHash}:`,
+                error
+              );
+              // Continue even if torrent removal fails
+            }
+          }
+        }
+
+        // Delete download queue entries
+        await this.db.delete(downloadQueue).where(eq(downloadQueue.sceneId, sceneId));
+        logger.info(`[SubscriptionService] Deleted ${queueItems.length} download queue entries for scene ${sceneId}`);
+      }
+
+      // Delete files and folder
       const { createFileManagerService } = await import("./file-manager.service.js");
       const fileManagerService = createFileManagerService(
         this.db,
@@ -1162,9 +1193,9 @@ export class SubscriptionService {
       );
 
       await fileManagerService.deleteSceneFolder(sceneId, "user_deleted");
-      console.log(`[SubscriptionService] ✅ Deleted files and folder for scene ${sceneId}`);
+      logger.info(`[SubscriptionService] ✅ Deleted files and folder for scene ${sceneId}`);
     } catch (error) {
-      console.error(
+      logger.error(
         `[SubscriptionService] Failed to delete files for scene ${sceneId}:`,
         error
       );
@@ -1245,43 +1276,6 @@ export class SubscriptionService {
    * Validate that entity exists in local database
    */
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  private async _validateEntity(
-    entityType: string,
-    entityId: string
-  ): Promise<void> {
-    let exists = false;
-
-    switch (entityType) {
-      case "performer":
-        const performer = await this.db.query.performers.findFirst({
-          where: eq(performers.id, entityId),
-        });
-        exists = !!performer;
-        break;
-
-      case "studio":
-        const studio = await this.db.query.studios.findFirst({
-          where: eq(studios.id, entityId),
-        });
-        exists = !!studio;
-        break;
-
-      case "scene":
-        const scene = await this.db.query.scenes.findFirst({
-          where: eq(scenes.id, entityId),
-        });
-        exists = !!scene;
-        break;
-
-      default:
-        throw new Error(`Invalid entity type: ${entityType}`);
-    }
-
-    if (!exists) {
-      throw new Error(`${entityType} not found with id: ${entityId}`);
-    }
-  }
-
   /**
    * Get subscription with entity details
    */
@@ -1321,11 +1315,7 @@ export class SubscriptionService {
                 performer: true,
               },
             },
-            studiosScenes: {
-              with: {
-                studio: true,
-              },
-            },
+            site: true,
           },
         });
         entityName = entity?.title || subscription.entityId;
@@ -1347,7 +1337,9 @@ export class SubscriptionService {
 }
 
 // Export factory function
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createSubscriptionService(db: any, tpdb?: TPDBService) {
+export function createSubscriptionService(
+  db: Database,
+  tpdb?: TPDBService
+): SubscriptionService {
   return new SubscriptionService(db, tpdb);
 }

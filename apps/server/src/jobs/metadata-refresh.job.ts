@@ -23,26 +23,17 @@ export async function metadataRefreshJob(app: FastifyInstance) {
       where: eq(subscriptions.status, "active"),
     });
 
-    // Find scenes with missing or incomplete metadata
-    const scenesWithMissingMetadata = await app.db.query.scenes.findMany({
-      where: or(
-        isNull(scenes.details),
-        isNull(scenes.duration),
-        isNull(scenes.director)
-      ),
-    });
-
-    const totalTasks = activeSubscriptions.length + scenesWithMissingMetadata.length;
+    const totalTasks = activeSubscriptions.length;
 
     progressService.emitProgress(
       "metadata-refresh",
-      `Found ${activeSubscriptions.length} subscriptions and ${scenesWithMissingMetadata.length} scenes with missing metadata`,
+      `Found ${activeSubscriptions.length} subscriptions`,
       0,
       totalTasks
     );
 
     app.log.info(
-      `Found ${activeSubscriptions.length} active subscriptions and ${scenesWithMissingMetadata.length} scenes with missing metadata`
+      `Found ${activeSubscriptions.length} active subscriptions`
     );
 
     let processedCount = 0;
@@ -70,7 +61,7 @@ export async function metadataRefreshJob(app: FastifyInstance) {
         processedCount,
         totalTasks
       );
-      await refreshPerformers(app, Array.from(performerIds), progressService, totalTasks, processedCount);
+      await refreshPerformers(app, Array.from(performerIds));
       processedCount += performerIds.size;
     }
 
@@ -82,7 +73,7 @@ export async function metadataRefreshJob(app: FastifyInstance) {
         processedCount,
         totalTasks
       );
-      await refreshStudios(app, Array.from(studioIds), progressService, totalTasks, processedCount);
+      await refreshStudios(app, Array.from(studioIds));
       processedCount += studioIds.size;
     }
 
@@ -98,21 +89,8 @@ export async function metadataRefreshJob(app: FastifyInstance) {
       processedCount += sceneIds.size;
     }
 
-    // Fix scenes with missing metadata
-    if (scenesWithMissingMetadata.length > 0) {
-      progressService.emitProgress(
-        "metadata-refresh",
-        `Fixing ${scenesWithMissingMetadata.length} scenes with missing metadata`,
-        processedCount,
-        totalTasks
-      );
-      const missingSceneIds = scenesWithMissingMetadata.map(s => s.id);
-      await refreshScenes(app, missingSceneIds, progressService, totalTasks, processedCount);
-      processedCount += missingSceneIds.length;
-    }
-
-    // Create folders and metadata for all scenes (subscribed or with missing metadata)
-    const allScenesToProcess = new Set([...Array.from(sceneIds), ...scenesWithMissingMetadata.map(s => s.id)]);
+    // Create folders and metadata for subscribed scenes only
+    const allScenesToProcess = sceneIds;
 
     if (allScenesToProcess.size > 0) {
       progressService.emitProgress(
@@ -180,10 +158,7 @@ export async function metadataRefreshJob(app: FastifyInstance) {
 
 async function refreshPerformers(
   app: FastifyInstance,
-  performerIds: string[],
-  progressService: any,
-  totalTasks: number,
-  baseCount: number
+  performerIds: string[]
 ) {
   // TPDB doesn't support performer refresh yet
   // This functionality requires StashDB integration
@@ -192,10 +167,7 @@ async function refreshPerformers(
 
 async function refreshStudios(
   app: FastifyInstance,
-  studioIds: string[],
-  progressService: any,
-  totalTasks: number,
-  baseCount: number
+  studioIds: string[]
 ) {
   // TPDB doesn't support studio refresh yet
   // This functionality requires StashDB integration
@@ -247,9 +219,10 @@ async function refreshScenes(
 
       // STRATEGY 2: Use existing ID to refresh (subscribed scenes)
       if (!metadata) {
-        if (scene.tpdbId && settings.tpdb.enabled && app.tpdb) {
-          const contentType = scene.tpdbContentType || "scene";
-          metadata = await app.tpdb.getSceneById(scene.tpdbId, contentType);
+        const tpdbId = scene.externalIds.find(e => e.source === 'tpdb')?.id;
+        if (tpdbId && settings.tpdb.enabled && app.tpdb) {
+          const contentType = scene.contentType || "scene";
+          metadata = await app.tpdb.getSceneById(tpdbId, contentType);
           source = "tpdb";
         }
         // StashDB support removed - TPDB-only mode
@@ -264,21 +237,18 @@ async function refreshScenes(
       const updateData: any = {
         title: metadata.title,
         date: metadata.date,
-        details: metadata.details,
         duration: metadata.duration,
-        director: metadata.director,
         code: metadata.code,
-        urls: metadata.urls || [],
         images: metadata.images || [],
         hasMetadata: true,
         updatedAt: new Date().toISOString(),
       };
 
-      if (source === "tpdb") {
-        updateData.tpdbId = metadata.id || metadata.tpdbId;
-        updateData.tpdbContentType = metadata.tpdbContentType || null;
-      } else {
-        updateData.stashdbId = metadata.id;
+      if (source === "tpdb" && metadata.id) {
+        // Update externalIds with TPDB ID
+        const existingIds = scene.externalIds.filter(e => e.source !== 'tpdb');
+        updateData.externalIds = [...existingIds, { source: 'tpdb', id: metadata.id }];
+        updateData.contentType = metadata.contentType || "scene";
       }
 
       await app.db.update(scenes).set(updateData).where(eq(scenes.id, id));

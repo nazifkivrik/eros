@@ -3,11 +3,13 @@
  * Handles torrent searching with detailed logging for debugging
  */
 
-import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import type * as schema from "@repo/database";
+import type { Database } from "@repo/database";
 import { createLogsService } from "./logs.service.js";
 import { createSettingsService } from "./settings.service.js";
 import { createAIMatchingService } from "./ai-matching.service.js";
+import { SceneMatcher } from "./matching/scene-matcher.service.js";
+import { logger } from "../utils/logger.js";
+import type { MatchSettings, SceneMetadata as MatchSceneMetadata } from "./matching/match-types.js";
 import { eq } from "drizzle-orm";
 import {
   performers,
@@ -15,7 +17,6 @@ import {
   scenes,
   qualityProfiles,
   performersScenes,
-  studiosScenes,
 } from "@repo/database";
 
 interface TorrentResult {
@@ -34,7 +35,7 @@ interface TorrentResult {
 interface SceneMetadata {
   id: string;
   title: string;
-  date?: string;
+  date: string | null;
   performerIds: string[];
   studioId?: string;
 }
@@ -44,7 +45,7 @@ export class TorrentSearchService {
   private settingsService;
   private aiMatchingService;
 
-  constructor(private db: BetterSQLite3Database<typeof schema>) {
+  constructor(private db: Database) {
     this.logsService = createLogsService(db);
     this.settingsService = createSettingsService(db);
     this.aiMatchingService = createAIMatchingService();
@@ -505,8 +506,8 @@ export class TorrentSearchService {
       try {
         await this.aiMatchingService.initialize();
 
-        // Very high threshold for group merging (0.92) to prevent false positives
-        const AI_MERGE_THRESHOLD = 0.92;
+        // Use groupingThreshold from settings for group merging
+        const AI_MERGE_THRESHOLD = settings.ai.groupingThreshold;
 
         // Track which groups have been merged
         const mergedIndices = new Set<number>();
@@ -586,7 +587,7 @@ export class TorrentSearchService {
                 );
               }
             } catch (error) {
-              console.error(`[AI Merge] Error comparing groups:`, error);
+              logger.error({ error }, "[AI Merge] Error comparing groups");
             }
           }
 
@@ -764,6 +765,9 @@ export class TorrentSearchService {
   /**
    * Step 4: Match grouped results with database metadata
    */
+  /**
+   * Match torrent groups with database scenes using improved scoring system
+   */
   private async matchWithMetadata(
     groups: Array<{ sceneTitle: string; torrents: TorrentResult[] }>,
     entityType: "performer" | "studio",
@@ -772,73 +776,26 @@ export class TorrentSearchService {
     matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }>;
     unmatched: Array<{ sceneTitle: string; torrents: TorrentResult[] }>;
   }> {
-    const matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }> =
-      [];
-    const unmatched: Array<{ sceneTitle: string; torrents: TorrentResult[] }> =
-      [];
+    // 1. Pre-fetch all candidate scenes ONCE (optimized query)
+    const candidateScenes = await this.fetchCandidateScenes(entityType, entityId);
 
-    // Get scenes for this entity (limit to prevent memory issues)
-    let entityScenes: any[] = [];
-    const MAX_SCENES_TO_MATCH = 500; // Prevent loading thousands of scenes
-
-    if (entityType === "performer") {
-      const performerSceneRecords =
-        await this.db.query.performersScenes.findMany({
-          where: eq(performersScenes.performerId, entityId),
-          limit: MAX_SCENES_TO_MATCH,
-        });
-
-      const sceneIds = performerSceneRecords.map((ps) => ps.sceneId);
-
-      // Fetch scenes in batches to prevent memory spike
-      const batchSize = 50;
-      for (let i = 0; i < sceneIds.length; i += batchSize) {
-        const batch = sceneIds.slice(i, i + batchSize);
-        const batchScenes = await Promise.all(
-          batch.map((sceneId) =>
-            this.db.query.scenes.findFirst({
-              where: eq(scenes.id, sceneId),
-            })
-          )
-        );
-        entityScenes.push(...batchScenes.filter(Boolean));
-      }
-    } else {
-      const studioSceneRecords = await this.db.query.studiosScenes.findMany({
-        where: eq(studiosScenes.studioId, entityId),
-        limit: MAX_SCENES_TO_MATCH,
-      });
-
-      const sceneIds = studioSceneRecords.map((ss) => ss.sceneId);
-
-      // Fetch scenes in batches to prevent memory spike
-      const batchSize = 50;
-      for (let i = 0; i < sceneIds.length; i += batchSize) {
-        const batch = sceneIds.slice(i, i + batchSize);
-        const batchScenes = await Promise.all(
-          batch.map((sceneId) =>
-            this.db.query.scenes.findFirst({
-              where: eq(scenes.id, sceneId),
-            })
-          )
-        );
-        entityScenes.push(...batchScenes.filter(Boolean));
-      }
-    }
-
-    // Get AI settings
+    // 2. Get match settings - use groupingThreshold for matching
     const settings = await this.settingsService.getSettings();
-    const aiEnabled = settings.ai.enabled;
-    const aiThreshold = settings.ai.threshold;
+    const matchSettings: MatchSettings = {
+      aiEnabled: settings.ai.enabled,
+      aiThreshold: settings.ai.threshold,
+      groupingThreshold: settings.ai.groupingThreshold, // REUSE for matching
+      levenshteinThreshold: settings.ai.levenshteinThreshold,
+    };
 
-    // Initialize AI model if enabled
-    if (aiEnabled) {
+    // Initialize AI if enabled
+    if (matchSettings.aiEnabled) {
       try {
         await this.aiMatchingService.initialize();
         await this.logsService.info(
           "torrent",
           "AI matching enabled for scene matching",
-          { model: settings.ai.model, threshold: aiThreshold }
+          { model: settings.ai.model, threshold: matchSettings.groupingThreshold }
         );
       } catch (error) {
         await this.logsService.warning(
@@ -849,110 +806,57 @@ export class TorrentSearchService {
       }
     }
 
-    // Track which scenes have already been matched to prevent duplicates
+    // 3. Initialize SceneMatcher
+    const matcher = new SceneMatcher(this.aiMatchingService, this.logsService);
+
+    // 4. Find BEST match for each group (not first match)
+    const matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }> = [];
+    const unmatched: Array<{ sceneTitle: string; torrents: TorrentResult[] }> = [];
     const matchedSceneIds = new Set<string>();
 
-    // Try to match each group with a scene
     for (const group of groups) {
-      let matchedScene: any = null;
-      let matchMethod = "none";
-      let matchScore = 0;
+      // Filter out already-matched scenes
+      const availableScenes = candidateScenes.filter(
+        (s) => !matchedSceneIds.has(s.id)
+      );
 
-      // Try fuzzy matching with scene titles
-      for (const scene of entityScenes) {
-        // Skip if this scene was already matched to another group
-        if (matchedSceneIds.has(scene.id)) {
-          continue;
-        }
+      // Find best match using new scoring system
+      const matchResult = await matcher.findBestMatch(
+        group.sceneTitle,
+        availableScenes,
+        matchSettings
+      );
 
-        const groupTitle = group.sceneTitle.toLowerCase();
-        const sceneTitle = scene.title.toLowerCase();
+      if (matchResult) {
+        matchedSceneIds.add(matchResult.scene.id);
 
-        // Try AI matching first if enabled
-        if (aiEnabled) {
-          try {
-            const aiSimilarity =
-              await this.aiMatchingService.calculateSimilarity(
-                groupTitle,
-                sceneTitle
-              );
-
-            if (aiSimilarity >= aiThreshold) {
-              matchedScene = scene;
-              matchMethod = "ai";
-              matchScore = aiSimilarity;
-              matchedSceneIds.add(scene.id);
-              break;
-            }
-          } catch (error) {
-            // Fall through to traditional matching if AI fails
-            console.error("[TorrentSearch] AI matching failed:", error);
-          }
-        }
-
-        // Fall back to traditional Levenshtein + truncated matching
-        const similarity = this.calculateSimilarity(groupTitle, sceneTitle);
-
-        // Check for truncated title match (one string starts with the other)
-        const isTruncated =
-          groupTitle.startsWith(sceneTitle) ||
-          sceneTitle.startsWith(groupTitle);
-
-        // Check if shorter string is substantially contained in longer string (for truncated titles)
-        const shorter =
-          groupTitle.length < sceneTitle.length ? groupTitle : sceneTitle;
-        const longer =
-          groupTitle.length < sceneTitle.length ? sceneTitle : groupTitle;
-        const isPartialMatch =
-          shorter.length > 20 && longer.startsWith(shorter);
-
-        // If similarity is high enough OR it's a truncated match, consider it a match
-        if (similarity > 0.7 || isTruncated || isPartialMatch) {
-          matchedScene = scene;
-          matchMethod =
-            isTruncated || isPartialMatch ? "truncated" : "levenshtein";
-          matchScore = similarity;
-          matchedSceneIds.add(scene.id); // Mark this scene as matched
-          break;
-        }
-      }
-
-      if (matchedScene) {
-        // Get performer and studio IDs for this scene
+        // Get performer IDs for this scene
         const performerSceneRecords =
           await this.db.query.performersScenes.findMany({
-            where: eq(performersScenes.sceneId, matchedScene.id),
+            where: eq(performersScenes.sceneId, matchResult.scene.id),
           });
         const performerIds = performerSceneRecords.map((ps) => ps.performerId);
 
-        const studioSceneRecords = await this.db.query.studiosScenes.findMany({
-          where: eq(studiosScenes.sceneId, matchedScene.id),
-        });
-        const studioId =
-          studioSceneRecords.length > 0
-            ? studioSceneRecords[0].studioId
-            : undefined;
-
         matched.push({
           scene: {
-            id: matchedScene.id,
-            title: matchedScene.title,
-            date: matchedScene.date,
+            id: matchResult.scene.id,
+            title: matchResult.scene.title,
+            date: matchResult.scene.date,
             performerIds,
-            studioId,
+            studioId: matchResult.scene.studioId || undefined,
           },
           torrents: group.torrents,
         });
 
-        // Log match details
         await this.logsService.info(
           "torrent",
-          `Matched "${group.sceneTitle}" to "${matchedScene.title}" using ${matchMethod}`,
+          `Matched "${group.sceneTitle}" to "${matchResult.scene.title}"`,
           {
-            method: matchMethod,
-            score: matchScore,
+            method: matchResult.method,
+            score: matchResult.score,
+            confidence: matchResult.confidence,
             groupTitle: group.sceneTitle,
-            sceneTitle: matchedScene.title,
+            sceneTitle: matchResult.scene.title,
           }
         );
       } else {
@@ -967,12 +871,58 @@ export class TorrentSearchService {
         {
           matched: matched.length,
           unmatched: unmatched.length,
-          aiEnabled,
+          aiEnabled: matchSettings.aiEnabled,
         }
       );
     }
 
     return { matched, unmatched };
+  }
+
+  /**
+   * Fetch candidate scenes for matching (optimized single query)
+   */
+  private async fetchCandidateScenes(
+    entityType: "performer" | "studio",
+    entityId: string
+  ): Promise<MatchSceneMetadata[]> {
+    const MAX_SCENES = 500;
+
+    if (entityType === "performer") {
+      // Single JOIN query instead of batching
+      const results = await this.db
+        .select({
+          id: scenes.id,
+          title: scenes.title,
+          date: scenes.date,
+          siteId: scenes.siteId,
+        })
+        .from(scenes)
+        .innerJoin(performersScenes, eq(performersScenes.sceneId, scenes.id))
+        .where(eq(performersScenes.performerId, entityId))
+        .limit(MAX_SCENES);
+
+      return results.map((r) => ({
+        id: r.id,
+        title: r.title,
+        date: r.date,
+        studioId: r.siteId,
+      }));
+    } else {
+      // Simple query for studio
+      const results = await this.db.query.scenes.findMany({
+        where: eq(scenes.siteId, entityId),
+        limit: MAX_SCENES,
+        columns: { id: true, title: true, date: true, siteId: true },
+      });
+
+      return results.map((r) => ({
+        id: r.id,
+        title: r.title,
+        date: r.date,
+        studioId: r.siteId,
+      }));
+    }
   }
 
   /**
@@ -1215,7 +1165,8 @@ export class TorrentSearchService {
 }
 
 // Export factory function
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createTorrentSearchService(db: any) {
+export function createTorrentSearchService(
+  db: Database
+): TorrentSearchService {
   return new TorrentSearchService(db);
 }

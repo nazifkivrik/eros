@@ -6,7 +6,7 @@
 
 import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
-import { sceneFiles, sceneExclusions, downloadQueue, indexers, scenes } from "@repo/database";
+import { sceneFiles, sceneExclusions, downloadQueue, scenes } from "@repo/database";
 import { createFileManagerService } from "../services/file-manager.service.js";
 import { createLogsService } from "../services/logs.service.js";
 import { createSettingsService } from "../services/settings.service.js";
@@ -149,19 +149,11 @@ export async function filesystemSyncJob(app: FastifyInstance) {
                   }
                 }
 
-                // Verify indexer exists
-                const indexerExists = await app.db.query.indexers.findFirst({
-                  where: eq(indexers.id, `prowlarr-${bestTorrent.indexerId}`),
-                });
-
-                const indexerId = indexerExists?.id || `prowlarr-${bestTorrent.indexerId}`;
-
                 // Add to download queue
                 await app.db.insert(downloadQueue).values({
                   id: nanoid(),
                   sceneId: missing.sceneId,
                   torrentHash: null,
-                  indexerId: indexerId as string,
                   title: bestTorrent.title,
                   size: bestTorrent.size,
                   seeders: bestTorrent.seeders,

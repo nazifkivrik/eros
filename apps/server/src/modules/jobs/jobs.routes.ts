@@ -3,6 +3,7 @@ import { getJobProgressService } from "../../services/job-progress.service.js";
 import {
   JobNameParamsSchema,
   JobsListResponseSchema,
+  JobHistoryListResponseSchema,
   TriggerJobResponseSchema,
   ErrorResponseSchema,
 } from "./jobs.schema.js";
@@ -30,7 +31,7 @@ const jobsRoutes: FastifyPluginAsyncZod = async (app) => {
     {
       schema: {
         response: {
-          200: JobsListResponseSchema,
+          200: JobHistoryListResponseSchema,
         },
       },
     },

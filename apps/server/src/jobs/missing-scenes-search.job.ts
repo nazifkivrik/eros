@@ -7,7 +7,7 @@
 
 import type { FastifyInstance } from "fastify";
 import { eq, and, inArray } from "drizzle-orm";
-import { scenes, performersScenes, studiosScenes, subscriptions, downloadQueue, indexers } from "@repo/database";
+import { scenes, performersScenes, subscriptions, downloadQueue } from "@repo/database";
 import { createLogsService } from "../services/logs.service.js";
 import { getJobProgressService } from "../services/job-progress.service.js";
 import { createQBittorrentService } from "../services/qbittorrent.service.js";
@@ -93,12 +93,12 @@ export async function missingScenesSearchJob(app: FastifyInstance) {
       missingSceneIds.push(...performerSceneIds);
     }
 
-    // Query scenes by studios
+    // Query scenes by studios using siteId
     if (studioIds.length > 0) {
       const studioScenes = await app.db
-        .selectDistinct({ sceneId: studiosScenes.sceneId })
-        .from(studiosScenes)
-        .where(inArray(studiosScenes.studioId, studioIds));
+        .selectDistinct({ sceneId: scenes.id })
+        .from(scenes)
+        .where(inArray(scenes.siteId, studioIds));
 
       const studioSceneIds = studioScenes.map(row => row.sceneId);
       missingSceneIds.push(...studioSceneIds);
@@ -251,19 +251,11 @@ export async function missingScenesSearchJob(app: FastifyInstance) {
           }
         }
 
-        // Verify indexer exists
-        const indexerExists = await app.db.query.indexers.findFirst({
-          where: eq(indexers.id, `prowlarr-${bestTorrent.indexerId}`),
-        });
-
-        const indexerId = indexerExists?.id || `prowlarr-${bestTorrent.indexerId}`;
-
         // Add to download queue
         await app.db.insert(downloadQueue).values({
           id: nanoid(),
           sceneId: scene.id,
           torrentHash: null, // Will be populated by torrent-monitor job
-          indexerId: indexerId as string,
           title: bestTorrent.title,
           size: bestTorrent.size,
           seeders: bestTorrent.seeders,

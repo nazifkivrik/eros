@@ -1,25 +1,33 @@
 import { z } from "zod";
+import {
+  JobStatusSchema,
+  JobHistoryItemSchema,
+  JobNameSchema,
+  JobsResponseSchema,
+  JobHistoryResponseSchema,
+  type JobStatus,
+  type JobHistoryItem,
+} from "@repo/shared-types";
 
-export const JobNameSchema = z.enum([
-  "subscription-search",
-  "metadata-refresh",
-  "torrent-monitor",
-  "cleanup",
-  "metadata-discovery",
-]);
+// Re-export shared schemas
+export {
+  JobStatusSchema,
+  JobHistoryItemSchema,
+  JobNameSchema,
+  type JobStatus,
+  type JobHistoryItem,
+};
 
-export const JobSchema = z.object({
-  name: z.string(),
-  enabled: z.boolean(),
-});
+// Backward compatibility
+export const JobSchema = JobStatusSchema;
+export type Job = JobStatus;
 
 export const JobNameParamsSchema = z.object({
   jobName: JobNameSchema,
 });
 
-export const JobsListResponseSchema = z.object({
-  jobs: z.array(JobSchema),
-});
+export const JobsListResponseSchema = JobsResponseSchema;
+export const JobHistoryListResponseSchema = JobHistoryResponseSchema;
 
 export const TriggerJobResponseSchema = z.object({
   success: z.boolean(),

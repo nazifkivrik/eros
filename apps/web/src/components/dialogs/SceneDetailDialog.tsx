@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { Scene } from "@repo/shared-types";
 import { useSceneDetails } from "@/hooks/useSearch";
 import { useCheckSubscription, useDeleteSubscription } from "@/hooks/useSubscriptions";
 import {
@@ -22,7 +23,7 @@ import { formatDate, formatDuration } from "@/lib/dialog-utils";
 interface SceneDetailDialogProps {
   sceneId: string | null;
   onClose: () => void;
-  onSubscribe: (scene: any) => void;
+  onSubscribe: (scene: Scene) => void;
 }
 
 export function SceneDetailDialog({
@@ -65,8 +66,8 @@ export function SceneDetailDialog({
           <DialogDescription>
             {isLoading
               ? "Loading scene details"
-              : scene?.studio?.name
-                ? `${scene.studio.name}${scene.date ? ` - ${formatDate(scene.date)}` : ""}`
+              : scene?.date
+                ? formatDate(scene.date)
                 : "Scene details and information"}
           </DialogDescription>
         </DialogHeader>
@@ -102,10 +103,10 @@ export function SceneDetailDialog({
                   </div>
                 )}
 
-                {scene.studio && (
+                {scene.siteId && (
                   <div className="flex items-center gap-2">
                     <Film className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Studio: {scene.studio.name}</span>
+                    <span className="text-sm">Site ID: {scene.siteId}</span>
                   </div>
                 )}
 
@@ -117,74 +118,58 @@ export function SceneDetailDialog({
                 )}
               </div>
 
-              {scene.director && (
+              {scene.directorIds && scene.directorIds.length > 0 && (
                 <div className="text-sm">
-                  <span className="text-muted-foreground">Director: </span>
-                  <span className="font-medium">{scene.director}</span>
+                  <span className="text-muted-foreground">Directors: </span>
+                  <span className="font-medium">{scene.directorIds.length} director(s)</span>
                 </div>
               )}
 
-              {scene.details && (
+              {scene.description && (
                 <>
                   <Separator />
                   <div>
                     <h3 className="font-medium mb-2">Description</h3>
-                    <p className="text-sm text-muted-foreground">{scene.details}</p>
+                    <p className="text-sm text-muted-foreground">{scene.description}</p>
                   </div>
                 </>
               )}
 
-              {/* Performers */}
-              {scene.performers && scene.performers.length > 0 && (
+              {/* Files */}
+              {(scene as any).files && (scene as any).files.length > 0 && (
                 <>
                   <Separator />
                   <div>
-                    <h3 className="font-medium mb-2">Performers</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {scene.performers.map((performer: any, idx: number) => (
-                        <Badge key={idx} variant="secondary">
-                          {performer.name}
-                        </Badge>
+                    <h3 className="font-medium mb-2">Downloaded Files ({(scene as any).files.length})</h3>
+                    <div className="space-y-2">
+                      {(scene as any).files.map((file: any) => (
+                        <div key={file.id} className="text-sm bg-muted/50 p-3 rounded-md">
+                          <div className="font-mono text-xs break-all">{file.filePath}</div>
+                          <div className="text-muted-foreground text-xs mt-1">
+                            {(file.fileSize / (1024 * 1024 * 1024)).toFixed(2)} GB
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </div>
                 </>
               )}
 
-              {/* Tags */}
-              {scene.tags && scene.tags.length > 0 && (
-                <div>
-                  <h3 className="font-medium mb-2">Tags</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {scene.tags.map((tag: string, idx: number) => (
-                      <Badge key={idx} variant="outline">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Links */}
-              {scene.urls && scene.urls.length > 0 && (
+              {/* Link */}
+              {scene.url && (
                 <>
                   <Separator />
                   <div>
-                    <h3 className="font-medium mb-2">Links</h3>
-                    <div className="space-y-1">
-                      {scene.urls.map((url: string, idx: number) => (
-                        <a
-                          key={idx}
-                          href={url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 text-sm text-primary hover:underline"
-                        >
-                          <LinkIcon className="h-3 w-3" />
-                          {url}
-                        </a>
-                      ))}
-                    </div>
+                    <h3 className="font-medium mb-2">Link</h3>
+                    <a
+                      href={scene.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-sm text-primary hover:underline"
+                    >
+                      <LinkIcon className="h-3 w-3" />
+                      {scene.url}
+                    </a>
                   </div>
                 </>
               )}
@@ -192,7 +177,7 @@ export function SceneDetailDialog({
 
             <SubscriptionFooter
               isSubscribed={subscriptionStatus?.subscribed || false}
-              subscription={subscriptionStatus?.subscription}
+              subscription={subscriptionStatus?.subscription ?? undefined}
               onClose={onClose}
               onSubscribe={() => onSubscribe(scene)}
               onUnsubscribe={() => setShowUnsubscribeDialog(true)}

@@ -5,7 +5,7 @@ import { createSubscriptionService } from "../../services/subscription.service.j
 import type { Database } from "@repo/database";
 import {
   SubscriptionSchema,
-  SubscriptionWithDetailsSchema,
+  SubscriptionDetailResponseSchema,
   CreateSubscriptionSchema,
   UpdateSubscriptionSchema,
   SubscriptionParamsSchema,
@@ -65,7 +65,7 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         params: SubscriptionParamsSchema,
         response: {
-          200: SubscriptionWithDetailsSchema,
+          200: SubscriptionDetailResponseSchema,
           404: ErrorResponseSchema,
         },
       },
@@ -97,9 +97,9 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       try {
         const subscription = await subscriptionService.createSubscription(
-          request.body as any
+          request.body
         );
-        return reply.code(201).send(subscription as any);
+        return reply.code(201).send(subscription);
       } catch (error) {
         return reply.code(400).send({
           error: error instanceof Error ? error.message : "Unknown error",
@@ -175,7 +175,7 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request) => {
       const { id } = request.params;
-      return (await subscriptionService.toggleMonitoring(id)) as any;
+      return await subscriptionService.toggleMonitoring(id);
     }
   );
 
@@ -192,7 +192,7 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request) => {
       const { id } = request.params;
-      return (await subscriptionService.toggleStatus(id)) as any;
+      return await subscriptionService.toggleStatus(id);
     }
   );
 
@@ -216,7 +216,7 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
 
       return {
         subscribed: !!subscription,
-        subscription: (subscription || null) as any,
+        subscription: subscription || null,
       };
     }
   );
@@ -249,30 +249,28 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       // Get all scenes for this performer/studio
-      const scenesQuery = subscription.entityType === "performer"
-        ? appWithDb.db.query.performersScenes.findMany({
-            where: (performersScenes, { eq }) => eq(performersScenes.performerId, subscription.entityId),
-            with: {
-              scene: {
-                with: {
-                  sceneFiles: true,
-                },
+      let scenes;
+      if (subscription.entityType === "performer") {
+        const sceneRelations = await appWithDb.db.query.performersScenes.findMany({
+          where: (performersScenes, { eq }) => eq(performersScenes.performerId, subscription.entityId),
+          with: {
+            scene: {
+              with: {
+                sceneFiles: true,
               },
             },
-          })
-        : appWithDb.db.query.studiosScenes.findMany({
-            where: (studiosScenes, { eq }) => eq(studiosScenes.studioId, subscription.entityId),
-            with: {
-              scene: {
-                with: {
-                  sceneFiles: true,
-                },
-              },
-            },
-          });
-
-      const sceneRelations = await scenesQuery;
-      const scenes = sceneRelations.map((rel: any) => rel.scene).filter(Boolean);
+          },
+        });
+        scenes = sceneRelations.map((rel: any) => rel.scene).filter(Boolean);
+      } else {
+        // For studio subscriptions, query scenes directly by siteId
+        scenes = await appWithDb.db.query.scenes.findMany({
+          where: (scenes, { eq }) => eq(scenes.siteId, subscription.entityId),
+          with: {
+            sceneFiles: true,
+          },
+        });
+      }
 
       // Get download queue status for each scene
       const scenesWithStatus = await Promise.all(
@@ -316,6 +314,12 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
           200: z.object({
             files: z.array(z.any()),
             downloadQueue: z.any().nullable(),
+            sceneFolder: z.string().nullable(),
+            folderContents: z.object({
+              nfoFiles: z.array(z.string()),
+              posterFiles: z.array(z.string()),
+              videoFiles: z.array(z.string()),
+            }),
           }),
           404: ErrorResponseSchema,
         },
@@ -335,9 +339,13 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       // Get scene files
+      app.log.info({ subscriptionId: id, sceneId: subscription.entityId }, "Fetching scene files");
+
       const files = await appWithDb.db.query.sceneFiles.findMany({
         where: (sceneFiles, { eq }) => eq(sceneFiles.sceneId, subscription.entityId),
       });
+
+      app.log.info({ filesCount: files.length, sceneId: subscription.entityId }, "Scene files found");
 
       // Get download queue entry
       const downloadQueue = await appWithDb.db.query.downloadQueue.findFirst({
@@ -345,9 +353,69 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
         orderBy: (dq, { desc }) => [desc(dq.addedAt)],
       });
 
+      // Get scene folder path and scan for metadata files
+      const { createSettingsService } = await import("../../services/settings.service.js");
+      const settingsService = createSettingsService(appWithDb.db);
+      const settings = await settingsService.getSettings();
+      const { join } = await import("path");
+
+      // Get scene details for folder name
+      const scene = await appWithDb.db.query.scenes.findFirst({
+        where: (scenes, { eq }) => eq(scenes.id, subscription.entityId),
+      });
+
+      const sceneFolder = scene?.title
+        ? join(settings.general.scenesPath, scene.title.replace(/[/\\?%*:|"<>]/g, '_'))
+        : null;
+
+      // Scan folder for .nfo and poster files
+      let folderContents: { nfoFiles: string[]; posterFiles: string[]; videoFiles: string[] } = {
+        nfoFiles: [],
+        posterFiles: [],
+        videoFiles: []
+      };
+
+      if (sceneFolder) {
+        try {
+          const { readdir, stat } = await import("fs/promises");
+          const { extname } = await import("path");
+
+          const dirExists = await stat(sceneFolder).then(() => true).catch(() => false);
+
+          if (dirExists) {
+            const filesInFolder = await readdir(sceneFolder);
+
+            for (const file of filesInFolder) {
+              const filePath = join(sceneFolder, file);
+              const ext = extname(file).toLowerCase();
+
+              if (ext === '.nfo') {
+                folderContents.nfoFiles.push(file);
+              } else if (['.jpg', '.jpeg', '.png', '.webp'].includes(ext) && file.toLowerCase().includes('poster')) {
+                folderContents.posterFiles.push(file);
+              } else if (['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.m4v', '.webm'].includes(ext)) {
+                folderContents.videoFiles.push(file);
+              }
+            }
+          }
+        } catch (error) {
+          app.log.warn({ error, sceneFolder }, "Failed to scan scene folder");
+        }
+      }
+
+      app.log.info({
+        hasDownloadQueue: !!downloadQueue,
+        sceneId: subscription.entityId,
+        filesCount: files.length,
+        sceneFolder,
+        folderContents
+      }, "Returning files response");
+
       return {
         files,
         downloadQueue: downloadQueue || null,
+        sceneFolder,
+        folderContents,
       };
     }
   );

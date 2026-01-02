@@ -51,6 +51,8 @@ export const SettingsSchema: z.ZodType<AppSettings> = z.object({
     enabled: z.boolean(),
     model: z.string(),
     threshold: z.number(),
+    groupingThreshold: z.number(),
+    levenshteinThreshold: z.number(),
   }),
   jobs: z.object({
     subscriptionSearch: z.object({
@@ -82,10 +84,6 @@ export const SettingsSchema: z.ZodType<AppSettings> = z.object({
       schedule: z.string(),
     }),
     qbittorrentCleanup: z.object({
-      enabled: z.boolean(),
-      schedule: z.string(),
-    }),
-    hashGeneration: z.object({
       enabled: z.boolean(),
       schedule: z.string(),
     }),

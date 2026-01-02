@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { SubscriptionDetail } from "@repo/shared-types";
 import Link from "next/link";
 import Image from "next/image";
 import {  Users, Building2, Film, Trash2, AlertCircle, LayoutGrid, List } from "lucide-react";
@@ -25,16 +26,30 @@ export default function SubscriptionsPage() {
   const [viewMode, setViewMode] = useState<"card" | "table">("table");
   const [unsubscribeDialog, setUnsubscribeDialog] = useState<{
     open: boolean;
-    subscription: any | null;
+    subscription: SubscriptionDetail | null;
   }>({ open: false, subscription: null });
   const { data: subscriptions, isLoading } = useSubscriptions();
   const deleteSubscription = useDeleteSubscription();
 
-  const performers = subscriptions?.data?.filter((s: any) => s.entityType === "performer") || [];
-  const studios = subscriptions?.data?.filter((s: any) => s.entityType === "studio") || [];
-  const scenes = subscriptions?.data?.filter((s: any) => s.entityType === "scene") || [];
+  // Helper to get the best image URL from entity data
+  const getEntityImageUrl = (entity: any): string | null => {
+    if (!entity) return null;
 
-  const handleUnsubscribeClick = (subscription: any, e: React.MouseEvent) => {
+    // Prefer poster/thumbnail from TPDB
+    if (entity.poster) return entity.poster;
+    if (entity.thumbnail) return entity.thumbnail;
+    if (entity.logo) return entity.logo;
+
+    // Fallback to images array
+    const images = entity.images ? (typeof entity.images === 'string' ? JSON.parse(entity.images) : entity.images) : [];
+    return images[0]?.url || null;
+  };
+
+  const performers = subscriptions?.data?.filter((s) => s.entityType === "performer") || [];
+  const studios = subscriptions?.data?.filter((s) => s.entityType === "studio") || [];
+  const scenes = subscriptions?.data?.filter((s) => s.entityType === "scene") || [];
+
+  const handleUnsubscribeClick = (subscription: SubscriptionDetail, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
@@ -73,7 +88,7 @@ export default function SubscriptionsPage() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {performers.map((sub: any) => (
+          {performers.map((sub) => (
             <TableRow
               key={sub.id}
               className="cursor-pointer hover:bg-accent/50"
@@ -115,9 +130,8 @@ export default function SubscriptionsPage() {
 
   const renderPerformersCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      {performers.map((sub: any) => {
-        const images = sub.entity?.images ? (typeof sub.entity.images === 'string' ? JSON.parse(sub.entity.images) : sub.entity.images) : [];
-        const imageUrl = images[0]?.url || null;
+      {performers.map((sub) => {
+        const imageUrl = getEntityImageUrl(sub.entity);
         return (
           <Link key={sub.id} href={`/subscriptions/${sub.id}`}>
             <Card className="cursor-pointer hover:bg-accent/50 transition-colors h-full overflow-hidden">
@@ -190,7 +204,7 @@ export default function SubscriptionsPage() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {studios.map((sub: any) => (
+          {studios.map((sub) => (
             <TableRow
               key={sub.id}
               className="cursor-pointer hover:bg-accent/50"
@@ -230,9 +244,8 @@ export default function SubscriptionsPage() {
 
   const renderStudiosCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      {studios.map((sub: any) => {
-        const images = sub.entity?.images ? (typeof sub.entity.images === 'string' ? JSON.parse(sub.entity.images) : sub.entity.images) : [];
-        const imageUrl = images[0]?.url || null;
+      {studios.map((sub) => {
+        const imageUrl = getEntityImageUrl(sub.entity);
         return (
           <Link key={sub.id} href={`/subscriptions/${sub.id}`}>
             <Card className="cursor-pointer hover:bg-accent/50 transition-colors h-full overflow-hidden">
@@ -305,7 +318,7 @@ export default function SubscriptionsPage() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {scenes.map((sub: any) => (
+          {scenes.map((sub) => (
             <TableRow
               key={sub.id}
               className="cursor-pointer hover:bg-accent/50"
@@ -345,9 +358,8 @@ export default function SubscriptionsPage() {
 
   const renderScenesCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      {scenes.map((sub: any) => {
-        const images = sub.entity?.images ? (typeof sub.entity.images === 'string' ? JSON.parse(sub.entity.images) : sub.entity.images) : [];
-        const imageUrl = images[0]?.url || null;
+      {scenes.map((sub) => {
+        const imageUrl = getEntityImageUrl(sub.entity);
         return (
           <Link key={sub.id} href={`/subscriptions/${sub.id}`}>
             <Card className="cursor-pointer hover:bg-accent/50 transition-colors h-full overflow-hidden">

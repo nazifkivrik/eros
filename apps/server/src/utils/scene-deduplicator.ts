@@ -6,7 +6,7 @@
  * 3. Studio code pattern matching (for JAV scenes)
  */
 
-import type { TPDBScene } from "../services/tpdb/tpdb.types.js";
+import type { TPDBScene } from "@repo/shared-types";
 
 interface MappedScene {
   id: string;
@@ -14,7 +14,7 @@ interface MappedScene {
   title: string;
   date: string | null;
   code: string | null;
-  tpdbContentType: string;
+  contentType: string;
   duration?: number | null;
   performers?: Array<{ id: string; name: string }>;
   hashes?: Array<{ hash: string; type: string }>;
@@ -78,7 +78,7 @@ export function deduplicateScenes<T extends MappedScene>(scenes: T[]): T[] {
 
     // 3. Studio code pattern matching for JAV content
     // Group scenes by base studio code and later filter
-    if (!isDuplicate && scene.tpdbContentType === 'jav' && scene.code) {
+    if (!isDuplicate && scene.contentType === 'jav' && scene.code) {
       const baseCode = extractBaseStudioCode(scene.code);
 
       if (baseCode) {
@@ -194,8 +194,8 @@ export function analyzeSceneDuplicates<T extends MappedScene>(
   const hashDuplicates = scenes.filter(s => s.hashes && s.hashes.length > 0).length -
     deduplicated.filter(s => s.hashes && s.hashes.length > 0).length;
 
-  const javScenes = scenes.filter(s => s.tpdbContentType === 'jav' && s.code).length;
-  const uniqueJavScenes = deduplicated.filter(s => s.tpdbContentType === 'jav' && s.code).length;
+  const javScenes = scenes.filter(s => s.contentType === 'jav' && s.code).length;
+  const uniqueJavScenes = deduplicated.filter(s => s.contentType === 'jav' && s.code).length;
 
   return {
     total: original,

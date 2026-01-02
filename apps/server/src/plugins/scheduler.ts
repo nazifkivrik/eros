@@ -18,7 +18,6 @@ import { cleanupJob } from "../jobs/cleanup.job.js";
 import { missingScenesSearchJob } from "../jobs/missing-scenes-search.job.js";
 import { unifiedSyncJob } from "../jobs/unified-sync.job.js";
 import { qbittorrentCleanupJob } from "../jobs/qbittorrent-cleanup.job.js";
-import { hashGenerationJob } from "../jobs/hash-generation.job.js";
 
 interface JobDefinition {
   name: string;
@@ -126,7 +125,6 @@ const schedulerPlugin: FastifyPluginAsync = async (app) => {
       "missing-scenes-search": () => missingScenesSearchJob(app),
       "unified-sync": () => unifiedSyncJob(app),
       "qbittorrent-cleanup": () => qbittorrentCleanupJob(app),
-      "hash-generation": () => hashGenerationJob(app),
     };
 
     const handler = jobHandlers[jobName];
@@ -182,15 +180,33 @@ const schedulerPlugin: FastifyPluginAsync = async (app) => {
   };
 
   const getJobs = async () => {
-    const jobNames = Array.from(jobs.keys());
+    // Define all available jobs (including disabled ones)
+    const allJobNames = [
+      "subscription-search",
+      "metadata-refresh",
+      "torrent-monitor",
+      "cleanup",
+      "metadata-discovery",
+      "missing-scenes-search",
+      "unified-sync",
+      "qbittorrent-cleanup",
+    ];
 
     // Get the latest execution for each job from jobs_log
     const jobsWithHistory = await Promise.all(
-      jobNames.map(async (name) => {
+      allJobNames.map(async (name) => {
         const latestRun = await app.db.query.jobsLog.findFirst({
           where: eq(jobsLog.jobName, name),
           orderBy: [desc(jobsLog.startedAt)],
         });
+
+        // Ensure duration is always present (null if not available)
+        const duration =
+          latestRun?.metadata &&
+          typeof latestRun.metadata === "object" &&
+          'duration' in latestRun.metadata
+            ? (latestRun.metadata as any).duration ?? null
+            : null;
 
         return {
           name,
@@ -199,10 +215,7 @@ const schedulerPlugin: FastifyPluginAsync = async (app) => {
           lastRun: latestRun?.startedAt || null,
           completedAt: latestRun?.completedAt || null,
           error: latestRun?.errorMessage || null,
-          duration:
-            latestRun?.metadata && typeof latestRun.metadata === "object"
-              ? (latestRun.metadata as any).duration
-              : null,
+          duration,
         };
       })
     );
@@ -295,13 +308,6 @@ const schedulerPlugin: FastifyPluginAsync = async (app) => {
     enabled: settings.jobs.qbittorrentCleanup.enabled,
   });
 
-  registerJob({
-    name: "hash-generation",
-    schedule: settings.jobs.hashGeneration.schedule,
-    handler: () => hashGenerationJob(app),
-    enabled: settings.jobs.hashGeneration.enabled,
-  });
-
   // Cleanup on server shutdown
   app.addHook("onClose", async () => {
     app.log.info("Stopping all scheduled jobs...");
@@ -341,7 +347,7 @@ declare module "fastify" {
           startedAt: string;
           completedAt: string | null;
           error: string | null;
-          metadata: Record<string, any>;
+          metadata: Record<string, unknown>;
         }>
       >;
     };

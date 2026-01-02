@@ -1,11 +1,10 @@
+import type { LogLevel, EventType } from "@repo/shared-types";
+
 /**
- * Logging Types
- * Shared between backend and frontend for log management
+ * Log entity type
+ * Server-only - not exposed to frontend in this shape
  */
-
-import type { LogLevel, EventType } from "../enums.js";
-
-export interface Log {
+export type Log = {
   id: string;
   level: LogLevel;
   eventType: EventType;
@@ -15,9 +14,13 @@ export interface Log {
   performerId: string | null;
   studioId: string | null;
   createdAt: string;
-}
+};
 
-export interface LogFilters {
+/**
+ * Log query filters
+ * Used by logs service and routes
+ */
+export type LogFilters = {
   level?: LogLevel;
   eventType?: EventType;
   sceneId?: string;
@@ -27,4 +30,4 @@ export interface LogFilters {
   endDate?: string;
   limit?: number;
   offset?: number;
-}
+};

@@ -1,4 +1,5 @@
 import { pipeline, type FeatureExtractionPipeline } from "@xenova/transformers";
+import { logger } from "../utils/logger.js";
 
 /**
  * AI Matching Service
@@ -24,7 +25,7 @@ export class AIMatchingService {
 
     this.initializationPromise = (async () => {
       try {
-        console.log("Loading AI model for semantic matching...");
+        logger.info("Loading AI model for semantic matching...");
 
         // Load feature extraction pipeline with sentence transformer model
         this.model = await pipeline(
@@ -33,9 +34,9 @@ export class AIMatchingService {
         );
 
         this.isInitialized = true;
-        console.log("AI model loaded successfully");
+        logger.info("AI model loaded successfully");
       } catch (error) {
-        console.error("Failed to load AI model:", error);
+        logger.error("Failed to load AI model:", error);
         throw error;
       }
     })();
@@ -67,7 +68,7 @@ export class AIMatchingService {
 
       return embedding;
     } catch (error) {
-      console.error("Failed to generate embedding:", error);
+      logger.error("Failed to generate embedding:", error);
       throw error;
     }
   }

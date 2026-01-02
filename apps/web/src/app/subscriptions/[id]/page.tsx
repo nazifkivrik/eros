@@ -69,13 +69,19 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
   const qualityProfiles = qualityProfilesData?.data || [];
 
   // Get scenes for performer/studio subscriptions with download status
-  const { data: scenesData } = useSubscriptionScenes(id);
+  const { data: scenesData } = useSubscriptionScenes(
+    subscription?.entityType === "performer" || subscription?.entityType === "studio" ? id : ""
+  );
   const scenes = scenesData?.data || [];
 
   // Get files for scene subscriptions
-  const { data: filesData } = useSubscriptionFiles(id);
+  const { data: filesData } = useSubscriptionFiles(
+    subscription?.entityType === "scene" ? id : ""
+  );
   const sceneFiles = filesData?.files || [];
   const downloadQueue = filesData?.downloadQueue;
+  const sceneFolder = filesData?.sceneFolder;
+  const folderContents = filesData?.folderContents || { nfoFiles: [], posterFiles: [], videoFiles: [] };
 
   // Form state for editing
   const [editForm, setEditForm] = useState({
@@ -161,9 +167,9 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
 
   // Parse entity data safely
   const entity = subscription?.entity;
-  const images = entity?.images ? (typeof entity.images === 'string' ? JSON.parse(entity.images) : entity.images) : [];
-  const aliases = entity?.aliases ? (typeof entity.aliases === 'string' ? JSON.parse(entity.aliases) : entity.aliases) : [];
-  const urls = entity?.urls ? (typeof entity.urls === 'string' ? JSON.parse(entity.urls) : entity.urls) : [];
+  const images = entity?.images || [];
+  const aliases = (entity && 'aliases' in entity) ? entity.aliases : [];
+  const urls = (entity && 'urls' in entity && Array.isArray(entity.urls)) ? entity.urls : [];
 
   // Helper functions
   const formatDate = (dateStr: string | null) => {
@@ -310,11 +316,11 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
             {/* Image Carousel */}
             {images.length > 0 && (
               <div className="md:col-span-1">
-                <Carousel className="w-full">
+                <Carousel className="w-full" opts={{ loop: true }}>
                   <CarouselContent>
                     {images.map((img: any, idx: number) => (
                       <CarouselItem key={idx}>
-                        <div className={subscription.entityType === "performer" ? "aspect-[3/4]" : "aspect-video"}>
+                        <div className={`relative w-full ${subscription.entityType === "performer" ? "aspect-[3/4]" : "aspect-video"} overflow-hidden rounded-lg`}>
                           <Image
                             src={img.url}
                             alt={`${subscription.entityName} - Image ${idx + 1}`}
@@ -342,7 +348,7 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
               <h2 className="text-2xl font-bold mb-4">{subscription.entityName}</h2>
 
               {/* PERFORMER METADATA */}
-              {subscription.entityType === "performer" && (
+              {subscription.entityType === "performer" && entity && 'gender' in entity && (
                 <>
                   {/* Basic Info */}
                   <div className="space-y-3 mb-4">
@@ -358,11 +364,11 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                         <span className="text-sm">Born: {formatDate(entity.birthdate)}</span>
                       </div>
                     )}
-                    {(entity.careerStartDate || entity.careerEndDate) && (
+                    {(entity.careerStartYear || entity.careerEndYear) && (
                       <div className="flex items-center gap-2">
                         <MapPin className="h-4 w-4 text-muted-foreground" />
                         <span className="text-sm">
-                          Career: {entity.careerStartDate || '?'} - {entity.careerEndDate || 'Present'}
+                          Career: {entity.careerStartYear || '?'} - {entity.careerEndYear || 'Present'}
                         </span>
                       </div>
                     )}
@@ -377,12 +383,6 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
 
                   {/* Physical Details */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t">
-                    {entity.careerLength && (
-                      <div>
-                        <h3 className="text-sm font-medium text-muted-foreground">Career Length</h3>
-                        <p className="text-sm mt-1">{entity.careerLength}</p>
-                      </div>
-                    )}
                     {entity.measurements && (
                       <div>
                         <h3 className="text-sm font-medium text-muted-foreground">Measurements</h3>
@@ -406,7 +406,7 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
               )}
 
               {/* SCENE METADATA */}
-              {subscription.entityType === "scene" && (
+              {subscription.entityType === "scene" && entity && 'date' in entity && (
                 <>
                   {/* Scene Details */}
                   <div className="space-y-3 mb-4">
@@ -428,25 +428,19 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                         <span className="font-medium">{entity.code}</span>
                       </div>
                     )}
-                    {entity.director && (
-                      <div className="text-sm">
-                        <span className="text-muted-foreground">Director: </span>
-                        <span className="font-medium">{entity.director}</span>
-                      </div>
-                    )}
                   </div>
 
-                  {entity.details && (
+                  {entity.description && (
                     <div className="space-y-2 mb-4">
                       <h3 className="text-sm font-medium text-muted-foreground">Description</h3>
-                      <p className="text-sm leading-relaxed">{entity.details}</p>
+                      <p className="text-sm leading-relaxed">{entity.description}</p>
                     </div>
                   )}
                 </>
               )}
 
               {/* STUDIO METADATA */}
-              {subscription.entityType === "studio" && (
+              {subscription.entityType === "studio" && entity && 'parentStudioId' in entity && (
                 <>
                   {entity.url && (
                     <div className="mb-4">
@@ -628,9 +622,36 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-col gap-1">
                           {scene.hasFiles ? (
-                            <Badge variant="default">{scene.fileCount} file{scene.fileCount !== 1 ? 's' : ''}</Badge>
+                            <>
+                              <Badge variant="default">{scene.fileCount} file{scene.fileCount !== 1 ? 's' : ''}</Badge>
+                              {scene.sceneFiles && scene.sceneFiles.length > 0 && (
+                                <div className="mt-2 space-y-1">
+                                  {scene.sceneFiles.map((file: any) => (
+                                    <div key={file.id} className="text-xs font-mono bg-muted/50 p-2 rounded">
+                                      <div className="font-medium mb-1">Video:</div>
+                                      <div className="truncate max-w-xs mb-1" title={file.filePath}>
+                                        {file.filePath}
+                                      </div>
+                                      {file.nfoPath && (
+                                        <div className="truncate max-w-xs text-muted-foreground" title={file.nfoPath}>
+                                          NFO: {file.nfoPath}
+                                        </div>
+                                      )}
+                                      {file.posterPath && (
+                                        <div className="truncate max-w-xs text-muted-foreground" title={file.posterPath}>
+                                          Poster: {file.posterPath}
+                                        </div>
+                                      )}
+                                      <div className="text-muted-foreground mt-1">
+                                        {(file.fileSize / (1024 * 1024 * 1024)).toFixed(2)} GB
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </>
                           ) : (
                             <span className="text-sm text-muted-foreground">No files</span>
                           )}
@@ -724,7 +745,7 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Path</TableHead>
+                      <TableHead>Files</TableHead>
                       <TableHead>Size</TableHead>
                       <TableHead>Quality</TableHead>
                       <TableHead>Added</TableHead>
@@ -733,17 +754,32 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                   <TableBody>
                     {sceneFiles.map((file: any) => (
                       <TableRow key={file.id}>
-                        <TableCell className="font-medium max-w-md truncate">
-                          {file.relativePath}
+                        <TableCell className="font-mono text-xs max-w-md">
+                          <div className="space-y-1">
+                            <div className="font-medium">Video:</div>
+                            <div className="truncate" title={file.filePath}>
+                              {file.filePath}
+                            </div>
+                            {file.nfoPath && (
+                              <div className="truncate text-muted-foreground" title={file.nfoPath}>
+                                NFO: {file.nfoPath}
+                              </div>
+                            )}
+                            {file.posterPath && (
+                              <div className="truncate text-muted-foreground" title={file.posterPath}>
+                                Poster: {file.posterPath}
+                              </div>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
-                          {(file.size / (1024 * 1024 * 1024)).toFixed(2)} GB
+                          {(file.fileSize / (1024 * 1024 * 1024)).toFixed(2)} GB
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline">{file.quality}</Badge>
+                          <Badge variant="outline">{file.quality || 'N/A'}</Badge>
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
-                          {new Date(file.dateAdded).toLocaleDateString()}
+                          {new Date(file.createdAt).toLocaleDateString()}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -751,9 +787,82 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                 </Table>
               </div>
             ) : (
-              <div className="flex items-center gap-3 text-muted-foreground p-4">
-                <Film className="h-5 w-5" />
-                <p>No files found for this scene. {downloadQueue ? "Download in progress." : "This scene has not been downloaded yet."}</p>
+              <div className="space-y-4">
+                {/* Show folder contents if available */}
+                {folderContents.nfoFiles.length > 0 || folderContents.posterFiles.length > 0 || folderContents.videoFiles.length > 0 ? (
+                  <div className="space-y-3">
+                    <h3 className="font-medium">Folder Contents</h3>
+
+                    {folderContents.nfoFiles.length > 0 && (
+                      <div className="p-3 bg-muted/50 rounded-lg">
+                        <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+                          <Badge variant="outline">NFO Files</Badge>
+                          <span className="text-xs text-muted-foreground">{folderContents.nfoFiles.length}</span>
+                        </h4>
+                        <ul className="text-xs font-mono space-y-1">
+                          {folderContents.nfoFiles.map((file: string, idx: number) => (
+                            <li key={idx} className="text-muted-foreground">✓ {file}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {folderContents.posterFiles.length > 0 && (
+                      <div className="p-3 bg-muted/50 rounded-lg">
+                        <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+                          <Badge variant="outline">Poster Files</Badge>
+                          <span className="text-xs text-muted-foreground">{folderContents.posterFiles.length}</span>
+                        </h4>
+                        <ul className="text-xs font-mono space-y-1">
+                          {folderContents.posterFiles.map((file: string, idx: number) => (
+                            <li key={idx} className="text-muted-foreground">✓ {file}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {folderContents.videoFiles.length > 0 && (
+                      <div className="p-3 bg-muted/50 rounded-lg">
+                        <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+                          <Badge variant="default">Video Files</Badge>
+                          <span className="text-xs text-muted-foreground">{folderContents.videoFiles.length}</span>
+                        </h4>
+                        <ul className="text-xs font-mono space-y-1">
+                          {folderContents.videoFiles.map((file: string, idx: number) => (
+                            <li key={idx} className="text-muted-foreground">✓ {file}</li>
+                          ))}
+                        </ul>
+                        <p className="text-xs text-amber-600 mt-2">
+                          ⚠️ Video files found but not in database. The filesystem sync job will add them when it runs.
+                        </p>
+                      </div>
+                    )}
+
+                    {sceneFolder && (
+                      <div className="p-3 bg-muted/30 rounded-lg border-l-2 border-primary">
+                        <h4 className="font-medium mb-1 text-xs">Folder Path</h4>
+                        <p className="text-xs font-mono text-muted-foreground break-all">{sceneFolder}</p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 text-muted-foreground p-4">
+                      <Film className="h-5 w-5" />
+                      <p>No files found for this scene. {downloadQueue ? "Download in progress." : "This scene has not been downloaded yet."}</p>
+                    </div>
+                    {sceneFolder && (
+                      <div className="p-4 bg-muted/30 rounded-lg border-l-4 border-primary">
+                        <h4 className="font-medium mb-2 text-sm">Expected Scene Folder</h4>
+                        <p className="text-sm font-mono text-muted-foreground break-all">{sceneFolder}</p>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          When you subscribe to a scene, .nfo and poster files are created here.
+                          Video files will appear after download completes.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </CardContent>

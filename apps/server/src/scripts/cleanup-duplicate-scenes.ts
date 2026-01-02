@@ -14,7 +14,7 @@
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "@repo/database";
-import { scenes, sceneFiles, performersScenes, studiosScenes, subscriptions } from "@repo/database";
+import { scenes, sceneFiles, performersScenes, subscriptions } from "@repo/database";
 import { eq, and } from "drizzle-orm";
 import * as fs from "fs";
 import * as path from "path";
@@ -68,7 +68,7 @@ async function main() {
 
     duplicateGroups.get(key)!.scenes.push({
       id: scene.id,
-      tpdb_id: scene.tpdbId,
+      tpdb_id: scene.externalIds.find(e => e.source === 'tpdb')?.id || null,
       code: scene.code,
       created_at: scene.createdAt,
     });
@@ -148,10 +148,7 @@ async function removeDuplicateScene(
     // 2. Delete performer-scene links
     await db.delete(performersScenes).where(eq(performersScenes.sceneId, sceneId));
 
-    // 3. Delete studio-scene links
-    await db.delete(studiosScenes).where(eq(studiosScenes.sceneId, sceneId));
-
-    // 4. Delete subscriptions for this scene
+    // 3. Delete subscriptions for this scene (no studio-scene links to delete with new schema)
     await db.delete(subscriptions).where(
       and(
         eq(subscriptions.entityType, "scene"),
@@ -159,10 +156,10 @@ async function removeDuplicateScene(
       )
     );
 
-    // 5. Delete the scene folder from filesystem
+    // 4. Delete the scene folder from filesystem
     await deleteSceneFolder(sceneId);
 
-    // 6. Finally delete the scene itself
+    // 5. Finally delete the scene itself
     await db.delete(scenes).where(eq(scenes.id, sceneId));
 
     console.log(`      ✅ Successfully deleted scene ${sceneId}`);

@@ -1,8 +1,16 @@
+/**
+ * Setup status response
+ * Used by setup routes to determine if app is initialized
+ */
 export type SetupStatus = {
   setupCompleted: boolean;
   hasAdmin: boolean;
 };
 
+/**
+ * Setup wizard data
+ * Used during initial app configuration
+ */
 export type SetupData = {
   // Step 1: Admin account (required)
   username: string;
@@ -29,6 +37,10 @@ export type SetupData = {
   };
 };
 
+/**
+ * User entity (minimal for setup)
+ * Full User type may live in auth module
+ */
 export type User = {
   id: string;
   username: string;

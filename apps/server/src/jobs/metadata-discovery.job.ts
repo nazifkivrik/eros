@@ -98,14 +98,10 @@ async function discoverMetadataForScene(
   await app.db
     .update(scenes)
     .set({
-      stashdbId: fullScene.id,
       title: fullScene.title,
       date: fullScene.date,
-      details: fullScene.details,
       duration: fullScene.duration,
-      director: fullScene.director,
       code: fullScene.code,
-      urls: fullScene.urls || [],
       images: fullScene.images || [],
       hasMetadata: true,
       updatedAt: new Date().toISOString(),

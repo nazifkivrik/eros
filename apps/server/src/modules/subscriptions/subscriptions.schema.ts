@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { QualityItemSchema } from "../quality-profiles/quality-profiles.schema.js";
+import { PerformerSchema, StudioSchema, SceneSchema } from "../search/search.schema.js";
 
 export const EntityTypeSchema = z.enum(["performer", "studio", "scene"]);
 
@@ -20,16 +22,29 @@ export const SubscriptionSchema = z.object({
 export const QualityProfileSchema = z.object({
   id: z.string(),
   name: z.string(),
-  items: z.any(), // JSON array of quality items
+  items: z.array(QualityItemSchema),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 
-export const SubscriptionWithDetailsSchema = SubscriptionSchema.extend({
+export const SubscriptionDetailResponseSchema = z.object({
+  id: z.string(),
+  entityType: z.enum(["performer", "studio", "scene"]),
+  entity: z.union([PerformerSchema, StudioSchema, SceneSchema]).nullable(),
   entityName: z.string(),
-  entity: z.any().nullable(), // Can be performer, studio, or scene
   qualityProfile: QualityProfileSchema.nullable(),
+  autoDownload: z.boolean(),
+  includeMetadataMissing: z.boolean(),
+  includeAliases: z.boolean(),
+  status: z.string(),
+  monitored: z.boolean(),
+  searchCutoffDate: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 });
+
+// Response tipi schema'dan üret
+export type SubscriptionDetailResponse = z.infer<typeof SubscriptionDetailResponseSchema>;
 
 export const CreateSubscriptionSchema = z.object({
   entityType: EntityTypeSchema,
@@ -68,7 +83,7 @@ export const DeleteSubscriptionQuerySchema = z.object({
 });
 
 export const SubscriptionListResponseSchema = z.object({
-  data: z.array(SubscriptionWithDetailsSchema),
+  data: z.array(SubscriptionDetailResponseSchema),
 });
 
 export const SubscriptionsByTypeResponseSchema = z.object({

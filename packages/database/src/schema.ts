@@ -1,5 +1,5 @@
 import { sql, relations } from "drizzle-orm";
-import { sqliteTable, text, integer, primaryKey, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, primaryKey, index } from "drizzle-orm/sqlite-core";
 
 // Helper function for timestamps
 const timestamps = {
@@ -14,67 +14,188 @@ const timestamps = {
 // Performers Table
 export const performers = sqliteTable("performers", {
   id: text("id").primaryKey(),
-  stashdbId: text("stashdb_id").unique(),
-  tpdbId: text("tpdb_id").unique(),
+  externalIds: text("external_ids", { mode: "json" })
+    .$type<Array<{ source: string; id: string }>>()
+    .notNull()
+    .default(sql`'[]'`),
+  slug: text("slug").notNull(),
   name: text("name").notNull(),
-  aliases: text("aliases", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
+  fullName: text("full_name").notNull(),
   disambiguation: text("disambiguation"),
+  bio: text("bio"),
+  rating: real("rating").notNull().default(0),
+  aliases: text("aliases", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
+
+  // Physical attributes
   gender: text("gender"),
   birthdate: text("birthdate"),
   deathDate: text("death_date"),
-  careerStartDate: text("career_start_date"),
-  careerEndDate: text("career_end_date"),
-  careerLength: text("career_length"),
-  bio: text("bio"),
+  birthplace: text("birthplace"),
+  birthplaceCode: text("birthplace_code"),
+  astrology: text("astrology"),
+  ethnicity: text("ethnicity"),
+  nationality: text("nationality"),
+
+  // Appearance
+  hairColour: text("hair_colour"),
+  eyeColour: text("eye_colour"),
+  height: text("height"),
+  weight: text("weight"),
   measurements: text("measurements"),
+  cupsize: text("cupsize"),
+  waist: text("waist"),
+  hips: text("hips"),
   tattoos: text("tattoos"),
   piercings: text("piercings"),
+  fakeBoobs: integer("fake_boobs", { mode: "boolean" }).notNull().default(false),
+
+  // Career
+  careerStartYear: integer("career_start_year"),
+  careerEndYear: integer("career_end_year"),
+  sameSexOnly: integer("same_sex_only", { mode: "boolean" }).notNull().default(false),
+
+  // Media
   images: text("images", { mode: "json" })
     .$type<Array<{ url: string; width?: number; height?: number }>>()
     .notNull()
     .default(sql`'[]'`),
+  thumbnail: text("thumbnail"),
+  poster: text("poster"),
+
+  // External links
+  links: text("links", { mode: "json" }).$type<Array<{ url: string; platform: string }>>(),
+
   ...timestamps,
 });
 
-// Studios Table (self-referencing)
+// Studios Table
 export const studios = sqliteTable("studios", {
   id: text("id").primaryKey(),
-  stashdbId: text("stashdb_id").unique(),
-  tpdbId: text("tpdb_id").unique(),
+  externalIds: text("external_ids", { mode: "json" })
+    .$type<Array<{ source: string; id: string }>>()
+    .notNull()
+    .default(sql`'[]'`),
   name: text("name").notNull(),
-  aliases: text("aliases", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
+  shortName: text("short_name"),
+  slug: text("slug"),
+  url: text("url"),
+  description: text("description"),
+  rating: real("rating").notNull().default(0),
+
+  // Hierarchy
   parentStudioId: text("parent_studio_id"),
+  networkId: text("network_id"),
+
+  // Media
   images: text("images", { mode: "json" })
     .$type<Array<{ url: string; width?: number; height?: number }>>()
     .notNull()
     .default(sql`'[]'`),
-  url: text("url"),
+  logo: text("logo"),
+  favicon: text("favicon"),
+  poster: text("poster"),
+
+  // External links
+  links: text("links", { mode: "json" }).$type<Array<{ url: string; platform: string }>>(),
+
   ...timestamps,
 });
 
 // Scenes Table
 export const scenes = sqliteTable("scenes", {
   id: text("id").primaryKey(),
-  stashdbId: text("stashdb_id").unique(),
-  tpdbId: text("tpdb_id").unique(),
-  tpdbContentType: text("tpdb_content_type").$type<"scene" | "jav" | "movie">(),
+  externalIds: text("external_ids", { mode: "json" })
+    .$type<Array<{ source: string; id: string }>>()
+    .notNull()
+    .default(sql`'[]'`),
+  slug: text("slug").notNull(),
   title: text("title").notNull(),
+  description: text("description"),
   date: text("date"),
-  details: text("details"),
+
+  // Content type
+  contentType: text("content_type").$type<"scene" | "jav" | "movie">().notNull().default("scene"),
+
+  // Media info
   duration: integer("duration"),
-  director: text("director"),
+  format: text("format"),
+
+  // Identifiers
+  externalId: text("external_id"),
   code: text("code"),
-  urls: text("urls", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
+  sku: text("sku"),
+  url: text("url"),
+
+  // Media
   images: text("images", { mode: "json" })
     .$type<Array<{ url: string; width?: number; height?: number }>>()
     .notNull()
     .default(sql`'[]'`),
+  poster: text("poster"),
+  backImage: text("back_image"),
+  thumbnail: text("thumbnail"),
+  trailer: text("trailer"),
+  background: text("background", { mode: "json" })
+    .$type<{
+      full: string | null;
+      large: string | null;
+      medium: string | null;
+      small: string | null;
+    }>(),
+
+  // Metadata
+  rating: real("rating").notNull().default(0),
+
+  // Relations
+  siteId: text("site_id").references(() => studios.id, { onDelete: "set null" }),
+
+  // External links
+  links: text("links", { mode: "json" }).$type<Array<{ url: string; platform: string }>>(),
+
+  // System
   hasMetadata: integer("has_metadata", { mode: "boolean" }).notNull().default(true),
-  inferredFromIndexers: integer("inferred_from_indexers", { mode: "boolean" })
-    .notNull()
-    .default(false),
+  inferredFromIndexers: integer("inferred_from_indexers", { mode: "boolean" }).notNull().default(false),
+
   ...timestamps,
 });
+
+// Directors Table
+export const directors = sqliteTable("directors", {
+  id: text("id").primaryKey(),
+  externalIds: text("external_ids", { mode: "json" })
+    .$type<Array<{ source: string; id: string }>>()
+    .notNull()
+    .default(sql`'[]'`),
+  name: text("name").notNull(),
+  slug: text("slug").notNull(),
+  ...timestamps,
+});
+
+// Scene Markers Table
+export const sceneMarkers = sqliteTable("scene_markers", {
+  id: text("id").primaryKey(),
+  sceneId: text("scene_id")
+    .notNull()
+    .references(() => scenes.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  startTime: integer("start_time").notNull(),
+  endTime: integer("end_time"),
+  ...timestamps,
+});
+
+// Scene Hashes Table
+export const sceneHashes = sqliteTable("scene_hashes", {
+  id: text("id").primaryKey(),
+  sceneId: text("scene_id")
+    .notNull()
+    .references(() => scenes.id, { onDelete: "cascade" }),
+  hash: text("hash").notNull(),
+  type: text("type").$type<"oshash" | "md5" | "phash">().notNull(),
+  duration: integer("duration"),
+}, (table) => ({
+  hashIdx: index("scene_hashes_hash_idx").on(table.hash),
+  typeHashIdx: index("scene_hashes_type_hash_idx").on(table.type, table.hash),
+}));
 
 // Performers-Scenes Junction Table
 export const performersScenes = sqliteTable(
@@ -92,19 +213,19 @@ export const performersScenes = sqliteTable(
   })
 );
 
-// Studios-Scenes Junction Table
-export const studiosScenes = sqliteTable(
-  "studios_scenes",
+// Directors-Scenes Junction Table
+export const directorsScenes = sqliteTable(
+  "directors_scenes",
   {
-    studioId: text("studio_id")
+    directorId: text("director_id")
       .notNull()
-      .references(() => studios.id, { onDelete: "cascade" }),
+      .references(() => directors.id, { onDelete: "cascade" }),
     sceneId: text("scene_id")
       .notNull()
       .references(() => scenes.id, { onDelete: "cascade" }),
   },
   (table) => ({
-    pk: primaryKey({ columns: [table.studioId, table.sceneId] }),
+    pk: primaryKey({ columns: [table.directorId, table.sceneId] }),
   })
 );
 
@@ -117,8 +238,8 @@ export const qualityProfiles = sqliteTable("quality_profiles", {
       Array<{
         quality: string;
         source: string;
-        minSeeders: number | "any"; // can be "any" or a number
-        maxSize: number; // in GB
+        minSeeders: number | "any";
+        maxSize: number;
       }>
     >()
     .notNull(),
@@ -138,32 +259,17 @@ export const subscriptions = sqliteTable("subscriptions", {
     .notNull()
     .default(false),
   includeAliases: integer("include_aliases", { mode: "boolean" }).notNull().default(false),
-  status: text("status").notNull().default("active"), // 'active' | 'paused' | 'inactive'
+  status: text("status").notNull().default("active"),
   monitored: integer("monitored", { mode: "boolean" }).notNull().default(true),
   searchCutoffDate: text("search_cutoff_date"),
   ...timestamps,
-});
-
-// Indexers Table
-export const indexers = sqliteTable("indexers", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  type: text("type").notNull(), // 'prowlarr' | 'manual'
-  baseUrl: text("base_url").notNull(),
-  apiKey: text("api_key"),
-  priority: integer("priority").notNull().default(50),
-  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
-  categories: text("categories", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
-  createdAt: text("created_at")
-    .notNull()
-    .default(sql`(datetime('now'))`),
 });
 
 // Meta Sources Table
 export const metaSources = sqliteTable("meta_sources", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  type: text("type").notNull(), // 'stashdb' | 'theporndb' | 'custom'
+  type: text("type").notNull(),
   baseUrl: text("base_url").notNull(),
   apiKey: text("api_key"),
   priority: integer("priority").notNull().default(50),
@@ -181,13 +287,11 @@ export const downloadQueue = sqliteTable("download_queue", {
     .references(() => scenes.id, { onDelete: "cascade" }),
   torrentHash: text("torrent_hash"),
   qbitHash: text("qbit_hash"),
-  indexerId: text("indexer_id").notNull(), // Prowlarr indexer ID (no FK constraint)
-  indexerName: text("indexer_name"), // Indexer name from Prowlarr
   title: text("title").notNull(),
   size: integer("size").notNull(),
   seeders: integer("seeders").notNull(),
   quality: text("quality").notNull(),
-  status: text("status").notNull().default("queued"), // 'queued' | 'downloading' | 'completed' | 'failed' | 'paused'
+  status: text("status").notNull().default("queued"),
   addedAt: text("added_at")
     .notNull()
     .default(sql`(datetime('now'))`),
@@ -233,7 +337,7 @@ export const entityMetaSources = sqliteTable("entity_meta_sources", {
   id: text("id").primaryKey(),
   entityType: text("entity_type").$type<"performer" | "studio" | "scene">().notNull(),
   entityId: text("entity_id").notNull(),
-  sourceType: text("source_type").$type<"stashdb" | "tpdb" | "manual">().notNull(),
+  sourceType: text("source_type").$type<"tpdb" | "manual">().notNull(),
   sourceId: text("source_id").notNull(),
   isPrimary: integer("is_primary", { mode: "boolean" }).notNull().default(false),
   lastSyncedAt: text("last_synced_at").notNull(),
@@ -247,7 +351,12 @@ export const entityMetaSources = sqliteTable("entity_meta_sources", {
 // Tags Table
 export const tags = sqliteTable("tags", {
   id: text("id").primaryKey(),
+  externalIds: text("external_ids", { mode: "json" })
+    .$type<Array<{ source: string; id: string }>>()
+    .notNull()
+    .default(sql`'[]'`),
   name: text("name").notNull().unique(),
+  slug: text("slug").notNull(),
 });
 
 // Scenes-Tags Junction Table
@@ -270,7 +379,7 @@ export const scenesTags = sqliteTable(
 export const searchHistory = sqliteTable("search_history", {
   id: text("id").primaryKey(),
   query: text("query").notNull(),
-  entityType: text("entity_type"), // 'performer' | 'studio' | 'scene' | 'all'
+  entityType: text("entity_type"),
   resultsCount: integer("results_count").notNull(),
   searchedAt: text("searched_at")
     .notNull()
@@ -281,7 +390,7 @@ export const searchHistory = sqliteTable("search_history", {
 export const jobsLog = sqliteTable("jobs_log", {
   id: text("id").primaryKey(),
   jobName: text("job_name").notNull(),
-  status: text("status").notNull(), // 'running' | 'completed' | 'failed'
+  status: text("status").notNull(),
   startedAt: text("started_at")
     .notNull()
     .default(sql`(datetime('now'))`),
@@ -321,9 +430,7 @@ export const logs = sqliteTable("logs", {
     .notNull()
     .default(sql`(datetime('now'))`),
 }, (table) => ({
-  // Index for efficient date-based queries and cleanup
   createdAtIdx: index("logs_created_at_idx").on(table.createdAt),
-  // Composite index for filtering by level and date
   levelCreatedAtIdx: index("logs_level_created_at_idx").on(table.level, table.createdAt),
 }));
 
@@ -333,7 +440,7 @@ export const sceneExclusions = sqliteTable("scene_exclusions", {
   sceneId: text("scene_id")
     .notNull()
     .references(() => scenes.id, { onDelete: "cascade" }),
-  reason: text("reason").notNull(), // 'user_deleted' | 'manual_removal'
+  reason: text("reason").notNull(),
   excludedAt: text("excluded_at")
     .notNull()
     .default(sql`(datetime('now'))`),
@@ -350,16 +457,40 @@ export const performersRelations = relations(performers, ({ many }) => ({
 }));
 
 export const studiosRelations = relations(studios, ({ many }) => ({
-  studiosScenes: many(studiosScenes),
+  scenes: many(scenes),
 }));
 
-export const scenesRelations = relations(scenes, ({ many }) => ({
+export const scenesRelations = relations(scenes, ({ one, many }) => ({
   performersScenes: many(performersScenes),
-  studiosScenes: many(studiosScenes),
   scenesTags: many(scenesTags),
   downloadQueue: many(downloadQueue),
   sceneFiles: many(sceneFiles),
   sceneExclusions: many(sceneExclusions),
+  sceneMarkers: many(sceneMarkers),
+  sceneHashes: many(sceneHashes),
+  directorsScenes: many(directorsScenes),
+  site: one(studios, {
+    fields: [scenes.siteId],
+    references: [studios.id],
+  }),
+}));
+
+export const directorsRelations = relations(directors, ({ many }) => ({
+  directorsScenes: many(directorsScenes),
+}));
+
+export const sceneMarkersRelations = relations(sceneMarkers, ({ one }) => ({
+  scene: one(scenes, {
+    fields: [sceneMarkers.sceneId],
+    references: [scenes.id],
+  }),
+}));
+
+export const sceneHashesRelations = relations(sceneHashes, ({ one }) => ({
+  scene: one(scenes, {
+    fields: [sceneHashes.sceneId],
+    references: [scenes.id],
+  }),
 }));
 
 export const performersScenesRelations = relations(performersScenes, ({ one }) => ({
@@ -373,13 +504,13 @@ export const performersScenesRelations = relations(performersScenes, ({ one }) =
   }),
 }));
 
-export const studiosScenesRelations = relations(studiosScenes, ({ one }) => ({
-  studio: one(studios, {
-    fields: [studiosScenes.studioId],
-    references: [studios.id],
+export const directorsScenesRelations = relations(directorsScenes, ({ one }) => ({
+  director: one(directors, {
+    fields: [directorsScenes.directorId],
+    references: [directors.id],
   }),
   scene: one(scenes, {
-    fields: [studiosScenes.sceneId],
+    fields: [directorsScenes.sceneId],
     references: [scenes.id],
   }),
 }));
@@ -395,18 +526,10 @@ export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
   }),
 }));
 
-export const indexersRelations = relations(indexers, ({ many }) => ({
-  downloadQueue: many(downloadQueue),
-}));
-
 export const downloadQueueRelations = relations(downloadQueue, ({ one }) => ({
   scene: one(scenes, {
     fields: [downloadQueue.sceneId],
     references: [scenes.id],
-  }),
-  indexer: one(indexers, {
-    fields: [downloadQueue.indexerId],
-    references: [indexers.id],
   }),
 }));
 

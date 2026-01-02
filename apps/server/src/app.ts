@@ -14,13 +14,6 @@ import qbittorrentPlugin from "./plugins/qbittorrent.js";
 import schedulerPlugin from "./plugins/scheduler.js";
 import aiPlugin from "./plugins/ai.js";
 import fileManagerPlugin from "./plugins/file-manager.js";
-// TODO: Implement these plugins in future phases
-// import envPlugin from "./plugins/env";
-// import settingsPlugin from "./plugins/settings";
-// import subscriptionPlugin from "./plugins/subscription";
-// import prowlarrPlugin from "./plugins/prowlarr";
-// import parserPlugin from "./plugins/parser";
-// import heuristicPlugin from "./plugins/heuristic";
 
 import authRoutes from "./modules/auth/auth.routes.js";
 import setupRoutes from "./modules/setup/setup.routes.js";
@@ -33,8 +26,6 @@ import jobsRoutes from "./modules/jobs/jobs.routes.js";
 import torrentsRoutes from "./modules/torrents/torrents.routes.js";
 import logsRoutes from "./modules/logs/logs.routes.js";
 import settingsRoutes from "./modules/settings/settings.routes.js";
-// TODO: Implement these routes in future phases
-// import entitiesRoutes from "./modules/entities/entities.routes";
 
 export async function buildApp() {
   const app = Fastify({
@@ -69,13 +60,6 @@ export async function buildApp() {
   await app.register(fileManagerPlugin);
   await app.register(schedulerPlugin);
   await app.register(aiPlugin);
-  // TODO: Register these plugins in future phases
-  // await app.register(envPlugin);
-  // await app.register(settingsPlugin);
-  // await app.register(subscriptionPlugin);
-  // await app.register(prowlarrPlugin);
-  // await app.register(parserPlugin);
-  // await app.register(heuristicPlugin);
 
   // Register modules
   await app.register(setupRoutes, { prefix: "/api/setup" });
@@ -91,8 +75,6 @@ export async function buildApp() {
   await app.register(torrentsRoutes, { prefix: "/api/torrents" });
   await app.register(logsRoutes, { prefix: "/api/logs" });
   await app.register(settingsRoutes, { prefix: "/api/settings" });
-  // TODO: Register these routes in future phases
-  // await app.register(entitiesRoutes, { prefix: "/api" });
 
   app.get("/health", async () => ({ status: "ok" }));
 

@@ -1,3 +1,15 @@
+import type {
+  Performer,
+  Studio,
+  Scene,
+  QualityProfile,
+  DownloadQueueItem,
+  Subscription,
+  SubscriptionDetail,
+  EventType,
+  LogLevel,
+} from "@repo/shared-types";
+
 // Use relative URL for browser requests to work in any environment (local, Docker, etc.)
 // Server-side requests will use the full URL from env
 const API_URL = typeof window === 'undefined'
@@ -124,68 +136,68 @@ class ApiClient {
   }
 
   // Search
-  async search(query: string, limit = 20) {
+  async search(query: string, limit = 20, page = 1) {
     return this.request<{
-      performers: any[];
-      studios: any[];
-      scenes: any[];
+      performers: Performer[];
+      studios: Studio[];
+      scenes: Scene[];
     }>("/search", {
       method: "POST",
-      body: JSON.stringify({ query, limit }),
+      body: JSON.stringify({ query, limit, page }),
     });
   }
 
   async searchPerformers(query: string, limit = 20) {
-    return this.request<{ results: any[] }>("/search/performers", {
+    return this.request<{ results: Performer[] }>("/search/performers", {
       method: "POST",
       body: JSON.stringify({ query, limit }),
     });
   }
 
   async searchStudios(query: string, limit = 20) {
-    return this.request<{ results: any[] }>("/search/studios", {
+    return this.request<{ results: Studio[] }>("/search/studios", {
       method: "POST",
       body: JSON.stringify({ query, limit }),
     });
   }
 
   async searchScenes(query: string, limit = 20) {
-    return this.request<{ results: any[] }>("/search/scenes", {
+    return this.request<{ results: Scene[] }>("/search/scenes", {
       method: "POST",
       body: JSON.stringify({ query, limit }),
     });
   }
 
   async getPerformerDetails(id: string) {
-    return this.request<any>(`/search/performers/${id}`);
+    return this.request<Performer>(`/search/performers/${id}`);
   }
 
   async getStudioDetails(id: string) {
-    return this.request<any>(`/search/studios/${id}`);
+    return this.request<Studio>(`/search/studios/${id}`);
   }
 
   async getSceneDetails(id: string) {
-    return this.request<any>(`/search/scenes/${id}`);
+    return this.request<Scene>(`/search/scenes/${id}`);
   }
 
   // Performers
   async getPerformers(limit = 20, offset = 0) {
-    return this.request<{ data: any[]; total: number }>("/performers", {
+    return this.request<{ data: Performer[]; total: number }>("/performers", {
       params: { limit, offset },
     });
   }
 
   async getPerformer(id: string) {
-    return this.request<any>(`/performers/${id}`);
+    return this.request<Performer>(`/performers/${id}`);
   }
 
   // Quality Profiles
   async getQualityProfiles() {
-    return this.request<{ data: any[] }>("/quality-profiles");
+    return this.request<{ data: QualityProfile[] }>("/quality-profiles");
   }
 
   async getQualityProfile(id: string) {
-    return this.request<any>(`/quality-profiles/${id}`);
+    return this.request<QualityProfile>(`/quality-profiles/${id}`);
   }
 
   async createQualityProfile(data: {
@@ -197,7 +209,7 @@ class ApiClient {
       maxSize: number;
     }>;
   }) {
-    return this.request<any>("/quality-profiles", {
+    return this.request<QualityProfile>("/quality-profiles", {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -215,7 +227,7 @@ class ApiClient {
       }>;
     }
   ) {
-    return this.request<any>(`/quality-profiles/${id}`, {
+    return this.request<QualityProfile>(`/quality-profiles/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
@@ -236,7 +248,7 @@ class ApiClient {
     includeMetadataMissing: boolean;
     includeAliases: boolean;
   }) {
-    return this.request<any>("/subscriptions", {
+    return this.request<Subscription>("/subscriptions", {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -291,15 +303,15 @@ class ApiClient {
   }
 
   async getSubscriptions() {
-    return this.request<{ data: any[] }>("/subscriptions");
+    return this.request<{ data: SubscriptionDetail[] }>("/subscriptions");
   }
 
   async getSubscription(id: string) {
-    return this.request<any>(`/subscriptions/${id}`);
+    return this.request<SubscriptionDetail>(`/subscriptions/${id}`);
   }
 
   async checkSubscription(entityType: string, entityId: string) {
-    return this.request<{ subscribed: boolean; subscription: any | null }>(
+    return this.request<{ subscribed: boolean; subscription: Subscription | null }>(
       `/subscriptions/check/${entityType}/${entityId}`
     );
   }
@@ -312,7 +324,7 @@ class ApiClient {
     monitored?: boolean;
     status?: string;
   }) {
-    return this.request<any>(`/subscriptions/${id}`, {
+    return this.request<Subscription>(`/subscriptions/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
@@ -331,7 +343,7 @@ class ApiClient {
 
   // Download Queue
   async getDownloadQueue() {
-    const response = await this.request<{ data: any[] }>("/download-queue");
+    const response = await this.request<{ data: DownloadQueueItem[] }>("/download-queue");
     return {
       items: response.data,
       total: response.data.length
@@ -361,7 +373,27 @@ class ApiClient {
 
   // Torrents
   async getTorrents() {
-    return this.request<{ torrents: any[]; total: number }>("/torrents");
+    return this.request<{
+      torrents: Array<{
+        hash: string;
+        name: string;
+        size: number;
+        progress: number;
+        state: string;
+        dlspeed: number;
+        upspeed: number;
+        downloaded: number;
+        uploaded: number;
+        ratio: number;
+        eta: number;
+        seeders: number;
+        leechers: number;
+        category: string;
+        added_on: number;
+        completion_on: number;
+      }>;
+      total: number
+    }>("/torrents");
   }
 
   async pauseTorrent(hash: string) {
@@ -400,7 +432,21 @@ class ApiClient {
 
   // Jobs
   async getJobs() {
-    return this.request<{ jobs: any[] }>("/jobs");
+    return this.request<{
+      jobs: Array<{
+        id: string;
+        name: string;
+        description: string;
+        schedule: string;
+        lastRun: string | null;
+        nextRun: string;
+        status: string;
+        enabled: boolean;
+        error: string | null;
+        completedAt: string | null;
+        duration: number | null;
+      }>
+    }>("/jobs");
   }
 
   async triggerJob(jobName: string) {
@@ -412,8 +458,8 @@ class ApiClient {
 
   // Logs
   async getLogs(filters?: {
-    level?: "error" | "warning" | "info" | "debug";
-    eventType?: "torrent" | "subscription" | "download" | "metadata" | "system";
+    level?: LogLevel;
+    eventType?: EventType;
     sceneId?: string;
     performerId?: string;
     studioId?: string;

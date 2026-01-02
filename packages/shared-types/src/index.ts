@@ -1,32 +1,19 @@
-// Barrel export - maintains backward compatibility
-// All types can be imported from '@repo/shared-types'
+/**
+ * Barrel export - single entry point for @repo/shared-types
+ * All types can be imported from '@repo/shared-types'
+ */
 
-// Enums and constants
-export * from "./enums.js";
+// Core types (fundamental building blocks)
+export * from "./core/index.js";
 
-// Shared types
-export * from "./shared.js";
+// Domain entities (business domain)
+export * from "./domain/index.js";
 
-// API types
-export * from "./api.js";
+// Integration types (external services)
+export * from "./integration/index.js";
 
-// Entity types
-export * from "./entities/performer.js";
-export * from "./entities/studio.js";
-export * from "./entities/scene.js";
-export * from "./entities/subscription.js";
-export * from "./entities/logs.js";
-export * from "./entities/jobs.js";
-export * from "./entities/setup.js";
+// Configuration types (app settings)
+export * from "./config/index.js";
 
-// Settings - explicit export for const values
-export type {
-  AppSettings,
-  GeneralSettings,
-  FileManagementSettings,
-  StashDBSettings,
-  ProwlarrSettings,
-  QBittorrentSettings,
-  AISettings,
-} from "./entities/settings.js";
-export { DEFAULT_SETTINGS } from "./entities/settings.js";
+// API contract types (request/response)
+export * from "./api/index.js";

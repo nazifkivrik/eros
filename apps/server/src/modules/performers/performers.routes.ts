@@ -1,5 +1,6 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { performers } from "@repo/database";
 import { nanoid } from "nanoid";
 import {
@@ -91,16 +92,19 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const newPerformer = {
         id,
-        stashdbId: data.stashdbId || null,
+        tpdbId: data.tpdbId || null,
+        slug: data.name.toLowerCase().replace(/\s+/g, "-"),
         name: data.name,
+        fullName: data.name,
+        rating: 0,
         aliases: data.aliases,
         disambiguation: data.disambiguation || null,
         gender: data.gender || null,
         birthdate: data.birthdate || null,
         deathDate: data.deathDate || null,
-        careerStartDate: data.careerStartDate || null,
-        careerEndDate: data.careerEndDate || null,
         images: data.images,
+        fakeBoobs: false,
+        sameSexOnly: false,
         createdAt: now,
         updatedAt: now,
       };
@@ -160,6 +164,10 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
     {
       schema: {
         params: PerformerParamsSchema,
+        querystring: z.object({
+          deleteAssociatedScenes: z.boolean().optional().default(false),
+          removeFiles: z.boolean().optional().default(false),
+        }),
         response: {
           200: SuccessResponseSchema,
           404: ErrorResponseSchema,
@@ -168,6 +176,7 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       const { id } = request.params;
+      const { deleteAssociatedScenes, removeFiles } = request.query;
 
       const existing = await app.db.query.performers.findFirst({
         where: eq(performers.id, id),
@@ -177,6 +186,30 @@ const performersRoutes: FastifyPluginAsyncZod = async (app) => {
         return reply.code(404).send({ error: "Performer not found" });
       }
 
+      // Check if performer has a subscription
+      const subscription = await app.db.query.subscriptions.findFirst({
+        where: and(
+          eq(subscriptions.entityType, "performer"),
+          eq(subscriptions.entityId, id)
+        ),
+      });
+
+      // If subscription exists, delete it using subscription service
+      // This will handle scene deletion, download queue cleanup, and torrent removal
+      if (subscription) {
+        const { createSettingsService } = await import("../../services/settings.service.js");
+        const { createSubscriptionService } = await import("../../services/subscription.service.js");
+        const settingsService = createSettingsService(app.db);
+        const settings = await settingsService.getSettings();
+
+        const tpdbService = settings.tpdb.enabled ? app.tpdb : undefined;
+        const subscriptionService = createSubscriptionService(app.db, tpdbService);
+
+        await subscriptionService.deleteSubscription(subscription.id, deleteAssociatedScenes, removeFiles);
+        app.log.info({ performerId: id, subscriptionId: subscription.id }, "Deleted performer subscription");
+      }
+
+      // Delete performer (cascade deletes will handle performersScenes junction table)
       await app.db.delete(performers).where(eq(performers.id, id));
 
       return { success: true };

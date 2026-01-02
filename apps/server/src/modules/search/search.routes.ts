@@ -1,4 +1,7 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
+import { z } from "zod";
+import { eq } from "drizzle-orm";
+import { performers, studios, scenes } from "@repo/database/schema";
 import { createStashDBService } from "../../services/stashdb.service.js";
 import {
   PerformerSchema,
@@ -43,26 +46,26 @@ const searchRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request) => {
-      const { query, limit } = request.body;
+      const { query, limit, page } = request.body;
 
       try{
         const { service, source } = await getMetadataService();
 
         const [performers, studios, scenes] = await Promise.all([
-          service.searchPerformers(query, limit).catch((err) => {
+          service.searchPerformers(query, limit, page).catch((err) => {
             app.log.error({ err, query, source }, "Failed to search performers");
             return [];
           }),
           source === 'tpdb'
-            ? service.searchSites(query).then((sites: any[]) => sites.slice(0, limit)).catch((err: any) => {
+            ? service.searchSites(query, page).then((sites: any[]) => sites.slice(0, limit)).catch((err: any) => {
                 app.log.error({ err, query, source }, "Failed to search sites");
                 return [];
               })
-            : service.searchStudios(query, limit).catch((err: any) => {
+            : service.searchStudios(query, limit, page).catch((err: any) => {
                 app.log.error({ err, query, source }, "Failed to search studios");
                 return [];
               }),
-          service.searchScenes(query, limit).catch((err) => {
+          service.searchScenes(query, limit, page).catch((err) => {
             app.log.error({ err, query, source }, "Failed to search scenes");
             return [];
           }),
@@ -149,13 +152,45 @@ const searchRoutes: FastifyPluginAsyncZod = async (app) => {
         params: EntityIdParamsSchema,
         response: {
           200: PerformerSchema,
+          404: z.object({ error: z.string() }),
         },
       },
     },
-    async (request) => {
+    async (request, reply) => {
       const { id } = request.params;
-      const { service } = await getMetadataService();
-      return await service.getPerformerById(id);
+
+      // First check if this is a local DB ID
+      const performer = await app.db.query.performers.findFirst({
+        where: eq(performers.id, id),
+      });
+
+      if (performer) {
+        return performer;
+      }
+
+      // If not found locally, try to fetch from external source
+      // ID format: source:externalId (e.g., "tpdb:12345")
+      const [source, externalId] = id.includes(':') ? id.split(':') : ['tpdb', id];
+
+      // UUID format validation for TPDB (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+      const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(externalId);
+
+      if (!isValidUUID) {
+        app.log.warn({ id, externalId }, "Invalid UUID format for TPDB lookup");
+        return reply.code(404).send({ error: 'Performer not found' });
+      }
+
+      try {
+        const { service } = await getMetadataService();
+        if (source === 'tpdb' && app.tpdb) {
+          return await app.tpdb.getPerformerById(externalId);
+        }
+      } catch (error) {
+        app.log.error({ error, id, externalId }, "Failed to fetch performer from TPDB");
+        return reply.code(404).send({ error: 'Performer not found' });
+      }
+
+      return reply.code(404).send({ error: 'Performer not found' });
     }
   );
 
@@ -167,15 +202,28 @@ const searchRoutes: FastifyPluginAsyncZod = async (app) => {
         params: EntityIdParamsSchema,
         response: {
           200: StudioSchema,
+          404: z.object({ error: z.string() }),
         },
       },
     },
-    async (request) => {
+    async (request, reply) => {
       const { id } = request.params;
-      const { service, source } = await getMetadataService();
-      return source === 'tpdb'
-        ? await service.getSiteById(id)
-        : await service.getStudioDetails(id);
+
+      try {
+        const { service, source } = await getMetadataService();
+        const studio = source === 'tpdb'
+          ? await service.getSiteById(id)
+          : await service.getStudioDetails(id);
+
+        if (!studio) {
+          return reply.code(404).send({ error: 'Studio not found' });
+        }
+
+        return studio;
+      } catch (error) {
+        app.log.error({ error, id }, "Failed to fetch studio details");
+        return reply.code(404).send({ error: 'Studio not found' });
+      }
     }
   );
 
@@ -186,16 +234,53 @@ const searchRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         params: EntityIdParamsSchema,
         response: {
-          200: SceneSchema,
+          200: SceneSchema.extend({
+            files: z.array(z.object({
+              id: z.string(),
+              filePath: z.string(),
+              fileSize: z.number(),
+              createdAt: z.string(),
+            })).optional(),
+          }),
+          404: z.object({ error: z.string() }),
         },
       },
     },
-    async (request) => {
+    async (request, reply) => {
       const { id } = request.params;
-      const { service, source } = await getMetadataService();
-      return source === 'tpdb'
-        ? await service.getSceneById(id)
-        : await service.getSceneDetails(id);
+
+      try {
+        // First, check local database for this scene
+        const localScene = await app.db.query.scenes.findFirst({
+          where: eq(scenes.id, id),
+          with: {
+            sceneFiles: true,
+          },
+        });
+
+        // If scene exists locally, return it with file information
+        if (localScene) {
+          return {
+            ...localScene,
+            files: localScene.sceneFiles || [],
+          };
+        }
+
+        // If not found locally, fetch from metadata service
+        const { service, source } = await getMetadataService();
+        const scene = source === 'tpdb'
+          ? await service.getSceneById(id)
+          : await service.getSceneDetails(id);
+
+        if (!scene) {
+          return reply.code(404).send({ error: 'Scene not found' });
+        }
+
+        return scene;
+      } catch (error) {
+        app.log.error({ error, id }, "Failed to fetch scene details");
+        return reply.code(404).send({ error: 'Scene not found' });
+      }
     }
   );
 };

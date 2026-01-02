@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Play, Clock, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
-import { useDownloadQueue } from "@/hooks/useUnifiedDownloads";
+import { useUnifiedDownloads } from "@/hooks/useUnifiedDownloads";
 import { useTorrents } from "@/hooks/useTorrents";
 import { useJobs } from "@/hooks/useJobs";
 import { useSettings } from "@/hooks/useSettings";
@@ -14,13 +14,13 @@ import { formatDistanceToNow } from "date-fns";
 
 export default function HomePage() {
   const { data: subscriptions, isLoading: loadingSubscriptions } = useSubscriptions();
-  const { data: downloads, isLoading: loadingDownloads } = useDownloadQueue();
+  const { data: downloads, isLoading: loadingDownloads } = useUnifiedDownloads();
   const { data: torrents, isLoading: loadingTorrents } = useTorrents();
   const { data: jobs, isLoading: loadingJobs } = useJobs();
   const { data: settings } = useSettings();
 
-  const activeDownloads = downloads?.items?.filter(
-    (item: any) => item.status === "downloading"
+  const activeDownloads = downloads?.downloads?.filter(
+    (item) => item.status === "downloading"
   ).length || 0;
 
   const activeTorrents = torrents?.torrents?.length || 0;
@@ -31,18 +31,19 @@ export default function HomePage() {
     const serviceConfig = (settings as any)[service];
     if (!serviceConfig) return { status: "Not Configured", variant: "secondary" as const };
 
-    if (serviceConfig.enabled && serviceConfig.apiUrl) {
-      return { status: "Configured", variant: "default" as const, className: "bg-green-500" };
-    } else if (serviceConfig.enabled && serviceConfig.url) {
-      return { status: "Configured", variant: "default" as const, className: "bg-green-500" };
+    // Check if service has enabled property
+    if (typeof serviceConfig === 'object' && 'enabled' in serviceConfig) {
+      if (serviceConfig.enabled) {
+        return { status: "Configured", variant: "default" as const, className: "bg-green-500" };
+      }
     }
 
     return { status: "Not Configured", variant: "secondary" as const };
   };
 
   const recentJobs = jobs?.jobs
-    ?.filter((j: any) => j.lastRun)
-    ?.sort((a: any, b: any) => {
+    ?.filter((j) => j.lastRun)
+    ?.sort((a, b) => {
       const dateA = new Date(a.lastRun || 0).getTime();
       const dateB = new Date(b.lastRun || 0).getTime();
       return dateB - dateA;
@@ -91,7 +92,7 @@ export default function HomePage() {
               <Skeleton className="h-8 w-16" />
             ) : (
               <CardTitle className="text-2xl font-bold">
-                {downloads?.total || 0}
+                {downloads?.downloads?.length || 0}
               </CardTitle>
             )}
             <CardDescription>Total Downloads</CardDescription>
@@ -135,13 +136,13 @@ export default function HomePage() {
                     </div>
                   ))}
                 </div>
-              ) : (downloads?.items?.length ?? 0) > 0 ? (
+              ) : (downloads?.downloads?.length ?? 0) > 0 ? (
                 <div className="space-y-4">
-                  {downloads?.items?.slice(0, 5).map((item: any) => (
+                  {downloads?.downloads?.slice(0, 5).map((item) => (
                     <div key={item.id} className="space-y-2">
                       <div className="flex items-start justify-between">
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{item.title}</p>
+                          <p className="text-sm font-medium truncate">{item.sceneTitle}</p>
                           <p className="text-xs text-muted-foreground">
                             {item.quality} • {(item.size / 1024 / 1024 / 1024).toFixed(2)} GB
                           </p>
@@ -194,14 +195,14 @@ export default function HomePage() {
                 </div>
               ) : (torrents?.torrents?.length ?? 0) > 0 ? (
                 <div className="space-y-4">
-                  {torrents?.torrents?.slice(0, 5).map((torrent: any) => (
+                  {torrents?.torrents?.slice(0, 5).map((torrent) => (
                     <div key={torrent.hash} className="space-y-2">
                       <div className="flex items-start justify-between">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium truncate">{torrent.name}</p>
                           <p className="text-xs text-muted-foreground">
-                            ↓ {(torrent.downloadSpeed / 1024 / 1024).toFixed(1)} MB/s •
-                            ↑ {(torrent.uploadSpeed / 1024 / 1024).toFixed(1)} MB/s
+                            ↓ {(torrent.dlspeed / 1024 / 1024).toFixed(1)} MB/s •
+                            ↑ {(torrent.upspeed / 1024 / 1024).toFixed(1)} MB/s
                           </p>
                         </div>
                         <span className="text-xs text-muted-foreground">
@@ -245,7 +246,7 @@ export default function HomePage() {
               </div>
             ) : recentJobs.length > 0 ? (
               <div className="space-y-3">
-                {recentJobs.map((job: any) => (
+                {recentJobs.map((job) => (
                   <div key={job.name} className="flex items-center justify-between p-3 rounded-lg border">
                     <div className="flex items-center gap-3">
                       {job.status === "completed" ? (
@@ -260,7 +261,7 @@ export default function HomePage() {
                       <div>
                         <p className="text-sm font-medium">{getJobDisplayName(job.name)}</p>
                         <p className="text-xs text-muted-foreground">
-                          Last run: {formatDistanceToNow(new Date(job.lastRun), { addSuffix: true })}
+                          Last run: {job.lastRun ? formatDistanceToNow(new Date(job.lastRun), { addSuffix: true }) : "Never"}
                         </p>
                       </div>
                     </div>

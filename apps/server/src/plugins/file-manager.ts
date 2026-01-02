@@ -28,7 +28,7 @@ const fileManagerPlugin: FastifyPluginAsync = async (app) => {
   app.decorate("fileManager", fileManager);
 
   app.log.info("FileManager decorated successfully", {
-    hasFileManager: !!(app as any).fileManager,
+    hasFileManager: !!app.fileManager,
   });
 };
 

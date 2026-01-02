@@ -6,6 +6,7 @@ import { scenes, performers, studios, sceneFiles, sceneExclusions } from "@repo/
 import { constants } from "fs";
 import type { QBittorrentService } from "./qbittorrent.service.js";
 import { createTorrentParserService } from "./parser.service.js";
+import { logger } from "../utils/logger.js";
 
 export type SceneMetadata = {
   id: string;
@@ -143,7 +144,7 @@ export class FileManagerService {
 
       return posterPath;
     } catch (error) {
-      console.error(`Failed to download poster for scene ${sceneId}:`, error);
+      logger.error(`Failed to download poster for scene ${sceneId}:`, error);
       return null;
     }
   }
@@ -194,30 +195,25 @@ export class FileManagerService {
       )
     );
 
-    // Get studios for this scene
-    const studioRecords = await this.db.query.studiosScenes.findMany({
-      where: (studiosScenes, { eq }) => eq(studiosScenes.sceneId, sceneId),
-    });
-
-    const studioIds = studioRecords.map((ss) => ss.studioId);
-    const studiosData = await Promise.all(
-      studioIds.map((id) =>
-        this.db.query.studios.findFirst({
-          where: eq(studios.id, id),
-        })
-      )
-    );
+    // Get studio for this scene from siteId
+    let studiosData: any[] = [];
+    if (scene.siteId) {
+      const studio = await this.db.query.studios.findFirst({
+        where: eq(studios.id, scene.siteId),
+      });
+      if (studio) {
+        studiosData = [studio];
+      }
+    }
 
     return {
       id: scene.id,
-      stashdbId: scene.stashdbId,
+      externalIds: scene.externalIds,
       title: scene.title,
       date: scene.date,
-      details: scene.details,
       duration: scene.duration,
-      director: scene.director,
       code: scene.code,
-      urls: scene.urls as string[],
+      url: scene.url,
       images: scene.images as Array<{ url: string; width?: number; height?: number }>,
       performers: performersData
         .filter((p) => p !== undefined)
@@ -319,13 +315,13 @@ export class FileManagerService {
     try {
       nfoPath = await this.generateNFO(sceneId, destinationFolder);
     } catch (error) {
-      console.error(`Failed to generate NFO for scene ${sceneId}:`, error);
+      logger.error(`Failed to generate NFO for scene ${sceneId}:`, error);
     }
 
     try {
       posterPath = await this.downloadPoster(sceneId, destinationFolder);
     } catch (error) {
-      console.error(`Failed to download poster for scene ${sceneId}:`, error);
+      logger.error(`Failed to download poster for scene ${sceneId}:`, error);
     }
 
     return {
@@ -425,13 +421,13 @@ export class FileManagerService {
     try {
       nfoPath = await this.generateNFO(sceneId, destinationFolder);
     } catch (error) {
-      console.error(`Failed to generate NFO for scene ${sceneId}:`, error);
+      logger.error(`Failed to generate NFO for scene ${sceneId}:`, error);
     }
 
     try {
       posterPath = await this.downloadPoster(sceneId, destinationFolder);
     } catch (error) {
-      console.error(`Failed to download poster for scene ${sceneId}:`, error);
+      logger.error(`Failed to download poster for scene ${sceneId}:`, error);
     }
 
     return {
@@ -527,7 +523,7 @@ export class FileManagerService {
       }
     } catch (error) {
       // If scenes directory doesn't exist or can't be accessed, just log and continue
-      console.error(`Failed to scan scenes directory ${this.scenesPath}:`, error);
+      logger.error(`Failed to scan scenes directory ${this.scenesPath}:`, error);
     }
 
     return {
@@ -558,7 +554,7 @@ export class FileManagerService {
         }
       }
     } catch (error) {
-      console.error(`Failed to scan directory ${dirPath}:`, error);
+      logger.error(`Failed to scan directory ${dirPath}:`, error);
     }
 
     return filePaths;
@@ -573,13 +569,65 @@ export class FileManagerService {
       where: eq(sceneFiles.sceneId, sceneId),
     });
 
-    // Delete folder if exists
+    // Delete folder if exists (from scene files)
+    const deletedFolders = new Set<string>();
     for (const file of files) {
       const folderPath = dirname(file.filePath);
+      if (!deletedFolders.has(folderPath)) {
+        try {
+          await rm(folderPath, { recursive: true, force: true });
+          deletedFolders.add(folderPath);
+          logger.info(`[FileManager] Deleted folder: ${folderPath}`);
+        } catch (error) {
+          logger.error(`[FileManager] Failed to delete folder ${folderPath}:`, error);
+        }
+      }
+    }
+
+    // If no files were found, try to find and delete potential folder based on scene title
+    if (files.length === 0) {
       try {
-        await rm(folderPath, { recursive: true, force: true });
+        const scene = await this.db.query.scenes.findFirst({
+          where: eq(scenes.id, sceneId),
+        });
+
+        if (scene) {
+          // Try to find folder by scene title
+          const sanitizedTitle = this.sanitizeFilename(scene.title);
+
+          // Check for folder with exact title match
+          const potentialFolder = join(this.scenesPath, sanitizedTitle);
+          try {
+            const exists = await this.checkFolderExists(potentialFolder);
+            if (exists) {
+              await rm(potentialFolder, { recursive: true, force: true });
+              logger.info(`[FileManager] Deleted folder by title: ${potentialFolder}`);
+            }
+          } catch (error) {
+            logger.error(`[FileManager] Failed to delete potential folder ${potentialFolder}:`, error);
+          }
+
+          // Also check for folders with random suffixes (collision avoidance)
+          // Read scenesPath directory and find folders starting with scene title
+          try {
+            const entries = await readdir(this.scenesPath, { withFileTypes: true });
+            for (const entry of entries) {
+              if (entry.isDirectory() && entry.name.startsWith(sanitizedTitle)) {
+                const folderPath = join(this.scenesPath, entry.name);
+                try {
+                  await rm(folderPath, { recursive: true, force: true });
+                  logger.info(`[FileManager] Deleted matching folder: ${folderPath}`);
+                } catch (error) {
+                  logger.error(`[FileManager] Failed to delete matching folder ${folderPath}:`, error);
+                }
+              }
+            }
+          } catch (error) {
+            logger.error(`[FileManager] Failed to scan scenes directory:`, error);
+          }
+        }
       } catch (error) {
-        console.error(`Failed to delete folder ${folderPath}:`, error);
+        logger.error(`[FileManager] Failed to delete folder for scene ${sceneId}:`, error);
       }
     }
 
@@ -603,8 +651,27 @@ export class FileManagerService {
     posterPath: string | null;
     nfoPath: string;
   }> {
-    // Create folder
-    const folderPath = await this.createSceneFolder(sceneId);
+    // Check if this scene already has a folder
+    const existingSceneFile = await this.db.query.sceneFiles.findFirst({
+      where: eq(sceneFiles.sceneId, sceneId),
+    });
+
+    let folderPath: string;
+
+    if (existingSceneFile) {
+      // Use existing folder path
+      folderPath = dirname(existingSceneFile.filePath);
+
+      // Verify folder still exists
+      const exists = await this.checkFolderExists(folderPath);
+      if (!exists) {
+        // Folder was deleted, create new one
+        folderPath = await this.createSceneFolder(sceneId);
+      }
+    } else {
+      // Create new folder
+      folderPath = await this.createSceneFolder(sceneId);
+    }
 
     // Download poster
     const posterPath = await this.downloadPoster(sceneId, folderPath);
@@ -638,15 +705,12 @@ export class FileManagerService {
     const parserService = createTorrentParserService();
     const cleanedTitle = parserService.parseTorrent(scene.title).title;
 
-    // Create folder
-    const studioName = scene.studios[0]?.name || "Unknown";
-    const sanitizedStudio = this.sanitizeFilename(studioName);
+    // Create folder directly with scene title (no studio subfolder, no ID suffix)
     const sanitizedTitle = this.sanitizeFilename(cleanedTitle);
 
     const folderPath = join(
       this.scenesPath,
-      sanitizedStudio,
-      `${sanitizedTitle}_${scene.id}`
+      sanitizedTitle
     );
 
     await mkdir(folderPath, { recursive: true });

@@ -8,15 +8,21 @@ export const ImageSchema = z.object({
 
 export const PerformerResponseSchema = z.object({
   id: z.string(),
-  stashdbId: z.string().nullable(),
+  tpdbId: z.string().nullable(),
+  slug: z.string(),
   name: z.string(),
+  fullName: z.string(),
+  rating: z.number(),
   aliases: z.array(z.string()),
   disambiguation: z.string().nullable(),
+  bio: z.string().nullable(),
   gender: z.string().nullable(),
   birthdate: z.string().nullable(),
   deathDate: z.string().nullable(),
-  careerStartDate: z.string().nullable(),
-  careerEndDate: z.string().nullable(),
+  careerStartYear: z.number().nullable(),
+  careerEndYear: z.number().nullable(),
+  fakeBoobs: z.boolean(),
+  sameSexOnly: z.boolean(),
   images: z.array(ImageSchema),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -32,15 +38,13 @@ export const PerformerListQuerySchema = z.object({
 });
 
 export const CreatePerformerSchema = z.object({
-  stashdbId: z.string().optional(),
+  tpdbId: z.string().optional(),
   name: z.string(),
   aliases: z.array(z.string()).default([]),
   disambiguation: z.string().optional(),
   gender: z.string().optional(),
   birthdate: z.string().optional(),
   deathDate: z.string().optional(),
-  careerStartDate: z.string().optional(),
-  careerEndDate: z.string().optional(),
   images: z.array(ImageSchema).default([]),
 });
 
@@ -51,8 +55,6 @@ export const UpdatePerformerSchema = z.object({
   gender: z.string().optional(),
   birthdate: z.string().optional(),
   deathDate: z.string().optional(),
-  careerStartDate: z.string().optional(),
-  careerEndDate: z.string().optional(),
   images: z.array(ImageSchema).optional(),
 });
 

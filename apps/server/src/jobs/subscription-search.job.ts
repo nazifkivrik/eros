@@ -11,7 +11,6 @@ import {
   performers,
   studios,
   downloadQueue,
-  indexers,
   scenes,
 } from "@repo/database";
 import { createTorrentSearchService } from "../services/torrent-search.service.js";
@@ -202,18 +201,7 @@ async function processSubscription(
   try {
     const torrentSearchService = createTorrentSearchService(app.db);
 
-    // Get all enabled indexers
-    const enabledIndexers = await app.db.query.indexers.findMany({
-      where: eq(indexers.enabled, true),
-    });
-
-    // Get high-priority indexers (priority > 70)
-    const allowedIndexers = enabledIndexers.filter((idx) => idx.priority >= 70);
-    const allowedIndexerIds = allowedIndexers.map((idx) => idx.id);
-
-    app.log.info(
-      `[Subscription Search] Using ${allowedIndexerIds.length} high-priority indexers for ${entityName}`
-    );
+    app.log.info(`[Subscription Search] Searching for ${entityName}`);
 
     const selectedTorrents = await torrentSearchService.searchForSubscription(
       subscription.entityType as "performer" | "studio",
@@ -221,7 +209,7 @@ async function processSubscription(
       subscription.qualityProfileId,
       subscription.includeMetadataMissing,
       subscription.includeAliases,
-      allowedIndexerIds
+      [] // No indexer filtering - use all available
     );
 
     app.log.info(
@@ -322,14 +310,11 @@ async function processSubscription(
           sceneId = nanoid();
           await app.db.insert(scenes).values({
             id: sceneId,
-            stashdbId: null,
+            slug: torrent.title.toLowerCase().replace(/\s+/g, "-"),
             title: torrent.title,
             date: null,
-            details: null,
             duration: null,
-            director: null,
             code: null,
-            urls: [],
             images: [],
             hasMetadata: false,
             inferredFromIndexers: true,
@@ -431,7 +416,6 @@ async function processSubscription(
             id: nanoid(),
             sceneId: sceneId,
             torrentHash: torrent.infoHash,
-            indexerId: torrent.indexerId,
             title: torrent.title,
             size: torrent.size,
             seeders: torrent.seeders,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { Performer } from "@repo/shared-types";
 import { usePerformerDetails } from "@/hooks/useSearch";
 import { useCheckSubscription, useDeleteSubscription } from "@/hooks/useSubscriptions";
 import {
@@ -21,7 +22,7 @@ import { formatDate } from "@/lib/dialog-utils";
 interface PerformerDetailDialogProps {
   performerId: string | null;
   onClose: () => void;
-  onSubscribe: (performer: any) => void;
+  onSubscribe: (performer: Performer) => void;
 }
 
 export function PerformerDetailDialog({
@@ -109,25 +110,14 @@ export function PerformerDetailDialog({
                   </div>
                 )}
 
-                {(performer.careerStartDate || performer.careerEndDate) && (
+                {(performer.careerStartYear || performer.careerEndYear) && (
                   <div className="text-sm">
                     <span className="text-muted-foreground">Career: </span>
                     <span className="font-medium">
-                      {performer.careerStartDate
-                        ? new Date(performer.careerStartDate).getFullYear()
-                        : "?"}
+                      {performer.careerStartYear || "?"}
                       {" - "}
-                      {performer.careerEndDate
-                        ? new Date(performer.careerEndDate).getFullYear()
-                        : "Present"}
+                      {performer.careerEndYear || "Present"}
                     </span>
-                  </div>
-                )}
-
-                {performer.careerLength && (
-                  <div className="text-sm">
-                    <span className="text-muted-foreground">Career Length: </span>
-                    <span className="font-medium">{performer.careerLength}</span>
                   </div>
                 )}
 
@@ -149,19 +139,19 @@ export function PerformerDetailDialog({
                   </div>
                 )}
 
-                {(performer.hairColor || performer.eyeColor) && (
+                {(performer.hairColour || performer.eyeColour) && (
                   <div className="text-sm">
-                    {performer.hairColor && (
+                    {performer.hairColour && (
                       <>
                         <span className="text-muted-foreground">Hair: </span>
-                        <span className="font-medium capitalize">{performer.hairColor}</span>
+                        <span className="font-medium capitalize">{performer.hairColour}</span>
                       </>
                     )}
-                    {performer.hairColor && performer.eyeColor && <span className="mx-2">•</span>}
-                    {performer.eyeColor && (
+                    {performer.hairColour && performer.eyeColour && <span className="mx-2">•</span>}
+                    {performer.eyeColour && (
                       <>
                         <span className="text-muted-foreground">Eyes: </span>
-                        <span className="font-medium capitalize">{performer.eyeColor}</span>
+                        <span className="font-medium capitalize">{performer.eyeColour}</span>
                       </>
                     )}
                   </div>
@@ -189,7 +179,7 @@ export function PerformerDetailDialog({
                   <div className="text-sm">
                     <span className="text-muted-foreground">Measurements: </span>
                     <span className="font-medium">{performer.measurements}</span>
-                    {performer.cupSize && <span className="font-medium"> ({performer.cupSize})</span>}
+                    {performer.cupsize && <span className="font-medium"> ({performer.cupsize})</span>}
                   </div>
                 )}
 
@@ -232,7 +222,7 @@ export function PerformerDetailDialog({
 
             <SubscriptionFooter
               isSubscribed={subscriptionStatus?.subscribed || false}
-              subscription={subscriptionStatus?.subscription}
+              subscription={subscriptionStatus?.subscription ?? undefined}
               onClose={onClose}
               onSubscribe={() => onSubscribe(performer)}
               onUnsubscribe={() => setShowUnsubscribeDialog(true)}

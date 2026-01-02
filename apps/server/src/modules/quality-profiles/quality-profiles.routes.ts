@@ -95,7 +95,7 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
         updatedAt: now,
       };
 
-      await app.db.insert(qualityProfiles).values(newProfile as any);
+      await app.db.insert(qualityProfiles).values(newProfile);
 
       return reply.code(201).send(newProfile);
     }
@@ -146,7 +146,7 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
         .update(qualityProfiles)
         .set({
           name,
-          items: sortedItems as any,
+          items: sortedItems,
           updatedAt: now,
         })
         .where(eq(qualityProfiles.id, id));

@@ -3,8 +3,9 @@ import { nanoid } from "nanoid";
 import argon2 from "argon2";
 import type { Database } from "@repo/database";
 import { users, appSettings } from "@repo/database/schema";
-import type { SetupData, SetupStatus, AppSettings } from "@repo/shared-types";
+import type { AppSettings } from "@repo/shared-types";
 import { DEFAULT_SETTINGS } from "@repo/shared-types";
+import type { SetupData, SetupStatus } from "./setup.types.js";
 
 export class SetupService {
   constructor(private db: Database) {}

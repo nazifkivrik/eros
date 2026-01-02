@@ -3,6 +3,7 @@ import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { downloadQueue, scenes } from "@repo/database";
 import { nanoid } from "nanoid";
+import type { DownloadStatus } from "@repo/shared-types";
 import {
   DownloadQueueWithSceneSchema,
   AddToQueueSchema,
@@ -37,7 +38,7 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
             columns: {
               id: true,
               title: true,
-              stashdbId: true,
+              externalIds: true,
               images: true,
             },
           },
@@ -45,7 +46,12 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
         orderBy: (downloadQueue, { desc }) => [desc(downloadQueue.addedAt)],
       });
 
-      return { data: items as any };
+      return {
+        data: items.map((item) => ({
+          ...item,
+          status: item.status as DownloadStatus,
+        })),
+      };
     }
   );
 
@@ -75,7 +81,7 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
             columns: {
               id: true,
               title: true,
-              stashdbId: true,
+              externalIds: true,
               images: true,
             },
           },
@@ -86,7 +92,10 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
         return reply.code(404).send({ error: "Download queue item not found" });
       }
 
-      return item as any;
+      return {
+        ...item,
+        status: item.status as DownloadStatus,
+      };
     }
   );
 
@@ -105,7 +114,7 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
-      const { sceneId, indexerId, title, size, seeders, quality, magnetLink } =
+      const { sceneId, title, size, seeders, quality, magnetLink } =
         request.body;
 
       // Check if scene exists
@@ -138,7 +147,6 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
         id,
         sceneId,
         torrentHash: null,
-        indexerId,
         title,
         size,
         seeders,
@@ -176,14 +184,17 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
             columns: {
               id: true,
               title: true,
-              stashdbId: true,
+              externalIds: true,
               images: true,
             },
           },
         },
       });
 
-      return reply.code(201).send(created as any);
+      return reply.code(201).send({
+        ...created!,
+        status: created!.status as DownloadStatus,
+      });
     }
   );
 
@@ -228,14 +239,17 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
             columns: {
               id: true,
               title: true,
-              stashdbId: true,
+              externalIds: true,
               images: true,
             },
           },
         },
       });
 
-      return updated as any;
+      return {
+        ...updated!,
+        status: updated!.status as DownloadStatus,
+      };
     }
   );
 
@@ -366,13 +380,9 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
               images: true,
             },
             with: {
-              studiosScenes: {
-                with: {
-                  studio: {
-                    columns: {
-                      name: true,
-                    },
-                  },
+              site: {
+                columns: {
+                  name: true,
                 },
               },
             },
@@ -382,32 +392,35 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
       });
 
       // Get torrents from qBittorrent if available
-      let torrentsMap = new Map<string, any>();
+      let torrentsMap = new Map<string, unknown>();
       if (app.qbittorrent) {
         try {
           const torrents = await app.qbittorrent.getTorrents();
           torrentsMap = new Map(torrents.map((t) => [t.hash, t]));
-        } catch (error) {
+        } catch (error: unknown) {
           app.log.error({ error }, "Failed to fetch torrents from qBittorrent");
         }
       }
 
       // Merge data from DB and qBittorrent
       const unifiedDownloads = queueItems.map((item) => {
-        const torrent = item.qbitHash ? torrentsMap.get(item.qbitHash) : null;
-        const scene = item.scene as any;
-        const studio = scene?.studiosScenes?.[0]?.studio;
+        const torrent = item.qbitHash ? (torrentsMap.get(item.qbitHash) as Record<string, unknown> | undefined) : null;
+        const scene = item.scene;
+        const studio = scene?.site;
 
         // Determine unified status
-        let status = item.status as any;
+        let status: DownloadStatus = item.status as DownloadStatus;
         if (torrent) {
-          if (torrent.state === "pausedDL") {
+          const torrentState = torrent.state as string | undefined;
+          const torrentProgress = torrent.progress as number | undefined;
+
+          if (torrentState === "pausedDL") {
             status = "paused";
-          } else if (torrent.state.includes("DL") || torrent.state === "metaDL") {
+          } else if (torrentState?.includes("DL") || torrentState === "metaDL") {
             status = "downloading";
-          } else if (torrent.state.includes("UP") || torrent.state === "uploading") {
+          } else if (torrentState?.includes("UP") || torrentState === "uploading") {
             status = "seeding";
-          } else if (torrent.progress >= 1.0) {
+          } else if (torrentProgress !== undefined && torrentProgress >= 1.0) {
             status = "completed";
           }
         }
@@ -420,15 +433,16 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
           sceneStudio: studio?.name || null,
           qbitHash: item.qbitHash,
           status,
-          progress: torrent?.progress || (item.status === "completed" ? 1 : 0),
-          downloadSpeed: torrent?.dlspeed || 0,
-          uploadSpeed: torrent?.upspeed || 0,
-          eta: torrent?.eta || 0,
+          progress: torrent ? (torrent.progress as number | undefined) ?? null : (item.status === "completed" ? 1 : null),
+          downloadSpeed: torrent ? (torrent.dlspeed as number | undefined) ?? null : null,
+          uploadSpeed: torrent ? (torrent.upspeed as number | undefined) ?? null : null,
+          eta: torrent ? (torrent.eta as number | undefined) ?? null : null,
+          ratio: torrent ? (torrent.ratio as number | undefined) ?? null : null,
           size: item.size,
-          seeders: torrent?.num_seeds || item.seeders,
-          leechers: torrent?.num_leechs || 0,
+          seeders: (torrent?.num_seeds as number | undefined) || item.seeders,
+          leechers: (torrent?.num_leechs as number | undefined) || 0,
           quality: item.quality,
-          priority: torrent?.priority || null,
+          priority: (torrent?.priority as number | undefined) || null,
           addedAt: item.addedAt,
           completedAt: item.completedAt,
         };

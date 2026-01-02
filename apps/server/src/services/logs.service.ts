@@ -3,12 +3,12 @@
  * Handles application logging with different levels and event types
  */
 
-import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import type { Database } from "@repo/database";
 import { logs } from "@repo/database";
 import { nanoid } from "nanoid";
-import type * as schema from "@repo/database";
 import { desc, eq, and, gte, lte } from "drizzle-orm";
-import type { LogLevel, EventType, Log, LogFilters } from "@repo/shared-types";
+import type { LogLevel, EventType } from "@repo/shared-types";
+import type { Log, LogFilters } from "../modules/logs/logs.types.js";
 
 interface CreateLogInput {
   level: LogLevel;
@@ -21,7 +21,7 @@ interface CreateLogInput {
 }
 
 export class LogsService {
-  constructor(private db: BetterSQLite3Database<typeof schema>) {}
+  constructor(private db: Database) {}
 
   /**
    * Create a log entry
@@ -201,7 +201,8 @@ export class LogsService {
 }
 
 // Export factory function
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createLogsService(db: any) {
+export function createLogsService(
+  db: Database
+): LogsService {
   return new LogsService(db);
 }

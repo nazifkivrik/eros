@@ -5,7 +5,7 @@ node_modules
 .pnpm
 # Testing
 coverage
-
+CLAUDE.md
 # Next.js
 .next/
 out/

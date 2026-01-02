@@ -1,6 +1,7 @@
 import fp from "fastify-plugin";
 import session from "@fastify/session";
 import cookie from "@fastify/cookie";
+import type { FastifyRequest, FastifyReply } from "fastify";
 
 declare module "fastify" {
   interface Session {
@@ -32,7 +33,10 @@ export default fp(async (app) => {
   });
 
   // Authentication decorator
-  app.decorate("authenticate", async function (request: any, reply: any) {
+  app.decorate("authenticate", async function (
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) {
     if (!request.session.authenticated) {
       return reply.code(401).send({ error: "Unauthorized" });
     }

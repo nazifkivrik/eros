@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 
-export function useSearch(query: string, limit = 20) {
+export function useSearch(query: string, limit = 20, page = 1) {
   return useQuery({
-    queryKey: ["search", query, limit],
-    queryFn: () => apiClient.search(query, limit),
+    queryKey: ["search", query, limit, page],
+    queryFn: () => apiClient.search(query, limit, page),
     enabled: query.length > 0,
     placeholderData: (previousData) => previousData, // Keep previous data while loading
     staleTime: 1000, // Consider data fresh for 1 second

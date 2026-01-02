@@ -129,7 +129,7 @@ export default function JobsPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4">
           {Object.entries(JOB_INFO).map(([jobKey, jobInfo]) => {
-            const job = jobs.jobs.find((j: any) => j.name === jobKey);
+            const job = jobs.jobs.find((j) => j.name === jobKey);
             const jobEvent = getLatestJobEvent(jobKey);
             const running = isJobRunning(jobKey);
 
@@ -175,8 +175,8 @@ export default function JobsPage() {
                         <span>
                           Processing {jobEvent.progress.current} of {jobEvent.progress.total}
                         </span>
-                        {jobEvent.data?.entityName && (
-                          <span>Current: {jobEvent.data.entityName}</span>
+                        {jobEvent.data && typeof jobEvent.data === "object" && "entityName" in jobEvent.data && (
+                          <span>Current: {String(jobEvent.data.entityName)}</span>
                         )}
                       </div>
                     </div>
@@ -262,7 +262,7 @@ export default function JobsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {jobs.jobs.filter((j: any) => j.lastRun).length > 0 ? (
+            {jobs.jobs.filter((j) => j.lastRun).length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -275,8 +275,8 @@ export default function JobsPage() {
                 </TableHeader>
                 <TableBody>
                   {jobs.jobs
-                    .filter((j: any) => j.lastRun)
-                    .map((job: any) => (
+                    .filter((j) => j.lastRun)
+                    .map((job) => (
                       <TableRow key={job.name}>
                         <TableCell className="font-medium">
                           {JOB_INFO[job.name as keyof typeof JOB_INFO]?.name || job.name}

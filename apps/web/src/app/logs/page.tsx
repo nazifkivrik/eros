@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { useLogs, useCleanupLogs } from "@/hooks/useLogs";
 import { formatDistanceToNow } from "date-fns";
+import type { LogLevel, EventType } from "@repo/shared-types";
 
 const LOG_LEVELS = [
   { value: "error", label: "Error", icon: XCircle, color: "text-red-500" },
@@ -38,14 +39,26 @@ const EVENT_TYPES = [
   { value: "system", label: "System" },
 ];
 
+type LogEntry = {
+  id: string;
+  level: string;
+  eventType: string;
+  message: string;
+  details: Record<string, unknown> | null;
+  sceneId: string | null;
+  performerId: string | null;
+  studioId: string | null;
+  createdAt: string;
+};
+
 export default function LogsPage() {
-  const [level, setLevel] = useState<string | undefined>();
-  const [eventType, setEventType] = useState<string | undefined>();
-  const [selectedLog, setSelectedLog] = useState<any | null>(null);
+  const [level, setLevel] = useState<LogLevel | undefined>();
+  const [eventType, setEventType] = useState<EventType | undefined>();
+  const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
 
   const { data: logs, isLoading } = useLogs({
-    level: level as any,
-    eventType: eventType as any,
+    level,
+    eventType,
     limit: 100,
   });
 
@@ -109,7 +122,7 @@ export default function LogsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="text-sm font-medium mb-2 block">Log Level</label>
-              <Select value={level || "all"} onValueChange={(v) => setLevel(v === "all" ? undefined : v)}>
+              <Select value={level || "all"} onValueChange={(v) => setLevel(v === "all" ? undefined : v as LogLevel)}>
                 <SelectTrigger>
                   <SelectValue placeholder="All levels" />
                 </SelectTrigger>
@@ -126,7 +139,7 @@ export default function LogsPage() {
 
             <div>
               <label className="text-sm font-medium mb-2 block">Event Type</label>
-              <Select value={eventType || "all"} onValueChange={(v) => setEventType(v === "all" ? undefined : v)}>
+              <Select value={eventType || "all"} onValueChange={(v) => setEventType(v === "all" ? undefined : v as EventType)}>
                 <SelectTrigger>
                   <SelectValue placeholder="All events" />
                 </SelectTrigger>
@@ -167,7 +180,7 @@ export default function LogsPage() {
         </Card>
       ) : (
         <div className="space-y-2">
-          {logs?.data?.map((log: any) => (
+          {logs?.data?.map((log) => (
             <Card
               key={log.id}
               className="cursor-pointer hover:bg-accent/50 transition-colors"

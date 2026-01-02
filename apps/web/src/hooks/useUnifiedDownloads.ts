@@ -21,10 +21,10 @@ export interface UnifiedDownload {
   sceneStudio: string | null;
   qbitHash: string | null;
   status: UnifiedDownloadStatus;
-  progress: number; // 0-1
-  downloadSpeed: number; // bytes/sec
-  uploadSpeed: number; // bytes/sec
-  eta: number; // seconds
+  progress: number | null; // 0-1
+  downloadSpeed: number | null; // bytes/sec
+  uploadSpeed: number | null; // bytes/sec
+  eta: number | null; // seconds
   size: number;
   seeders: number;
   leechers: number;

@@ -4,13 +4,12 @@
  */
 
 import { eq } from "drizzle-orm";
-import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import type { Database } from "@repo/database";
 import { appSettings } from "@repo/database";
-import type * as schema from "@repo/database";
 import { DEFAULT_SETTINGS, type AppSettings } from "@repo/shared-types";
 
 export class SettingsService {
-  constructor(private db: BetterSQLite3Database<typeof schema>) {}
+  constructor(private db: Database) {}
 
 
   /**
@@ -26,12 +25,15 @@ export class SettingsService {
       const savedSettings = setting.value as Partial<AppSettings>;
 
       // Debug log
-      console.log("[SettingsService] Loaded from DB:", {
-        hasStashdb: !!savedSettings.stashdb,
-        stashdbEnabled: savedSettings.stashdb?.enabled,
-        hasApiKey: !!savedSettings.stashdb?.apiKey,
-        apiKeyLength: savedSettings.stashdb?.apiKey?.length
-      });
+      app.log.info(
+        {
+          hasStashdb: !!savedSettings.stashdb,
+          stashdbEnabled: savedSettings.stashdb?.enabled,
+          hasApiKey: !!savedSettings.stashdb?.apiKey,
+          apiKeyLength: savedSettings.stashdb?.apiKey?.length,
+        },
+        "[SettingsService] Loaded from DB"
+      );
 
       return {
         general: {
@@ -99,10 +101,6 @@ export class SettingsService {
             ...DEFAULT_SETTINGS.jobs.qbittorrentCleanup,
             ...(savedSettings.jobs?.qbittorrentCleanup || {}),
           },
-          hashGeneration: {
-            ...DEFAULT_SETTINGS.jobs.hashGeneration,
-            ...(savedSettings.jobs?.hashGeneration || {}),
-          },
         },
       };
     }
@@ -140,7 +138,7 @@ export class SettingsService {
       });
     }
 
-    console.log("[SettingsService] Settings updated successfully");
+    app.log.info("[SettingsService] Settings updated successfully");
     return settings;
   }
 
@@ -362,7 +360,8 @@ export class SettingsService {
 }
 
 // Export factory function
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createSettingsService(db: any) {
+export function createSettingsService(
+  db: Database
+): SettingsService {
   return new SettingsService(db);
 }
