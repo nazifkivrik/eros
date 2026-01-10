@@ -155,6 +155,7 @@ export const scenes = sqliteTable("scenes", {
   // System
   hasMetadata: integer("has_metadata", { mode: "boolean" }).notNull().default(true),
   inferredFromIndexers: integer("inferred_from_indexers", { mode: "boolean" }).notNull().default(false),
+  discoveryGroupId: text("discovery_group_id"),  // Links to torrent group if discovered from indexers
 
   ...timestamps,
 });
@@ -259,8 +260,7 @@ export const subscriptions = sqliteTable("subscriptions", {
     .notNull()
     .default(false),
   includeAliases: integer("include_aliases", { mode: "boolean" }).notNull().default(false),
-  status: text("status").notNull().default("active"),
-  monitored: integer("monitored", { mode: "boolean" }).notNull().default(true),
+  isSubscribed: integer("is_subscribed", { mode: "boolean" }).notNull().default(true),
   searchCutoffDate: text("search_cutoff_date"),
   ...timestamps,
 });
@@ -296,6 +296,12 @@ export const downloadQueue = sqliteTable("download_queue", {
     .notNull()
     .default(sql`(datetime('now'))`),
   completedAt: text("completed_at"),
+  // Retry tracking for torrents that failed to add to qBittorrent
+  addToClientAttempts: integer("add_to_client_attempts")
+    .notNull()
+    .default(0),
+  addToClientLastAttempt: text("add_to_client_last_attempt"),
+  addToClientError: text("add_to_client_error"),
 });
 
 // Scene Files Table
@@ -330,6 +336,39 @@ export const fileHashes = sqliteTable("file_hashes", {
   oshashIdx: index("file_hashes_oshash_idx").on(table.oshash),
   phashIdx: index("file_hashes_phash_idx").on(table.phash),
   sceneFileIdx: index("file_hashes_scene_file_idx").on(table.sceneFileId),
+}));
+
+// AI Match Scores Table - tracks AI matching decisions for debugging/audit
+export const aiMatchScores = sqliteTable("ai_match_scores", {
+  id: text("id").primaryKey(),
+  sceneId: text("scene_id").references(() => scenes.id, { onDelete: "cascade" }),
+  torrentTitle: text("torrent_title").notNull(),
+  score: real("score").notNull(), // 0.0 - 1.0
+  method: text("method").$type<"cross-encoder" | "bi-encoder" | "levenshtein">().notNull(),
+  model: text("model"), // e.g., "ms-marco-MiniLM-L-6-v2"
+  threshold: real("threshold").notNull(),
+  matched: integer("matched", { mode: "boolean" }).notNull(),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  sceneIdx: index("ai_match_scores_scene_idx").on(table.sceneId),
+  createdAtIdx: index("ai_match_scores_created_at_idx").on(table.createdAt),
+}));
+
+// Torrent Groups Table - tracks grouped torrents for discovery logic
+export const torrentGroups = sqliteTable("torrent_groups", {
+  id: text("id").primaryKey(),
+  groupTitle: text("group_title").notNull(), // Cleaned/normalized title
+  rawTitles: text("raw_titles", { mode: "json" }).$type<string[]>().notNull(), // Original torrent titles
+  sceneId: text("scene_id").references(() => scenes.id, { onDelete: "set null" }),
+  torrentCount: integer("torrent_count").notNull(),
+  indexerCount: integer("indexer_count").notNull(), // Unique indexers
+  status: text("status").$type<"matched" | "unknown" | "ignored">().notNull(),
+  aiScore: real("ai_score"), // Best match score if matched
+  searchPhase: text("search_phase").$type<"performer" | "studio" | "targeted">(), // Which phase found it
+  ...timestamps,
+}, (table) => ({
+  sceneIdx: index("torrent_groups_scene_idx").on(table.sceneId),
+  statusIdx: index("torrent_groups_status_idx").on(table.status),
 }));
 
 // Entity Meta Sources Table
@@ -420,7 +459,7 @@ export const appSettings = sqliteTable("app_settings", {
 export const logs = sqliteTable("logs", {
   id: text("id").primaryKey(),
   level: text("level").$type<"error" | "warning" | "info" | "debug">().notNull(),
-  eventType: text("event_type").$type<"torrent" | "subscription" | "download" | "metadata" | "system" | "missing-scenes">().notNull(),
+  eventType: text("event_type").$type<"torrent" | "subscription" | "download" | "metadata" | "system">().notNull(),
   message: text("message").notNull(),
   details: text("details", { mode: "json" }).$type<Record<string, unknown>>(),
   sceneId: text("scene_id").references(() => scenes.id, { onDelete: "set null" }),
@@ -469,9 +508,14 @@ export const scenesRelations = relations(scenes, ({ one, many }) => ({
   sceneMarkers: many(sceneMarkers),
   sceneHashes: many(sceneHashes),
   directorsScenes: many(directorsScenes),
+  aiMatchScores: many(aiMatchScores),
   site: one(studios, {
     fields: [scenes.siteId],
     references: [studios.id],
+  }),
+  discoveryGroup: one(torrentGroups, {
+    fields: [scenes.discoveryGroupId],
+    references: [torrentGroups.id],
   }),
 }));
 
@@ -566,6 +610,20 @@ export const scenesTagsRelations = relations(scenesTags, ({ one }) => ({
 export const sceneExclusionsRelations = relations(sceneExclusions, ({ one }) => ({
   scene: one(scenes, {
     fields: [sceneExclusions.sceneId],
+    references: [scenes.id],
+  }),
+}));
+
+export const aiMatchScoresRelations = relations(aiMatchScores, ({ one }) => ({
+  scene: one(scenes, {
+    fields: [aiMatchScores.sceneId],
+    references: [scenes.id],
+  }),
+}));
+
+export const torrentGroupsRelations = relations(torrentGroups, ({ one }) => ({
+  scene: one(scenes, {
+    fields: [torrentGroups.sceneId],
     references: [scenes.id],
   }),
 }));

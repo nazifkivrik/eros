@@ -36,9 +36,8 @@ export async function missingScenesSearchJob(app: FastifyInstance) {
     // Step 2: Find monitored subscriptions with autoDownload enabled
     const monitoredSubscriptions = await app.db.query.subscriptions.findMany({
       where: and(
-        eq(subscriptions.monitored, true),
-        eq(subscriptions.autoDownload, true),
-        eq(subscriptions.status, "active")
+        eq(subscriptions.isSubscribed, true),
+        eq(subscriptions.autoDownload, true)
       ),
     });
 
@@ -210,22 +209,24 @@ export async function missingScenesSearchJob(app: FastifyInstance) {
 
         // Add to qBittorrent if configured
         let qbittorrentStatus = "queued";
+        let qbitHash: string | null = null;
         if (qbittorrentService && bestTorrent.downloadUrl) {
           try {
             const downloadPath = settings.general.downloadPath || "/downloads";
             const isMagnet = bestTorrent.downloadUrl.startsWith("magnet:");
 
-            const success = await qbittorrentService.addTorrent({
+            qbitHash = await qbittorrentService.addTorrentAndGetHash({
               magnetLinks: isMagnet ? [bestTorrent.downloadUrl] : undefined,
               urls: !isMagnet ? [bestTorrent.downloadUrl] : undefined,
               savePath: downloadPath,
               category: "eros",
               paused: false,
+              matchTitle: bestTorrent.title,
             });
 
-            if (success) {
+            if (qbitHash) {
               qbittorrentStatus = "downloading";
-              app.log.info(`[MissingScenesSearch] Added to qBittorrent: ${scene.title}`);
+              app.log.info(`[MissingScenesSearch] Added to qBittorrent: ${scene.title} (qbitHash: ${qbitHash})`);
             }
           } catch (error) {
             app.log.error(`[MissingScenesSearch] qBittorrent error: ${error}`);
@@ -237,6 +238,7 @@ export async function missingScenesSearchJob(app: FastifyInstance) {
           id: nanoid(),
           sceneId: scene.id,
           torrentHash: null, // Will be populated by torrent-monitor job
+          qbitHash, // Save qBittorrent hash if available
           title: bestTorrent.title,
           size: bestTorrent.size,
           seeders: bestTorrent.seeders,

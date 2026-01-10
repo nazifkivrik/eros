@@ -1,6 +1,5 @@
 import { nanoid } from "nanoid";
 import type { Logger } from "pino";
-import type { SubscriptionStatus } from "@repo/shared-types";
 import { SubscriptionsRepository } from "../../infrastructure/repositories/subscriptions.repository.js";
 import { SubscriptionService as LegacySubscriptionService } from "../../services/subscription.service.js";
 
@@ -22,14 +21,18 @@ export interface UpdateSubscriptionDTO {
   autoDownload?: boolean;
   includeMetadataMissing?: boolean;
   includeAliases?: boolean;
-  status?: SubscriptionStatus;
-  monitored?: boolean;
+  isSubscribed?: boolean;
   searchCutoffDate?: string | null;
 }
 
 export interface DeleteSubscriptionDTO {
   deleteAssociatedScenes?: boolean;
-  removeFiles?: boolean;
+}
+
+export interface SubscriptionFilters {
+  search?: string;
+  includeMetaless?: boolean;
+  showInactive?: boolean;
 }
 
 /**
@@ -68,10 +71,10 @@ export class SubscriptionsService {
   /**
    * Get all subscriptions with details (entity + quality profile)
    */
-  async getAllWithDetails() {
-    this.logger.info("Fetching all subscriptions with details");
+  async getAllWithDetails(filters?: SubscriptionFilters) {
+    this.logger.info({ filters }, "Fetching all subscriptions with details");
     // Delegate to legacy service for complex operation
-    return await this.subscriptionService.getAllSubscriptionsWithDetails();
+    return await this.subscriptionService.getAllSubscriptionsWithDetails(filters);
   }
 
   /**
@@ -189,24 +192,14 @@ export class SubscriptionsService {
     // Delegate to legacy service for complex deletion logic
     await this.subscriptionService.deleteSubscription(
       id,
-      dto.deleteAssociatedScenes,
-      dto.removeFiles
+      dto.deleteAssociatedScenes
     );
 
     this.logger.info({ subscriptionId: id }, "Subscription deleted");
   }
 
   /**
-   * Toggle monitoring status
-   */
-  async toggleMonitoring(id: string) {
-    this.logger.info({ subscriptionId: id }, "Toggling subscription monitoring");
-
-    return await this.subscriptionService.toggleMonitoring(id);
-  }
-
-  /**
-   * Toggle subscription status
+   * Toggle subscription status (active <-> inactive)
    */
   async toggleStatus(id: string) {
     this.logger.info({ subscriptionId: id }, "Toggling subscription status");
@@ -246,8 +239,10 @@ export class SubscriptionsService {
           downloadProgress: downloadQueue,
           hasFiles: scene.sceneFiles && scene.sceneFiles.length > 0,
           fileCount: scene.sceneFiles?.length || 0,
-          isSubscribed: !!sceneSubscription,
           subscriptionId: sceneSubscription?.id || null,
+          // isSubscribed: true = subscribed and will be downloaded, false = unsubscribed
+          // Scenes are "subscribed" by default via performer/studio relation, but can be unsubscribed
+          isSubscribed: sceneSubscription?.isSubscribed ?? false,
         };
       })
     );

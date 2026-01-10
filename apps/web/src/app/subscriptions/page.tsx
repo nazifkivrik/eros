@@ -1,10 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState, Suspense } from "react";
 import type { SubscriptionDetail } from "@repo/shared-types";
 import Link from "next/link";
-import Image from "next/image";
-import {  Users, Building2, Film, Trash2, AlertCircle, LayoutGrid, List } from "lucide-react";
+import { Users, Building2, Film, Trash2, AlertCircle, Check, X } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -19,59 +18,186 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useSubscriptions, useDeleteSubscription } from "@/hooks/useSubscriptions";
+import { apiClient } from "@/lib/api-client";
 import { UnsubscribeConfirmDialog } from "@/components/dialogs/UnsubscribeConfirmDialog";
+import { ViewToggle } from "@/components/subscriptions/ViewToggle";
+import { SubscriptionImage } from "@/components/subscriptions/SubscriptionImage";
+import { SubscriptionFilters } from "@/components/subscriptions/SubscriptionFilters";
+import { useSubscriptionFilters } from "@/hooks/useSubscriptionFilters";
+import { cn } from "@/lib/utils";
 
-export default function SubscriptionsPage() {
-  const [activeTab, setActiveTab] = useState("performers");
-  const [viewMode, setViewMode] = useState<"card" | "table">("table");
-  const [unsubscribeDialog, setUnsubscribeDialog] = useState<{
+function SubscriptionsContent() {
+  // URL-based filter state - call this first to get filters
+  const {
+    filters,
+    setView,
+    setSearch,
+    setTab,
+    setIncludeMetaless,
+    setShowInactive,
+    toggleTag,
+    clearAllFilters,
+  } = useSubscriptionFilters({ defaultView: "table", defaultTab: "performers" });
+
+  // Call useSubscriptions with filters (showInactive is filtered client-side)
+  const { data: subscriptions, isLoading } = useSubscriptions({
+    search: filters.search || undefined,
+    includeMetaless: filters.includeMetaless,
+  });
+
+  const deleteSubscription = useDeleteSubscription();
+
+  // Delete dialog state
+  const [deleteDialog, setDeleteDialog] = useState<{
     open: boolean;
     subscription: SubscriptionDetail | null;
   }>({ open: false, subscription: null });
-  const { data: subscriptions, isLoading } = useSubscriptions();
-  const deleteSubscription = useDeleteSubscription();
 
-  // Helper to get the best image URL from entity data
-  const getEntityImageUrl = (entity: any): string | null => {
-    if (!entity) return null;
+  // Get all unique tags from scenes
+  const availableTags = useMemo(() => {
+    const scenes = subscriptions?.data?.filter((s) => s.entityType === "scene") || [];
+    const tagSet = new Set<string>();
+    scenes.forEach((sub) => {
+      const scene = sub.entity as any;
+      if (scene?.tags) {
+        scene.tags.forEach((tag: any) => tagSet.add(tag.name));
+      }
+    });
+    return Array.from(tagSet).sort();
+  }, [subscriptions]);
 
-    // Prefer poster/thumbnail from TPDB
-    if (entity.poster) return entity.poster;
-    if (entity.thumbnail) return entity.thumbnail;
-    if (entity.logo) return entity.logo;
+  // Filter subscriptions based on URL state
+  // Note: search, includeMetaless are filtered server-side
+  // Tab, tags, and showInactive are filtered client-side
+  const filteredSubscriptions = useMemo(() => {
+    let filtered = subscriptions?.data || [];
 
-    // Fallback to images array
-    const images = entity.images ? (typeof entity.images === 'string' ? JSON.parse(entity.images) : entity.images) : [];
-    return images[0]?.url || null;
-  };
+    // Tab filtering (client-side)
+    if (filters.tab) {
+      // Convert tab name (plural) to entity type (singular)
+      const entityTypeMap: Record<string, string> = {
+        performers: "performer",
+        studios: "studio",
+        scenes: "scene",
+      };
+      filtered = filtered.filter((s) => s.entityType === entityTypeMap[filters.tab!]);
+    }
 
-  const performers = subscriptions?.data?.filter((s) => s.entityType === "performer") || [];
-  const studios = subscriptions?.data?.filter((s) => s.entityType === "studio") || [];
-  const scenes = subscriptions?.data?.filter((s) => s.entityType === "scene") || [];
+    // Tag filtering (for scenes only, client-side)
+    if (filters.tab === "scenes" && filters.tags.length > 0) {
+      filtered = filtered.filter((s) => {
+        const scene = s.entity as any;
+        const sceneTags = scene?.tags?.map((t: any) => t.name) || [];
+        return filters.tags!.some((tag) => sceneTags.includes(tag));
+      });
+    }
+
+    // Show unsubscribed filtering (client-side)
+    // Checkbox unchecked (false): show only isSubscribed === true
+    // Checkbox checked (true): show all
+    if (!filters.showInactive) {
+      filtered = filtered.filter((s) => s.isSubscribed === true);
+    }
+
+    return filtered;
+  }, [subscriptions, filters]);
+
+  const performers = filteredSubscriptions.filter((s) => s.entityType === "performer");
+  const studios = filteredSubscriptions.filter((s) => s.entityType === "studio");
+  const scenes = filteredSubscriptions.filter((s) => s.entityType === "scene");
 
   const handleUnsubscribeClick = (subscription: SubscriptionDetail, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
-    // For scenes, just delete directly
+    // Scene subscriptions: toggle isSubscribed (unsubscribe/resubscribe)
+    // DO NOT delete - scene subscriptions should remain in DB for resubscribe capability
     if (subscription.entityType === "scene") {
-      deleteSubscription.mutate({ id: subscription.id });
+      apiClient.updateSubscription(subscription.id, {
+        isSubscribed: !subscription.isSubscribed
+      }).then(() => {
+        // Refetch subscriptions to show updated state
+        window.location.reload();
+      }).catch((err) => {
+        console.error('Failed to update subscription:', err);
+      });
       return;
     }
 
-    // For performers/studios, show dialog to ask about associated scenes
-    setUnsubscribeDialog({ open: true, subscription });
+    // Performer/Studio subscriptions: show dialog to ask about associated scenes
+    setDeleteDialog({ open: true, subscription });
   };
 
-  const handleConfirmUnsubscribe = (deleteAssociatedScenes: boolean, removeFiles: boolean) => {
-    if (unsubscribeDialog.subscription) {
+  const handleConfirmDelete = (deleteAssociatedScenes: boolean) => {
+    if (deleteDialog.subscription) {
       deleteSubscription.mutate({
-        id: unsubscribeDialog.subscription.id,
+        id: deleteDialog.subscription.id,
         deleteAssociatedScenes,
-        removeFiles,
       });
-      setUnsubscribeDialog({ open: false, subscription: null });
+      setDeleteDialog({ open: false, subscription: null });
     }
+  };
+
+  // Helper to get the best image URL from entity data
+  const getEntityImageUrl = (entity: any, entityType?: string): string | null => {
+    if (!entity) return null;
+
+    const isScene = entityType === "scene";
+
+    // === SCENES: Prefer background (landscape) ===
+    if (isScene) {
+      // background object has full/large/medium/small sizes
+      if (entity.background) {
+        if (typeof entity.background === "object") {
+          return entity.background.full || entity.background.large || Object.values(entity.background)[0];
+        }
+        return entity.background;
+      }
+      // Fallback to background_back
+      if (entity.background_back) {
+        if (typeof entity.background_back === "object") {
+          return entity.background_back.full || entity.background_back.large || Object.values(entity.background_back)[0];
+        }
+        return entity.background_back;
+      }
+      // Fallback to image (horizontal/landscape)
+      if (entity.image) return entity.image;
+      // Fallback to back_image
+      if (entity.back_image) return entity.back_image;
+    }
+
+    // === ALL TYPES: Check images array for background (scenes) or poster (performers/studios) ===
+    const images =
+      entity.images
+        ? typeof entity.images === "string"
+          ? JSON.parse(entity.images)
+          : entity.images
+        : [];
+
+    if (images.length > 0) {
+      // For scenes, prefer background-type images
+      if (isScene) {
+        const backgroundImg = images.find((img: any) =>
+          img.url?.includes("/background/") || img.type === "background"
+        );
+        if (backgroundImg) return backgroundImg.url;
+      }
+      // First image
+      if (images[0]?.url) return images[0].url;
+    }
+
+    // === FALLBACKS ===
+    // For scenes, poster is last resort (portrait)
+    if (isScene && entity.poster) return entity.poster;
+
+    // For performers/studios, prefer poster/thumbnail/logo
+    if (!isScene) {
+      if (entity.poster) return entity.poster;
+      if (entity.thumbnail) return entity.thumbnail;
+      if (entity.logo) return entity.logo;
+    }
+
+    return null;
   };
 
   const renderPerformersTable = () => (
@@ -92,11 +218,9 @@ export default function SubscriptionsPage() {
             <TableRow
               key={sub.id}
               className="cursor-pointer hover:bg-accent/50"
-              onClick={() => window.location.href = `/subscriptions/${sub.id}`}
+              onClick={() => (window.location.href = `/subscriptions/${sub.id}`)}
             >
-              <TableCell className="font-medium">
-                {sub.entityName}
-              </TableCell>
+              <TableCell className="font-medium">{sub.entityName}</TableCell>
               <TableCell>{sub.qualityProfile?.name || "N/A"}</TableCell>
               <TableCell>
                 <Badge variant={sub.autoDownload ? "default" : "outline"}>
@@ -130,63 +254,60 @@ export default function SubscriptionsPage() {
 
   const renderPerformersCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      {performers.map((sub) => {
-        const imageUrl = getEntityImageUrl(sub.entity);
-        return (
-          <Link key={sub.id} href={`/subscriptions/${sub.id}`}>
-            <Card className="cursor-pointer hover:bg-accent/50 transition-colors h-full overflow-hidden">
-              {imageUrl && (
-                <div className="aspect-[3/4] w-full overflow-hidden bg-muted">
-                  <Image
-                    src={imageUrl}
-                    alt={sub.entityName}
-                    width={300}
-                    height={400}
-                    className="w-full h-full object-cover"
-                  />
+      {performers.map((sub) => (
+        <Link key={sub.id} href={`/subscriptions/${sub.id}`}>
+          <Card className="cursor-pointer hover:bg-accent/50 transition-colors h-full overflow-hidden">
+            <SubscriptionImage
+              src={getEntityImageUrl(sub.entity, sub.entityType)}
+              alt={sub.entityName}
+              type="performer"
+            />
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <CardTitle className="truncate text-base">{sub.entityName}</CardTitle>
+                  <CardDescription className="mt-1 text-xs">
+                    {sub.qualityProfile?.name || "No quality profile"}
+                  </CardDescription>
                 </div>
-              )}
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <CardTitle className="truncate text-base">{sub.entityName}</CardTitle>
-                    <CardDescription className="mt-1 text-xs">
-                      {sub.qualityProfile?.name || "No quality profile"}
-                    </CardDescription>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={(e) => handleUnsubscribeClick(sub, e)}
-                    disabled={deleteSubscription.isPending}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-2 pt-0">
-                <div className="flex gap-1 flex-wrap text-xs">
-                  <Badge variant={sub.autoDownload ? "default" : "outline"} className="text-xs">
-                    Auto: {sub.autoDownload ? "On" : "Off"}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={(e) => handleUnsubscribeClick(sub, e)}
+                  disabled={deleteSubscription.isPending}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2 pt-0">
+              <div className="flex gap-1 flex-wrap text-xs">
+                <Badge
+                  variant={sub.autoDownload ? "default" : "outline"}
+                  className="text-xs"
+                >
+                  Auto: {sub.autoDownload ? "On" : "Off"}
+                </Badge>
+                <Badge
+                  variant={sub.includeAliases ? "default" : "outline"}
+                  className="text-xs"
+                >
+                  Aliases
+                </Badge>
+                {sub.includeMetadataMissing && (
+                  <Badge variant="secondary" className="text-xs">
+                    No Metadata
                   </Badge>
-                  <Badge variant={sub.includeAliases ? "default" : "outline"} className="text-xs">
-                    Aliases
-                  </Badge>
-                  {sub.includeMetadataMissing && (
-                    <Badge variant="secondary" className="text-xs">
-                      No Metadata
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {new Date(sub.createdAt).toLocaleDateString()}
-                </p>
-              </CardContent>
-            </Card>
-          </Link>
-        );
-      })}
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {new Date(sub.createdAt).toLocaleDateString()}
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
+      ))}
     </div>
   );
 
@@ -208,11 +329,9 @@ export default function SubscriptionsPage() {
             <TableRow
               key={sub.id}
               className="cursor-pointer hover:bg-accent/50"
-              onClick={() => window.location.href = `/subscriptions/${sub.id}`}
+              onClick={() => (window.location.href = `/subscriptions/${sub.id}`)}
             >
-              <TableCell className="font-medium">
-                {sub.entityName}
-              </TableCell>
+              <TableCell className="font-medium">{sub.entityName}</TableCell>
               <TableCell>{sub.qualityProfile?.name || "N/A"}</TableCell>
               <TableCell>
                 <Badge variant={sub.autoDownload ? "default" : "outline"}>
@@ -244,63 +363,60 @@ export default function SubscriptionsPage() {
 
   const renderStudiosCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      {studios.map((sub) => {
-        const imageUrl = getEntityImageUrl(sub.entity);
-        return (
-          <Link key={sub.id} href={`/subscriptions/${sub.id}`}>
-            <Card className="cursor-pointer hover:bg-accent/50 transition-colors h-full overflow-hidden">
-              {imageUrl && (
-                <div className="aspect-video w-full overflow-hidden bg-muted">
-                  <Image
-                    src={imageUrl}
-                    alt={sub.entityName}
-                    width={640}
-                    height={360}
-                    className="w-full h-full object-cover"
-                  />
+      {studios.map((sub) => (
+        <Link key={sub.id} href={`/subscriptions/${sub.id}`}>
+          <Card className="cursor-pointer hover:bg-accent/50 transition-colors h-full overflow-hidden">
+            <SubscriptionImage
+              src={getEntityImageUrl(sub.entity, sub.entityType)}
+              alt={sub.entityName}
+              type="studio"
+            />
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <CardTitle className="truncate text-base">{sub.entityName}</CardTitle>
+                  <CardDescription className="mt-1 text-xs">
+                    {sub.qualityProfile?.name || "No quality profile"}
+                  </CardDescription>
                 </div>
-              )}
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <CardTitle className="truncate text-base">{sub.entityName}</CardTitle>
-                    <CardDescription className="mt-1 text-xs">
-                      {sub.qualityProfile?.name || "No quality profile"}
-                    </CardDescription>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={(e) => handleUnsubscribeClick(sub, e)}
-                    disabled={deleteSubscription.isPending}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-2 pt-0">
-                <div className="flex gap-1 flex-wrap text-xs">
-                  <Badge variant={sub.autoDownload ? "default" : "outline"} className="text-xs">
-                    Auto: {sub.autoDownload ? "On" : "Off"}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={(e) => handleUnsubscribeClick(sub, e)}
+                  disabled={deleteSubscription.isPending}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2 pt-0">
+              <div className="flex gap-1 flex-wrap text-xs">
+                <Badge
+                  variant={sub.autoDownload ? "default" : "outline"}
+                  className="text-xs"
+                >
+                  Auto: {sub.autoDownload ? "On" : "Off"}
+                </Badge>
+                <Badge
+                  variant={sub.includeAliases ? "default" : "outline"}
+                  className="text-xs"
+                >
+                  Aliases
+                </Badge>
+                {sub.includeMetadataMissing && (
+                  <Badge variant="secondary" className="text-xs">
+                    No Metadata
                   </Badge>
-                  <Badge variant={sub.includeAliases ? "default" : "outline"} className="text-xs">
-                    Aliases
-                  </Badge>
-                  {sub.includeMetadataMissing && (
-                    <Badge variant="secondary" className="text-xs">
-                      No Metadata
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {new Date(sub.createdAt).toLocaleDateString()}
-                </p>
-              </CardContent>
-            </Card>
-          </Link>
-        );
-      })}
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {new Date(sub.createdAt).toLocaleDateString()}
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
+      ))}
     </div>
   );
 
@@ -311,9 +427,8 @@ export default function SubscriptionsPage() {
           <TableRow>
             <TableHead>Title</TableHead>
             <TableHead>Quality Profile</TableHead>
-            <TableHead>Auto Download</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead>Subscribed</TableHead>
+            <TableHead>Created</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
@@ -321,32 +436,34 @@ export default function SubscriptionsPage() {
           {scenes.map((sub) => (
             <TableRow
               key={sub.id}
-              className="cursor-pointer hover:bg-accent/50"
-              onClick={() => window.location.href = `/subscriptions/${sub.id}`}
+              className={cn(
+                "cursor-pointer hover:bg-accent/50",
+                !sub.isSubscribed && "opacity-60 bg-muted/30"
+              )}
+              onClick={() => (window.location.href = `/subscriptions/${sub.id}`)}
             >
-              <TableCell className="font-medium">
-                {sub.entityName}
-              </TableCell>
+              <TableCell className="font-medium">{sub.entityName}</TableCell>
               <TableCell>{sub.qualityProfile?.name || "N/A"}</TableCell>
               <TableCell>
-                <Badge variant={sub.autoDownload ? "default" : "outline"}>
-                  {sub.autoDownload ? "Yes" : "No"}
-                </Badge>
-              </TableCell>
-              <TableCell>
-                <Badge variant={sub.status === "active" ? "default" : "secondary"}>
-                  {sub.status}
+                <Badge
+                  variant={sub.isSubscribed ? "default" : "secondary"}
+                  className={cn(
+                    sub.isSubscribed ? "bg-green-600" : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  {sub.isSubscribed ? "✓ Active" : "○ Inactive"}
                 </Badge>
               </TableCell>
               <TableCell>{new Date(sub.createdAt).toLocaleDateString()}</TableCell>
               <TableCell className="text-right">
                 <Button
-                  variant="ghost"
+                  variant={sub.isSubscribed ? "ghost" : "default"}
                   size="sm"
+                  className="h-8 w-8 p-0"
                   onClick={(e) => handleUnsubscribeClick(sub, e)}
-                  disabled={deleteSubscription.isPending}
+                  title={sub.isSubscribed ? "Unsubscribe" : "Resubscribe"}
                 >
-                  <Trash2 className="h-4 w-4" />
+                  {sub.isSubscribed ? <X className="h-4 w-4" /> : <Check className="h-4 w-4" />}
                 </Button>
               </TableCell>
             </TableRow>
@@ -358,58 +475,63 @@ export default function SubscriptionsPage() {
 
   const renderScenesCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      {scenes.map((sub) => {
-        const imageUrl = getEntityImageUrl(sub.entity);
-        return (
-          <Link key={sub.id} href={`/subscriptions/${sub.id}`}>
-            <Card className="cursor-pointer hover:bg-accent/50 transition-colors h-full overflow-hidden">
-              {imageUrl && (
-                <div className="aspect-video w-full overflow-hidden bg-muted">
-                  <Image
-                    src={imageUrl}
-                    alt={sub.entityName}
-                    width={640}
-                    height={360}
-                    className="w-full h-full object-cover"
-                  />
+      {scenes.map((sub) => (
+        <Link key={sub.id} href={`/subscriptions/${sub.id}`}>
+          <Card
+            className={cn(
+              "cursor-pointer hover:bg-accent/50 transition-colors h-full overflow-hidden",
+              !sub.isSubscribed && "opacity-60 grayscale-[50%]"
+            )}
+          >
+            <SubscriptionImage
+              src={getEntityImageUrl(sub.entity, sub.entityType)}
+              alt={sub.entityName}
+              type="scene"
+            />
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <CardTitle className="truncate text-sm">{sub.entityName}</CardTitle>
+                  <CardDescription className="mt-1 text-xs">
+                    {sub.qualityProfile?.name || "No quality profile"}
+                  </CardDescription>
                 </div>
-              )}
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <CardTitle className="truncate text-sm">{sub.entityName}</CardTitle>
-                    <CardDescription className="mt-1 text-xs">
-                      {sub.qualityProfile?.name || "No quality profile"}
-                    </CardDescription>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={(e) => handleUnsubscribeClick(sub, e)}
-                    disabled={deleteSubscription.isPending}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-2 pt-0">
-                <div className="flex gap-1 flex-wrap text-xs">
-                  <Badge variant={sub.status === "active" ? "default" : "secondary"} className="text-xs">
-                    {sub.status}
-                  </Badge>
-                  <Badge variant={sub.autoDownload ? "default" : "outline"} className="text-xs">
-                    Auto: {sub.autoDownload ? "On" : "Off"}
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {new Date(sub.createdAt).toLocaleDateString()}
-                </p>
-              </CardContent>
-            </Card>
-          </Link>
-        );
-      })}
+                <Button
+                  variant={sub.isSubscribed ? "ghost" : "default"}
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={(e) => handleUnsubscribeClick(sub, e)}
+                  title={sub.isSubscribed ? "Unsubscribe" : "Resubscribe"}
+                >
+                  {sub.isSubscribed ? <X className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2 pt-0">
+              <div className="flex gap-1 flex-wrap text-xs">
+                <Badge
+                  variant={sub.isSubscribed ? "default" : "secondary"}
+                  className={cn(
+                    "text-xs",
+                    sub.isSubscribed ? "bg-green-600" : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  {sub.isSubscribed ? "✓ Active" : "○ Inactive"}
+                </Badge>
+                <Badge
+                  variant={sub.autoDownload ? "default" : "outline"}
+                  className="text-xs"
+                >
+                  Auto: {sub.autoDownload ? "On" : "Off"}
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {new Date(sub.createdAt).toLocaleDateString()}
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
+      ))}
     </div>
   );
 
@@ -425,22 +547,7 @@ export default function SubscriptionsPage() {
         </div>
 
         {/* View Toggle */}
-        <div className="flex gap-1 border rounded-lg p-1">
-          <Button
-            variant={viewMode === "card" ? "default" : "ghost"}
-            size="sm"
-            onClick={() => setViewMode("card")}
-          >
-            <LayoutGrid className="h-4 w-4" />
-          </Button>
-          <Button
-            variant={viewMode === "table" ? "default" : "ghost"}
-            size="sm"
-            onClick={() => setViewMode("table")}
-          >
-            <List className="h-4 w-4" />
-          </Button>
-        </div>
+        <ViewToggle view={filters.view} onViewChange={setView} />
       </div>
 
       {/* Stats */}
@@ -449,7 +556,9 @@ export default function SubscriptionsPage() {
           <CardHeader className="pb-3">
             <div className="flex items-center gap-2">
               <Users className="h-5 w-5 text-muted-foreground" />
-              <CardTitle className="text-2xl font-bold">{performers.length}</CardTitle>
+              <CardTitle className="text-2xl font-bold">
+                {subscriptions?.data?.filter((s) => s.entityType === "performer").length || 0}
+              </CardTitle>
             </div>
             <CardDescription>Performer Subscriptions</CardDescription>
           </CardHeader>
@@ -458,7 +567,9 @@ export default function SubscriptionsPage() {
           <CardHeader className="pb-3">
             <div className="flex items-center gap-2">
               <Building2 className="h-5 w-5 text-muted-foreground" />
-              <CardTitle className="text-2xl font-bold">{studios.length}</CardTitle>
+              <CardTitle className="text-2xl font-bold">
+                {subscriptions?.data?.filter((s) => s.entityType === "studio").length || 0}
+              </CardTitle>
             </div>
             <CardDescription>Studio Subscriptions</CardDescription>
           </CardHeader>
@@ -467,19 +578,49 @@ export default function SubscriptionsPage() {
           <CardHeader className="pb-3">
             <div className="flex items-center gap-2">
               <Film className="h-5 w-5 text-muted-foreground" />
-              <CardTitle className="text-2xl font-bold">{scenes.length}</CardTitle>
+              <CardTitle className="text-2xl font-bold">
+                {subscriptions?.data?.filter((s) => s.entityType === "scene").length || 0}
+              </CardTitle>
             </div>
             <CardDescription>Scene Subscriptions</CardDescription>
           </CardHeader>
         </Card>
       </div>
 
+      {/* Filters */}
+      <SubscriptionFilters
+        tab={filters.tab}
+        search={filters.search}
+        onSearchChange={setSearch}
+        includeMetaless={filters.includeMetaless}
+        onMetalessChange={setIncludeMetaless}
+        showInactive={filters.showInactive}
+        onInactiveChange={setShowInactive}
+        selectedTags={filters.tags}
+        onTagToggle={toggleTag}
+        onClearTags={clearAllFilters}
+        availableTags={availableTags}
+        showTagFilter={filters.tab === "scenes"}
+      />
+
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+      <Tabs value={filters.tab} onValueChange={(tab) => setTab(tab as any)}>
         <TabsList>
-          <TabsTrigger value="performers">Performers ({performers.length})</TabsTrigger>
-          <TabsTrigger value="studios">Studios ({studios.length})</TabsTrigger>
-          <TabsTrigger value="scenes">Scenes ({scenes.length})</TabsTrigger>
+          <TabsTrigger value="performers">
+            Performers (
+            {subscriptions?.data?.filter((s) => s.entityType === "performer").length || 0}
+            )
+          </TabsTrigger>
+          <TabsTrigger value="studios">
+            Studios (
+            {subscriptions?.data?.filter((s) => s.entityType === "studio").length || 0}
+            )
+          </TabsTrigger>
+          <TabsTrigger value="scenes">
+            Scenes (
+            {subscriptions?.data?.filter((s) => s.entityType === "scene" && s.isSubscribed).length || 0}
+            )
+          </TabsTrigger>
         </TabsList>
 
         {/* Performers Tab */}
@@ -499,12 +640,18 @@ export default function SubscriptionsPage() {
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3 text-muted-foreground">
                   <AlertCircle className="h-5 w-5" />
-                  <p>No performer subscriptions yet. Search and subscribe to performers to start tracking their content.</p>
+                  <p>
+                    {filters.search || filters.tags.length > 0
+                      ? "No performer subscriptions match your filters."
+                      : "No performer subscriptions yet. Search and subscribe to performers to start tracking their content."}
+                  </p>
                 </div>
               </CardContent>
             </Card>
+          ) : filters.view === "table" ? (
+            renderPerformersTable()
           ) : (
-            viewMode === "table" ? renderPerformersTable() : renderPerformersCards()
+            renderPerformersCards()
           )}
         </TabsContent>
 
@@ -525,12 +672,18 @@ export default function SubscriptionsPage() {
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3 text-muted-foreground">
                   <AlertCircle className="h-5 w-5" />
-                  <p>No studio subscriptions yet. Search and subscribe to studios to start tracking their content.</p>
+                  <p>
+                    {filters.search || filters.tags.length > 0
+                      ? "No studio subscriptions match your filters."
+                      : "No studio subscriptions yet. Search and subscribe to studios to start tracking their content."}
+                  </p>
                 </div>
               </CardContent>
             </Card>
+          ) : filters.view === "table" ? (
+            renderStudiosTable()
           ) : (
-            viewMode === "table" ? renderStudiosTable() : renderStudiosCards()
+            renderStudiosCards()
           )}
         </TabsContent>
 
@@ -551,24 +704,38 @@ export default function SubscriptionsPage() {
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3 text-muted-foreground">
                   <AlertCircle className="h-5 w-5" />
-                  <p>No scene subscriptions yet. Scene subscriptions are automatically created when you subscribe to performers or studios.</p>
+                  <p>
+                    {filters.search || filters.tags.length > 0 || !filters.includeMetaless
+                      ? "No scene subscriptions match your filters."
+                      : "No scene subscriptions yet. Scene subscriptions are automatically created when you subscribe to performers or studios."}
+                  </p>
                 </div>
               </CardContent>
             </Card>
+          ) : filters.view === "table" ? (
+            renderScenesTable()
           ) : (
-            viewMode === "table" ? renderScenesTable() : renderScenesCards()
+            renderScenesCards()
           )}
         </TabsContent>
       </Tabs>
 
-      {/* Unsubscribe Confirmation Dialog */}
+      {/* Delete Confirmation Dialog */}
       <UnsubscribeConfirmDialog
-        open={unsubscribeDialog.open}
-        onOpenChange={(open) => setUnsubscribeDialog({ open, subscription: null })}
-        entityType={unsubscribeDialog.subscription?.entityType || "performer"}
-        entityName={unsubscribeDialog.subscription?.entityName || "Unknown"}
-        onConfirm={handleConfirmUnsubscribe}
+        open={deleteDialog.open}
+        onOpenChange={(open) => setDeleteDialog({ open, subscription: null })}
+        entityType={deleteDialog.subscription?.entityType || "performer"}
+        entityName={deleteDialog.subscription?.entityName || "Unknown"}
+        onConfirm={handleConfirmDelete}
       />
     </div>
+  );
+}
+
+export default function SubscriptionsPage() {
+  return (
+    <Suspense fallback={<div className="p-8">Loading...</div>}>
+      <SubscriptionsContent />
+    </Suspense>
   );
 }

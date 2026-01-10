@@ -7,6 +7,7 @@ import {
   EntityTypeParamsSchema,
   CheckSubscriptionParamsSchema,
   DeleteSubscriptionQuerySchema,
+  SubscriptionListQuerySchema,
 } from "../../modules/subscriptions/subscriptions.schema.js";
 import type { Subscription } from "../../services/subscription.service.js";
 
@@ -37,8 +38,18 @@ export class SubscriptionsController {
   /**
    * List all subscriptions with details
    */
-  async list() {
-    const subscriptions = await this.subscriptionsService.getAllWithDetails();
+  async list(query?: unknown) {
+    // Parse and validate query parameters using Zod schema
+    const parsedQuery = query ? SubscriptionListQuerySchema.parse(query) : {};
+
+    // Only include filters that have actual values
+    const filters = {
+      search: parsedQuery.search || undefined,
+      includeMetaless: parsedQuery.includeMetaless || undefined,
+      showInactive: parsedQuery.showInactive || undefined,
+    };
+
+    const subscriptions = await this.subscriptionsService.getAllWithDetails(filters);
     return { data: subscriptions };
   }
 
@@ -90,8 +101,7 @@ export class SubscriptionsController {
       autoDownload: validatedBody.autoDownload,
       includeMetadataMissing: validatedBody.includeMetadataMissing,
       includeAliases: validatedBody.includeAliases,
-      status: validatedBody.status,
-      monitored: validatedBody.monitored,
+      isSubscribed: validatedBody.isSubscribed,
       searchCutoffDate: validatedBody.searchCutoffDate,
     });
 
@@ -114,16 +124,7 @@ export class SubscriptionsController {
   }
 
   /**
-   * Toggle monitoring
-   */
-  async toggleMonitoring(params: unknown) {
-    const validated = SubscriptionParamsSchema.parse(params);
-    const subscription = await this.subscriptionsService.toggleMonitoring(validated.id);
-    return subscription;
-  }
-
-  /**
-   * Toggle status
+   * Toggle status (active <-> inactive)
    */
   async toggleStatus(params: unknown) {
     const validated = SubscriptionParamsSchema.parse(params);

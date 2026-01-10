@@ -25,7 +25,8 @@ export default fp(async (app) => {
     await mkdir(dbDir, { recursive: true });
   }
 
-  const db = createDatabase(databasePath);
+  // createDatabase is now async - runs migrations automatically
+  const db = await createDatabase(databasePath);
 
   app.decorate("db", db);
 

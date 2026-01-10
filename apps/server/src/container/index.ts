@@ -16,6 +16,7 @@ import { TorrentCompletionService } from "../services/torrent-completion.service
 import { EntityResolverService } from "../services/entity-resolver.service.js";
 import { SceneMatcher } from "../services/matching/scene-matcher.service.js";
 import { AIMatchingService } from "../services/ai-matching.service.js";
+import { CrossEncoderService } from "../services/cross-encoder-matching.service.js";
 import { SpeedProfileService } from "../services/speed-profile.service.js";
 import { TPDBService } from "../services/tpdb/tpdb.service.js";
 import { StashDBService } from "../services/stashdb.service.js";
@@ -32,6 +33,7 @@ import { AuthRepository } from "../infrastructure/repositories/auth.repository.j
 import { SettingsRepository } from "../infrastructure/repositories/settings.repository.js";
 import { DownloadQueueRepository } from "../infrastructure/repositories/download-queue.repository.js";
 import { SearchRepository } from "../infrastructure/repositories/search.repository.js";
+import { AIMatchScoresRepository } from "../infrastructure/repositories/ai-match-scores.repository.js";
 
 // Clean Architecture - Application Services
 import { PerformersService } from "../application/services/performers.service.js";
@@ -100,6 +102,7 @@ export function buildContainer(config: ContainerConfig) {
     entityResolverService: asClass(EntityResolverService).scoped(),
     sceneMatcherService: asClass(SceneMatcher).scoped(),
     aiMatchingService: asClass(AIMatchingService).scoped(),
+    crossEncoderService: asClass(CrossEncoderService).scoped(),
     speedProfileService: asClass(SpeedProfileService).scoped(),
   });
 
@@ -116,6 +119,7 @@ export function buildContainer(config: ContainerConfig) {
     settingsRepository: asClass(SettingsRepository).scoped(),
     downloadQueueRepository: asClass(DownloadQueueRepository).scoped(),
     searchRepository: asClass(SearchRepository).scoped(),
+    aiMatchScoresRepository: asClass(AIMatchScoresRepository).scoped(),
   });
 
   // Register Application Services (Business Logic Layer)

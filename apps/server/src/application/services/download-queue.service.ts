@@ -284,17 +284,21 @@ export class DownloadQueueService {
     if (this.qbittorrentService) {
       try {
         const torrents = await this.qbittorrentService.getTorrents();
-        torrentsMap = new Map(torrents.map((t) => [t.hash, t]));
+        // Normalize hashes to lowercase for consistent matching
+        torrentsMap = new Map(torrents.map((t) => [t.hash.toLowerCase(), t]));
         this.logger.debug({ torrentsCount: torrents.length }, "Fetched torrents from qBittorrent");
       } catch (error: unknown) {
         this.logger.error({ error }, "Failed to fetch torrents from qBittorrent");
       }
+    } else {
+      this.logger.warn("qBittorrent service not available - download status will be based on database only");
     }
 
     // Business logic: Merge data and determine unified status
     const unifiedDownloads = queueItems.map((item) => {
+      // Normalize qbitHash to lowercase for matching with torrentsMap keys
       const torrent = item.qbitHash
-        ? (torrentsMap.get(item.qbitHash) as Record<string, unknown> | undefined)
+        ? (torrentsMap.get(item.qbitHash.toLowerCase()) as Record<string, unknown> | undefined)
         : null;
       const scene = item.scene;
       const studio = scene?.site;
@@ -306,8 +310,16 @@ export class DownloadQueueService {
         const torrentProgress = torrent.progress as number | undefined;
 
         // Business rule: Map qBittorrent states to our status
-        if (torrentState === "pausedDL") {
+        if (torrentState === "pausedDL" || torrentState === "pausedUP") {
           status = "paused";
+        } else if (torrentState === "queuedDL" || torrentState === "queuedUP") {
+          status = "queued";
+        } else if (torrentState === "stalledDL") {
+          status = "downloading"; // Still downloading but no seeds/peers
+        } else if (torrentState === "stalledUP") {
+          status = "seeding"; // Still seeding but no leechers
+        } else if (torrentState === "checkingDL" || torrentState === "checkingUP") {
+          status = "downloading"; // Checking data
         } else if (torrentState?.includes("DL") || torrentState === "metaDL") {
           status = "downloading";
         } else if (torrentState?.includes("UP") || torrentState === "uploading") {
@@ -347,5 +359,188 @@ export class DownloadQueueService {
     this.logger.info({ count: unifiedDownloads.length }, "Generated unified downloads");
 
     return unifiedDownloads;
+  }
+
+  /**
+   * Try to add torrent to qBittorrent with proper error handling
+   * Returns true if successful, false otherwise
+   * @private
+   */
+  private async tryAddToQbittorrent(
+    queueItemId: string,
+    options: {
+      magnetLink?: string;
+      torrentUrl?: string;
+      torrentHash?: string;
+      savePath?: string;
+    }
+  ): Promise<boolean> {
+    const item = await this.downloadQueueRepository.findById(queueItemId);
+    if (!item) throw new Error("Queue item not found");
+
+    const currentAttempts = (item.addToClientAttempts || 0) + 1;
+
+    try {
+      this.logger.info(
+        {
+          queueItemId,
+          attempt: currentAttempts,
+          magnetLink: !!options.magnetLink,
+          torrentUrl: !!options.torrentUrl,
+          torrentHash: options.torrentHash,
+        },
+        "Attempting to add torrent to qBittorrent"
+      );
+
+      // Use addTorrentAndGetHash to get the qBittorrent hash immediately
+      const qbitHash = await this.qbittorrentService!.addTorrentAndGetHash(
+        {
+          magnetLinks: options.magnetLink ? [options.magnetLink] : undefined,
+          urls: options.torrentUrl ? [options.torrentUrl] : undefined,
+          savePath: options.savePath,
+          category: "eros",
+          paused: false,
+          matchInfoHash: options.torrentHash,
+          matchTitle: item.title,
+        },
+        10000 // 10 second timeout
+      );
+
+      if (qbitHash) {
+        // SUCCESS: Update status to "downloading" and save qbitHash
+        this.logger.info(
+          { queueItemId, qbitHash },
+          "Successfully added to qBittorrent, saved qbitHash"
+        );
+        await this.downloadQueueRepository.updateRetryTracking(queueItemId, {
+          addToClientAttempts: currentAttempts,
+          addToClientLastAttempt: new Date().toISOString(),
+          addToClientError: null,
+          status: "downloading",
+          qbitHash, // Save the qBittorrent hash
+        });
+        return true;
+      } else {
+        // FAILURE: qBittorrent returned false or hash not found
+        throw new Error("qBittorrent.addTorrent failed or hash not found");
+      }
+    } catch (error) {
+      // FAILURE: Exception thrown
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        {
+          queueItemId,
+          attempt: currentAttempts,
+          error: errorMessage,
+        },
+        "Failed to add torrent to qBittorrent"
+      );
+
+      await this.downloadQueueRepository.updateRetryTracking(queueItemId, {
+        addToClientAttempts: currentAttempts,
+        addToClientLastAttempt: new Date().toISOString(),
+        addToClientError: errorMessage,
+        status: "add_failed",
+      });
+
+      return false;
+    }
+  }
+
+  /**
+   * Retry failed torrents (called by torrent-monitor job)
+   * @param maxAttempts - Maximum number of retry attempts allowed (default: 5)
+   * @returns Result object with total, succeeded, and permanentFailures counts
+   */
+  async retryFailedTorrents(maxAttempts: number = 5) {
+    this.logger.info({ maxAttempts }, "Retrying failed torrents");
+
+    // Respect Prowlarr rate limits: 5-10 monitor jobs = 25-50 minutes
+    // We use 5 minutes minimum between retries
+    const retryAfterMinutes = 5;
+    const failedItems = await this.downloadQueueRepository.findAddFailedItems(
+      maxAttempts,
+      retryAfterMinutes
+    );
+
+    this.logger.info({ count: failedItems.length }, "Found failed torrents to retry");
+
+    let successCount = 0;
+    let permanentFailures = 0;
+
+    for (const item of failedItems) {
+      const shouldRetry = (item.addToClientAttempts || 0) < maxAttempts;
+
+      if (!shouldRetry) {
+        this.logger.warn(
+          { id: item.id, attempts: item.addToClientAttempts },
+          "Max retry attempts reached, giving up"
+        );
+        permanentFailures++;
+        continue;
+      }
+
+      // Reconstruct magnet link if torrentHash is available
+      const magnetLink = item.torrentHash
+        ? `magnet:?xt=urn:btih:${item.torrentHash}&dn=${encodeURIComponent(item.title)}`
+        : undefined;
+
+      const success = await this.tryAddToQbittorrent(item.id, {
+        magnetLink,
+        torrentHash: item.torrentHash || undefined,
+      });
+
+      if (success) {
+        successCount++;
+      }
+    }
+
+    this.logger.info(
+      {
+        total: failedItems.length,
+        succeeded: successCount,
+        permanentFailures,
+      },
+      "Retry operation completed"
+    );
+
+    return {
+      total: failedItems.length,
+      succeeded: successCount,
+      permanentFailures,
+    };
+  }
+
+  /**
+   * Manually retry a single failed torrent
+   * @param id - Download queue item ID
+   * @returns Result object with id, success, and status
+   */
+  async retrySingleTorrent(id: string) {
+    this.logger.info({ id }, "Manually retrying failed torrent");
+
+    const item = await this.downloadQueueRepository.findById(id);
+    if (!item) {
+      throw new Error("Download queue item not found");
+    }
+
+    if (item.status !== "add_failed") {
+      throw new Error("Torrent is not in add_failed status");
+    }
+
+    const magnetLink = item.torrentHash
+      ? `magnet:?xt=urn:btih:${item.torrentHash}&dn=${encodeURIComponent(item.title)}`
+      : undefined;
+
+    const success = await this.tryAddToQbittorrent(id, {
+      magnetLink,
+      torrentHash: item.torrentHash || undefined,
+    });
+
+    return {
+      id,
+      success,
+      status: success ? ("downloading" as const) : ("add_failed" as const),
+    };
   }
 }

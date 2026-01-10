@@ -1,32 +1,21 @@
-1. Search sayfasında infinite scroll çalışmıyor sadece ilk sonuçlar gösteriliyor.
+1. /subscriptions sayfasında includeMetalessScenes filtresi  ve show unsubscribed seçenekleri çalışmıyor.  **fixed**
 
-2. Scene detail page te klasör detayları gösterilmiyor( oluşturulan .nfo,poster,indirilen dosya gibi )
+2. /subscriptions/:id sayfasında performera ait unsub edilmiş bir scene i resub yapamıyorum aynı şekilde unsubta yapamıyorum. **fixed**
 
-3. Unsub durumunda torrent istemcisinden silmiyor .
+3. /subscriptions sayfasındaki scene subscription butonu silmek yerine toggle yapıyor (unsubscribe/resubscribe). **fixed**
+   - Active scene: X butonu (unsubscribe → isSubscribed: false)
+   - Inactive scene: ✓ butonu (resubscribe → isSubscribed: true)
+   - Subscription DB'den silinmiyor, sadece isSubscribed değişiyor
 
-4. Downloads sayfasında şema hataları var docker.("url": "/api/download-queue/unified" )
+3. Metasız sceneler düzgün silinmiyor issues - **fixed**
+   - ÖNCES: Name matching çok katıydı, sadece junction table'daki ve title'da performer/studio adı geçen metasız sceneler siliniyordu
+   - ŞİMDİ: Subscription tablosunu doğrudan sorguluyor, daha esnek name matching kullanıyor
 
-5. Metasız scenelerin folderlar oluşturulurken Unknown altında oluşturuluyor direk scene ismi ile oşuturulmalı.
+4. Metasız sceneleri otomatik olarak inaktif başlıyor halbuki onlarında indirilmesi gerekiyor . **denenmedi henüz**
 
-6. Bir perfomer sildikten sonra isteğe bağlı scenelerde silebiliyoruz fakat sonrasında aynı performerı tekrar ekeldğimde de status direk downloading olarak geldi demekki databasede bazı kayıtlar silinmemiş. Mantık şöyle performer sildik ilişkili sceneleride sil dedik başka relationu olmayan (studyo ilede de ilişkisi olabilir) bütün sceneler silinir studyoya relation varsa relation silinir. 
+5. /subscriptions/:id sayfasında  hem subscription sütununda hemde download status alanında downloading çıkıyor sadece downloads status klonunda çıkması yeterli. **ok**
 
-7. Metadata refresh jobu hem unsub olanların folderları oluşturuyor hemde duplicate folderlar oluşturuyor.
+6. Torrent monitor jobunda torrent indirmesi bittikten sonra kendi klasörüne taşıma logici kontrol et , folderda move yapmayacağız bunun yerine torrent istemcisinde indirme yolunu ilgili klasör yapacağız böylece taşıma işlemini torrent istemcisi yapacak ve settings uida belirlediğimiz süre sonra torrent clienttan silecek. **denenmedi henüz**
 
-8. Hash generation tamamen gereksiz olmuş bu yanlış anlaşılma sonucu oluşturulmuş bir job. Hash kontrolü tpdb deki duplicate sitelerin ayrışması için istemiştim fakat böyle bir kod oluşturuldu bunu kaldıralım.Tpdbden performers scenes gelirken "hashes": [
-        {
-          "can_delete": true,
-          "created_at": "2022-11-08T23:08:36+00:00",
-          "duration": 0,
-          "hash": "string",
-          "id": 0,
-          "scene_id": 0,
-          "submissions": 0,
-          "type": "OSHASH",
-          "updated_at": "2022-11-08T23:08:36+00:00",
-          "users": [
-            0
-          ]
-        }
-      ] bu formatta hashler geliyor bunları karşılaştırarak deduplicate yapacağız sceneleri. 
 
-9. 
+

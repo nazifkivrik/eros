@@ -40,12 +40,11 @@ export function SceneDetailDialog({
 
   const deleteSubscription = useDeleteSubscription();
 
-  const handleUnsubscribe = (deleteAssociatedScenes: boolean, removeFiles: boolean) => {
+  const handleUnsubscribe = (deleteAssociatedScenes: boolean) => {
     if (subscriptionStatus?.subscription?.id) {
       deleteSubscription.mutate({
         id: subscriptionStatus.subscription.id,
-        deleteAssociatedScenes: deleteAssociatedScenes, // Scene is standalone, but keep parameter for consistency
-        removeFiles,
+        deleteAssociatedScenes: deleteAssociatedScenes,
       });
     }
   };

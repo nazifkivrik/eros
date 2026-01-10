@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, or, isNull, lt } from "drizzle-orm";
 import type { Database } from "@repo/database";
 import { downloadQueue } from "@repo/database/schema";
 import type { DownloadStatus } from "@repo/shared-types";
@@ -128,5 +128,70 @@ export class DownloadQueueRepository {
       where: (scenes, { eq }) => eq(scenes.id, sceneId),
     });
     return !!scene;
+  }
+
+  /**
+   * Find torrents that failed to add to qBittorrent and need retry
+   * @param maxAttempts - Maximum number of retry attempts allowed
+   * @param retryAfterMinutes - Minimum minutes to wait before retrying
+   */
+  async findAddFailedItems(maxAttempts: number, retryAfterMinutes: number) {
+    const cutoffTime = new Date(Date.now() - retryAfterMinutes * 60 * 1000).toISOString();
+
+    return await this.db.query.downloadQueue.findMany({
+      where: and(
+        eq(downloadQueue.status, "add_failed" as DownloadStatus),
+        lt(downloadQueue.addToClientAttempts, maxAttempts),
+        or(
+          lt(downloadQueue.addToClientLastAttempt, cutoffTime),
+          isNull(downloadQueue.addToClientLastAttempt)
+        )
+      ),
+      with: {
+        scene: {
+          columns: {
+            id: true,
+            title: true,
+            images: true,
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Update retry tracking fields when attempting to add to qBittorrent
+   */
+  async updateRetryTracking(
+    id: string,
+    data: {
+      addToClientAttempts: number;
+      addToClientLastAttempt: string;
+      addToClientError?: string | null;
+      status?: "add_failed" | "downloading";
+      qbitHash?: string | null;
+    }
+  ) {
+    await this.db.update(downloadQueue).set(data).where(eq(downloadQueue.id, id));
+    return await this.findById(id);
+  }
+
+  /**
+   * Find download queue item by torrent hash
+   */
+  async findByTorrentHash(torrentHash: string) {
+    const item = await this.db.query.downloadQueue.findFirst({
+      where: eq(downloadQueue.torrentHash, torrentHash),
+      with: {
+        scene: {
+          columns: {
+            id: true,
+            title: true,
+            images: true,
+          },
+        },
+      },
+    });
+    return item || null;
   }
 }

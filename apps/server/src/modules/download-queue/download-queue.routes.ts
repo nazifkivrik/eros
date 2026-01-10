@@ -28,7 +28,7 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["download-queue"],
         summary: "List download queue",
-        description: "Get all download queue items, optionally filtered by status (queued, downloading, completed, failed, paused, seeding)",
+        description: "Get all download queue items, optionally filtered by status (queued, downloading, completed, failed, paused, seeding, add_failed)",
         querystring: z.object({
           status: DownloadStatusSchema.optional().describe("Filter by download status"),
         }),
@@ -241,6 +241,45 @@ const downloadQueueRoutes: FastifyPluginAsyncZod = async (app) => {
       } catch (error) {
         if (error instanceof Error && error.message === "Download queue item not found") {
           return reply.code(404).send({ error: error.message });
+        }
+        throw error;
+      }
+    }
+  );
+
+  // Retry failed torrent
+  app.post(
+    "/:id/retry",
+    {
+      schema: {
+        tags: ["download-queue"],
+        summary: "Retry failed torrent",
+        description: "Manually retry adding a torrent that failed to add to qBittorrent",
+        params: z.object({
+          id: z.string().describe("Download queue item ID"),
+        }),
+        response: {
+          200: z.object({
+            id: z.string(),
+            success: z.boolean(),
+            status: DownloadStatusSchema,
+          }),
+          404: ErrorResponseSchema,
+          400: ErrorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      try {
+        return await downloadQueueController.retryFailedTorrent(request.params);
+      } catch (error) {
+        if (error instanceof Error) {
+          if (
+            error.message === "Download queue item not found" ||
+            error.message === "Torrent is not in add_failed status"
+          ) {
+            return reply.code(400).send({ error: error.message });
+          }
         }
         throw error;
       }

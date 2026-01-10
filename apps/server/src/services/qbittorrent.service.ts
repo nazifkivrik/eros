@@ -185,6 +185,84 @@ export class QBittorrentService {
     return result === "Ok.";
   }
 
+  /**
+   * Add a torrent and wait for it to appear in qBittorrent, then return its hash
+   * This is useful for immediately storing the qBittorrent hash in the database
+   *
+   * @param options - Same as addTorrent options
+   * @param options.matchInfoHash - Optional infoHash to match against (for faster lookup)
+   * @param options.matchTitle - Optional title to match against (fallback)
+   * @param timeout - Maximum time to wait for torrent to appear (default: 10 seconds)
+   * @returns The qBittorrent hash, or null if not found within timeout
+   */
+  async addTorrentAndGetHash(
+    options: {
+      urls?: string[];
+      magnetLinks?: string[];
+      category?: string;
+      savePath?: string;
+      paused?: boolean;
+      matchInfoHash?: string;
+      matchTitle?: string;
+    },
+    timeout: number = 10000
+  ): Promise<string | null> {
+    // First add the torrent
+    const success = await this.addTorrent(options);
+    if (!success) {
+      return null;
+    }
+
+    const startTime = Date.now();
+    const checkInterval = 500; // Check every 500ms
+
+    while (Date.now() - startTime < timeout) {
+      await new Promise((resolve) => setTimeout(resolve, checkInterval));
+
+      // Get torrents from qBittorrent
+      const torrents = await this.getTorrents();
+
+      // Try to match by infoHash (fastest and most reliable)
+      if (options.matchInfoHash) {
+        const normalizedInfoHash = options.matchInfoHash.toLowerCase();
+        const found = torrents.find((t) => t.hash.toLowerCase() === normalizedInfoHash);
+        if (found) {
+          return found.hash;
+        }
+      }
+
+      // Try to match by title (slower, but works if infoHash isn't available)
+      if (options.matchTitle) {
+        const found = torrents.find((t) => t.name === options.matchTitle);
+        if (found) {
+          return found.hash;
+        }
+      }
+
+      // If we have both infoHash and title, also try to match by recently added
+      // with matching title and category
+      if (options.category) {
+        const now = Math.floor(Date.now() / 1000);
+        const recentlyAdded = torrents.filter(
+          (t) =>
+            t.category === options.category &&
+            (now - t.added_on) < 30 // Added within last 30 seconds
+        );
+
+        if (recentlyAdded.length === 1 && options.matchTitle) {
+          // Only one recent torrent in this category, assume it's ours
+          const found = recentlyAdded.find((t) => t.name === options.matchTitle);
+          if (found) {
+            return found.hash;
+          }
+        }
+      }
+    }
+
+    // Timeout reached
+    return null;
+  }
+
   async pauseTorrent(hash: string): Promise<boolean> {
     const formData = new URLSearchParams();
     formData.append("hashes", hash);

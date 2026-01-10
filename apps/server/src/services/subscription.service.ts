@@ -3,7 +3,7 @@
  * Handles creating and managing subscriptions for performers, studios, and scenes
  */
 
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import type { Database } from "@repo/database";
 import {
   subscriptions,
@@ -19,6 +19,7 @@ import { nanoid } from "nanoid";
 import type { Subscription } from "@repo/shared-types";
 import type { TPDBService } from "./tpdb/tpdb.service.js";
 import { EntityResolverService } from "./entity-resolver.service.js";
+import type { CrossEncoderService } from "./cross-encoder-matching.service.js";
 import { logger } from "../utils/logger.js";
 
 export interface CreateSubscriptionInput {
@@ -30,13 +31,25 @@ export interface CreateSubscriptionInput {
   includeAliases: boolean;
 }
 
+export interface SubscriptionFilters {
+  search?: string;
+  includeMetaless?: boolean;
+  showInactive?: boolean;
+}
+
 export class SubscriptionService {
   private entityResolver: EntityResolverService;
 
   private db: Database;
   private tpdb?: TPDBService;
 
-  constructor({ db, tpdb }: { db: Database; tpdb?: TPDBService }) {
+  constructor({
+    db,
+    tpdb
+  }: {
+    db: Database;
+    tpdb?: TPDBService;
+  }) {
     this.db = db;
     this.tpdb = tpdb;
     this.entityResolver = new EntityResolverService({ db, tpdb });
@@ -126,8 +139,7 @@ export class SubscriptionService {
       autoDownload: input.autoDownload,
       includeMetadataMissing: input.includeMetadataMissing,
       includeAliases: input.includeAliases,
-      status: "active" as const,
-      monitored: true,
+      isSubscribed: true,
       searchCutoffDate: null,
       createdAt: now,
       updatedAt: now,
@@ -139,22 +151,30 @@ export class SubscriptionService {
         `[SubscriptionService] ✅ Created subscription for ${input.entityType}: ${entityName} (subscription ID: ${subscription.id})`
       );
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(
         `[SubscriptionService] ❌ Failed to create subscription for ${input.entityType}: ${entityName}`,
-        error
+        {
+          error: errorMessage,
+          entityType: input.entityType,
+          entityId: input.entityId,
+          qualityProfileId: input.qualityProfileId,
+        }
       );
-      throw error;
+      throw new Error(`Failed to create subscription: ${errorMessage}`);
     }
 
     // If subscribing to a performer or studio, also subscribe to all their scenes
     if (input.entityType === "performer" || input.entityType === "studio") {
+      // Studio subscriptions should not include aliases
+      const includeAliases = input.entityType === "studio" ? false : input.includeAliases;
       await this.subscribeToEntityScenes(
         input.entityType,
         localEntityId, // Use local ID
         input.qualityProfileId,
         input.autoDownload,
         input.includeMetadataMissing,
-        input.includeAliases
+        includeAliases
       );
     } else if (input.entityType === "scene") {
       // For single scene subscription, create folder and metadata immediately
@@ -255,6 +275,7 @@ export class SubscriptionService {
     }
 
     // Create subscriptions for each scene
+    // autoDownload determines isSubscribed: true=will download, false=won't download
     const sceneSubscriptions = entityScenes.map((scene) => ({
       id: nanoid(),
       entityType: "scene" as const,
@@ -263,8 +284,7 @@ export class SubscriptionService {
       autoDownload: autoDownload,
       includeMetadataMissing: includeMetadataMissing,
       includeAliases: includeAliases,
-      status: "active" as const,
-      monitored: true,
+      isSubscribed: autoDownload,
       searchCutoffDate: null,
       createdAt: now,
       updatedAt: now,
@@ -430,6 +450,10 @@ export class SubscriptionService {
         while (hasMore) {
           const result = await this.tpdb.getPerformerScenes(tpdbId, contentType, page);
 
+          logger.info(
+            `[SubscriptionService]   Page ${page}: ${result.scenes.length} ${contentType}s returned, pagination: ${result.pagination ? JSON.stringify(result.pagination) : 'undefined'}`
+          );
+
           if (result.scenes.length === 0) {
             logger.info(`[SubscriptionService]   Page ${page}: No more ${contentType}s found`);
             hasMore = false;
@@ -441,15 +465,41 @@ export class SubscriptionService {
             totalForType += result.scenes.length;
 
             // Use pagination metadata if available
-            if (result.pagination) {
-              hasMore = result.pagination.hasMore;
+            // NOTE: TPDB's hasMore is unreliable - use total to calculate pages instead
+            if (result.pagination && result.pagination.total !== undefined) {
+              const expectedPages = Math.ceil(result.pagination.total / 25);
+              hasMore = page < expectedPages;
               logger.info(
-                `[SubscriptionService]   Progress: ${totalForType} / ${result.pagination.total} total ${contentType}s`
+                `[SubscriptionService]   hasMore=${hasMore} (calculated from total: ${result.pagination.total} / 25 = ${expectedPages} pages, current page: ${page})`
               );
             } else {
-              // Fallback: if no pagination metadata, check scene count
-              // TPDB typically returns 20 scenes per page
-              hasMore = result.scenes.length >= 20;
+              // Fallback: No pagination metadata
+              // Strategy: Try page 2 if we got a full page, stop if page 2 is empty
+              const PAGE_SIZE = 25;
+              if (result.scenes.length >= PAGE_SIZE && page === 1) {
+                // Got a full page on page 1, try page 2
+                hasMore = true;
+                logger.info(
+                  `[SubscriptionService]   No pagination metadata, got full page (${result.scenes.length} >= ${PAGE_SIZE}), will try page 2`
+                );
+              } else if (page > 1 && result.scenes.length === 0) {
+                // Page 2 was empty, we're done
+                hasMore = false;
+                logger.info(
+                  `[SubscriptionService]   Page ${page} is empty, no more pages`
+                );
+              } else if (result.scenes.length < PAGE_SIZE) {
+                // Partial page, likely the last one
+                hasMore = false;
+                logger.info(
+                  `[SubscriptionService]   Partial page (${result.scenes.length} < ${PAGE_SIZE}), assuming last page`
+                );
+              } else {
+                hasMore = false;
+                logger.info(
+                  `[SubscriptionService]   No more pages (fallback logic)`
+                );
+              }
             }
 
             page++;
@@ -492,7 +542,7 @@ export class SubscriptionService {
     entityType: "performer" | "studio",
     entityId: string
   ): Promise<string | null> {
-    // Advanced duplicate checking
+    // Duplicate checking using exact matches only (TPDB ID, Title+Date, JAV Code)
     let sceneId: string | null = null;
 
     // 1. Check by TPDB external ID
@@ -756,8 +806,9 @@ export class SubscriptionService {
   /**
    * Get all subscriptions with entity and quality profile details
    * OPTIMIZED: Batch fetches to avoid N+1 queries (2N+1 → 5 queries)
+   * @param filters - Optional filters for search, includeMetaless, showInactive
    */
-  async getAllSubscriptionsWithDetails() {
+  async getAllSubscriptionsWithDetails(filters?: SubscriptionFilters) {
     // 1. Fetch all subscriptions (1 query)
     const allSubscriptions = await this.db.query.subscriptions.findMany({
       with: {
@@ -784,7 +835,7 @@ export class SubscriptionService {
     ]);
 
     // 3. Enrich subscriptions in memory (no queries)
-    return allSubscriptions.map((subscription) => {
+    const enrichedSubscriptions = allSubscriptions.map((subscription) => {
       let entity = null;
       let entityName = "Unknown";
 
@@ -831,6 +882,53 @@ export class SubscriptionService {
         qualityProfile: subscription.qualityProfile || null,
       };
     });
+
+    // 4. Apply filters if provided
+    let filtered = enrichedSubscriptions;
+
+    if (filters) {
+      // Log filters for debugging
+      logger.info({
+        search: filters.search,
+        includeMetaless: filters.includeMetaless,
+        showInactive: filters.showInactive,
+        totalCount: enrichedSubscriptions.length
+      }, "Applying subscription filters");
+
+      // Filter by search (entity name)
+      if (filters.search) {
+        const searchLower = filters.search.toLowerCase();
+        filtered = filtered.filter((s) =>
+          s.entityName?.toLowerCase().includes(searchLower)
+        );
+        logger.info(`After search filter: ${filtered.length} items`);
+      }
+
+      // Filter by includeMetaless (for scene subscriptions, filter out scenes without metadata)
+      // Only apply if explicitly set to false (not undefined)
+      if (filters.includeMetaless === false) {
+        const beforeCount = filtered.length;
+        filtered = filtered.filter((s) => {
+          // For scene subscriptions, check if the scene has metadata
+          if (s.entityType === "scene") {
+            const scene = s.entity as any;
+            return scene?.hasMetadata !== false;
+          }
+          return true;
+        });
+        logger.info(`After includeMetaless filter (false): ${beforeCount} -> ${filtered.length} items`);
+      }
+
+      // Filter by showInactive (show only active subscriptions)
+      // Only apply if explicitly set to false (not undefined)
+      if (filters.showInactive === false) {
+        const beforeCount = filtered.length;
+        filtered = filtered.filter((s) => s.isSubscribed === true);
+        logger.info(`After showInactive filter (false): ${beforeCount} -> ${filtered.length} items`);
+      }
+    }
+
+    return filtered;
   }
 
   /**
@@ -920,12 +1018,11 @@ export class SubscriptionService {
   /**
    * Delete subscription
    * For performer/studio subscriptions, optionally delete associated scene subscriptions
-   * For scene subscriptions, optionally delete scene files and folders
+   * Files are always deleted when removing scenes
    */
   async deleteSubscription(
     id: string,
-    deleteAssociatedScenes: boolean = false,
-    removeFiles: boolean = false
+    deleteAssociatedScenes: boolean = false
   ): Promise<void> {
     // Get the subscription first to check if it's a performer/studio
     const subscription = await this.db.query.subscriptions.findFirst({
@@ -957,11 +1054,11 @@ export class SubscriptionService {
     }
 
     logger.info(
-      `[SubscriptionService] Deleting subscription for ${subscription.entityType}: ${entityName} (subscription ID: ${id}, removeFiles: ${removeFiles})`
+      `[SubscriptionService] Deleting subscription for ${subscription.entityType}: ${entityName} (subscription ID: ${id}, deleteAssociatedScenes: ${deleteAssociatedScenes})`
     );
 
-    // If it's a scene subscription and user wants to remove files
-    if (subscription.entityType === "scene" && removeFiles) {
+    // If it's a scene subscription, always remove files
+    if (subscription.entityType === "scene") {
       await this.deleteSceneFilesAndFolder(subscription.entityId);
     }
 
@@ -980,8 +1077,7 @@ export class SubscriptionService {
     ) {
       await this.deleteEntitySceneSubscriptions(
         subscription.entityType,
-        subscription.entityId,
-        removeFiles
+        subscription.entityId
       );
     }
   }
@@ -993,85 +1089,183 @@ export class SubscriptionService {
    */
   private async deleteEntitySceneSubscriptions(
     entityType: "performer" | "studio",
-    entityId: string,
-    removeFiles: boolean = false
+    entityId: string
   ): Promise<void> {
-    // Find all scenes for this entity
-    let entityScenes: any[] = [];
+    // Get all scene subscriptions associated with this entity
+    // This includes both metadata scenes AND metadata-less scenes
+    // We query by checking if scenes were linked to this performer/studio
+    let sceneSubscriptions: any[] = [];
 
     if (entityType === "performer") {
-      // Find scenes by performer using junction table
-      const performerSceneRecords =
-        await this.db.query.performersScenes.findMany({
-          where: eq(performersScenes.performerId, entityId),
-        });
+      // Method 1: Get scenes from junction table
+      const performerSceneRecords = await this.db.query.performersScenes.findMany({
+        where: eq(performersScenes.performerId, entityId),
+      });
 
-      // Get all scene IDs
       const sceneIds = performerSceneRecords.map((ps) => ps.sceneId);
 
-      // Fetch all scenes
-      entityScenes = await Promise.all(
-        sceneIds.map((sceneId) =>
-          this.db.query.scenes.findFirst({
-            where: eq(scenes.id, sceneId),
-          })
-        )
-      );
-      entityScenes = entityScenes.filter(Boolean);
+      // Get scene subscriptions for these scenes
+      if (sceneIds.length > 0) {
+        const subsFromJunction = await this.db.query.subscriptions.findMany({
+          where: and(
+            eq(subscriptions.entityType, "scene"),
+            sceneIds.length > 0 ? inArray(subscriptions.entityId, sceneIds) : undefined
+          ),
+        });
+        sceneSubscriptions.push(...subsFromJunction);
+      }
+
+      // Method 2: Get metadata-less scenes (inferred from indexers)
+      // Find performer for name matching
+      const performer = await this.db.query.performers.findFirst({
+        where: eq(performers.id, entityId),
+      });
+
+      if (performer) {
+        // Get all metadata-less scenes
+        const inferredScenes = await this.db.query.scenes.findMany({
+          where: and(
+            eq(scenes.hasMetadata, false),
+            eq(scenes.inferredFromIndexers, true)
+          ),
+        });
+
+        // Get subscriptions for these inferred scenes
+        if (inferredScenes.length > 0) {
+          const inferredSceneIds = inferredScenes.map((s) => s.id);
+          const subsFromInferred = await this.db.query.subscriptions.findMany({
+            where: and(
+              eq(subscriptions.entityType, "scene"),
+              inArray(subscriptions.entityId, inferredSceneIds)
+            ),
+          });
+
+          // Filter by performer name in title (more flexible matching)
+          const performerNameLower = performer.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const filteredInferredSubs = subsFromInferred.filter((sub) => {
+            const scene = inferredScenes.find((s) => s.id === sub.entityId);
+            if (!scene || !scene.title) return false;
+
+            const titleLower = scene.title.toLowerCase().replace(/[^a-z0-9]/g, '');
+            // Check if performer name is in title OR title is very similar
+            return titleLower.includes(performerNameLower) ||
+                   performerNameLower.includes(titleLower) ||
+                   titleLower.split(performerNameLower).length <= 2; // Allow some variations
+          });
+
+          sceneSubscriptions.push(...filteredInferredSubs);
+        }
+      }
     } else if (entityType === "studio") {
-      // Find scenes by studio using siteId foreign key
-      entityScenes = await this.db.query.scenes.findMany({
+      // Method 1: Get scenes from siteId foreign key
+      const scenesBySiteId = await this.db.query.scenes.findMany({
         where: eq(scenes.siteId, entityId),
       });
+
+      if (scenesBySiteId.length > 0) {
+        const subsFromSiteId = await this.db.query.subscriptions.findMany({
+          where: and(
+            eq(subscriptions.entityType, "scene"),
+            inArray(subscriptions.entityId, scenesBySiteId.map((s) => s.id))
+          ),
+        });
+        sceneSubscriptions.push(...subsFromSiteId);
+      }
+
+      // Method 2: Get metadata-less scenes (inferred from indexers)
+      const studio = await this.db.query.studios.findFirst({
+        where: eq(studios.id, entityId),
+      });
+
+      if (studio) {
+        const inferredScenes = await this.db.query.scenes.findMany({
+          where: and(
+            eq(scenes.hasMetadata, false),
+            eq(scenes.inferredFromIndexers, true)
+          ),
+        });
+
+        if (inferredScenes.length > 0) {
+          const inferredSceneIds = inferredScenes.map((s) => s.id);
+          const subsFromInferred = await this.db.query.subscriptions.findMany({
+            where: and(
+              eq(subscriptions.entityType, "scene"),
+              inArray(subscriptions.entityId, inferredSceneIds)
+            ),
+          });
+
+          // Filter by studio name in title (more flexible matching)
+          const studioNameLower = studio.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const filteredInferredSubs = subsFromInferred.filter((sub) => {
+            const scene = inferredScenes.find((s) => s.id === sub.entityId);
+            if (!scene || !scene.title) return false;
+
+            const titleLower = scene.title.toLowerCase().replace(/[^a-z0-9]/g, '');
+            return titleLower.includes(studioNameLower) ||
+                   studioNameLower.includes(titleLower) ||
+                   titleLower.split(studioNameLower).length <= 2;
+          });
+
+          sceneSubscriptions.push(...filteredInferredSubs);
+        }
+      }
     }
 
+    // Deduplicate subscriptions by ID
+    const subscriptionMap = new Map();
+    for (const sub of sceneSubscriptions) {
+      if (sub && !subscriptionMap.has(sub.id)) {
+        subscriptionMap.set(sub.id, sub);
+      }
+    }
+    const uniqueSubscriptions = Array.from(subscriptionMap.values());
+
     logger.info(
-      `[SubscriptionService] Processing ${entityScenes.length} scenes for ${entityType} ${entityId} (removeFiles: ${removeFiles})`
+      `[SubscriptionService] Processing ${uniqueSubscriptions.length} scene subscriptions for ${entityType} ${entityId}`
     );
 
-    // Delete subscriptions and optionally files for each scene
-    for (const scene of entityScenes) {
+    // Delete subscriptions and remove files for each scene subscription
+    for (const sub of uniqueSubscriptions) {
       // Check if scene is subscribed through other performers/studios
-      const shouldRemoveFiles = await this.shouldRemoveSceneFiles(
-        scene.id,
+      const shouldRemoveScene = await this.shouldRemoveScene(
+        sub.entityId,
         entityType,
-        entityId,
-        removeFiles
+        entityId
       );
 
       // Delete scene subscription
       await this.db
         .delete(subscriptions)
-        .where(
-          and(
-            eq(subscriptions.entityType, "scene"),
-            eq(subscriptions.entityId, scene.id)
-          )
-        );
+        .where(eq(subscriptions.id, sub.id));
 
-      // Remove files if requested and not shared with other subscribed entities
-      if (shouldRemoveFiles) {
-        await this.deleteSceneFilesAndFolder(scene.id);
+      // Remove files and delete scene record if not shared with other subscribed entities
+      if (shouldRemoveScene) {
+        await this.deleteSceneFilesAndFolder(sub.entityId);
+
+        // Delete the scene record itself from database
+        // This also cascades to performers_scenes junction table
+        await this.db.delete(scenes).where(eq(scenes.id, sub.entityId));
+
+        logger.info(
+          `[SubscriptionService] Deleted scene "${sub.entityId}" from database (no other subscriptions reference it)`
+        );
+      } else {
+        logger.info(
+          `[SubscriptionService] Kept scene "${sub.entityId}" in database (referenced by other active subscriptions)`
+        );
       }
     }
   }
 
   /**
-   * Check if scene files should be removed when unsubscribing
-   * Returns true only if:
-   * - removeFiles is true AND
-   * - Scene is not subscribed through any other active performer/studio subscriptions
+   * Check if scene should be removed when unsubscribing
+   * Returns true only if scene is not subscribed through any other active performers/studios
    */
-  private async shouldRemoveSceneFiles(
+  private async shouldRemoveScene(
     sceneId: string,
     excludeEntityType: "performer" | "studio",
-    excludeEntityId: string,
-    removeFiles: boolean
+    excludeEntityId: string
   ): Promise<boolean> {
-    if (!removeFiles) {
-      return false;
-    }
-
     // Get all performers for this scene
     const performerRecords = await this.db.query.performersScenes.findMany({
       where: (performersScenes, { eq }) => eq(performersScenes.sceneId, sceneId),
@@ -1097,7 +1291,7 @@ export class SubscriptionService {
 
       if (performerSub) {
         logger.info(
-          `[SubscriptionService] Scene ${sceneId} is still subscribed through performer ${pr.performerId}, keeping files`
+          `[SubscriptionService] Scene ${sceneId} is still subscribed through performer ${pr.performerId}, keeping scene`
         );
         return false; // Scene is subscribed through another performer
       }
@@ -1117,14 +1311,14 @@ export class SubscriptionService {
 
         if (studioSub) {
           logger.info(
-            `[SubscriptionService] Scene ${sceneId} is still subscribed through studio ${sceneRecord.siteId}, keeping files`
+            `[SubscriptionService] Scene ${sceneId} is still subscribed through studio ${sceneRecord.siteId}, keeping scene`
           );
           return false; // Scene is subscribed through its studio
         }
       }
     }
 
-    // No other active subscriptions found, safe to remove files
+    // No other active subscriptions found, safe to remove scene
     return true;
   }
 
@@ -1209,24 +1403,7 @@ export class SubscriptionService {
   }
 
   /**
-   * Toggle subscription monitoring
-   */
-  async toggleMonitoring(id: string): Promise<Subscription> {
-    const subscription = await this.db.query.subscriptions.findFirst({
-      where: eq(subscriptions.id, id),
-    });
-
-    if (!subscription) {
-      throw new Error("Subscription not found");
-    }
-
-    return await this.updateSubscription(id, {
-      monitored: !subscription.monitored,
-    });
-  }
-
-  /**
-   * Pause/Resume subscription
+   * Toggle subscription status (true <-> false)
    */
   async toggleStatus(id: string): Promise<Subscription> {
     const subscription = await this.db.query.subscriptions.findFirst({
@@ -1237,10 +1414,10 @@ export class SubscriptionService {
       throw new Error("Subscription not found");
     }
 
-    const newStatus = subscription.status === "active" ? "paused" : "active";
+    const newStatus = !subscription.isSubscribed;
 
     return await this.updateSubscription(id, {
-      status: newStatus,
+      isSubscribed: newStatus,
     });
   }
 

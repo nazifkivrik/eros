@@ -44,3 +44,42 @@ export function useTestConnection() {
     },
   });
 }
+
+export function useAIModelStatus() {
+  return useQuery({
+    queryKey: ["ai-model-status"],
+    queryFn: () => apiClient.getAIModelStatus(),
+    refetchInterval: 30000, // Poll every 30 seconds
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useLoadAIModel() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: apiClient.loadAIModel.bind(apiClient),
+    onSuccess: (data: { success: boolean; message: string; modelLoaded: boolean }) => {
+      // Invalidate AI status to refresh
+      queryClient.invalidateQueries({ queryKey: ["ai-model-status"] });
+
+      if (data.success) {
+        toast.success(data.message);
+      } else {
+        toast.error(data.message);
+      }
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Failed to download AI model");
+    },
+  });
+}
+
+export function useQBittorrentStatus() {
+  return useQuery({
+    queryKey: ["qbittorrent-status"],
+    queryFn: () => apiClient.getQBittorrentStatus(),
+    refetchInterval: 10000, // Poll every 10 seconds
+    refetchOnWindowFocus: false,
+  });
+}

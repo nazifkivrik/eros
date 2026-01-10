@@ -12,6 +12,7 @@ import type { TorrentCompletionService } from "../services/torrent-completion.se
 import type { EntityResolverService } from "../services/entity-resolver.service.js";
 import type { SceneMatcher } from "../services/matching/scene-matcher.service.js";
 import type { AIMatchingService } from "../services/ai-matching.service.js";
+import type { CrossEncoderService } from "../services/cross-encoder-matching.service.js";
 import type { SpeedProfileService } from "../services/speed-profile.service.js";
 import type { TPDBService } from "../services/tpdb/tpdb.service.js";
 import type { StashDBService } from "../services/stashdb.service.js";
@@ -28,6 +29,7 @@ import type { AuthRepository } from "../infrastructure/repositories/auth.reposit
 import type { SettingsRepository } from "../infrastructure/repositories/settings.repository.js";
 import type { DownloadQueueRepository } from "../infrastructure/repositories/download-queue.repository.js";
 import type { SearchRepository } from "../infrastructure/repositories/search.repository.js";
+import type { AIMatchScoresRepository } from "../infrastructure/repositories/ai-match-scores.repository.js";
 
 // Clean Architecture - Application Services
 import type { PerformersService } from "../application/services/performers.service.js";
@@ -80,6 +82,7 @@ export interface ServiceContainer {
   entityResolverService: EntityResolverService;
   sceneMatcherService: SceneMatcher;
   aiMatchingService: AIMatchingService;
+  crossEncoderService: CrossEncoderService;
   speedProfileService: SpeedProfileService;
 
   // External service clients (optional)
@@ -105,6 +108,7 @@ export interface ServiceContainer {
   settingsRepository: SettingsRepository;
   downloadQueueRepository: DownloadQueueRepository;
   searchRepository: SearchRepository;
+  aiMatchScoresRepository: AIMatchScoresRepository;
 
   // Application Services (Business Logic Layer)
   performersService: PerformersService;

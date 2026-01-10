@@ -123,7 +123,8 @@ export class TPDBService {
   }> {
     const type = contentType || "scene";
     // TPDB uses plural endpoints: /performers/{id}/scenes, /performers/{id}/javs, /performers/{id}/movies
-    const endpoint = `/performers/${id}/${type}s?page=${page}`;
+    const perPage = 25;
+    const endpoint = `/performers/${id}/${type}s?page=${page}&per_page=${perPage}`;
 
     try {
       const response = await this.request<TPDBPaginatedResponse<TPDBScene>>(endpoint);
@@ -144,7 +145,12 @@ export class TPDBService {
         };
 
         logger.info(
-          `[TPDB] ${type}s page ${page}: ${scenes.length} scenes (${response.meta.current_page}/${response.meta.last} pages, ${response.meta.total} total)`
+          `[TPDB] ${type}s page ${page}: ${scenes.length} scenes (${response.meta.current_page}/${response.meta.last} pages, ${response.meta.total} total, hasMore=${hasMore})`
+        );
+      } else {
+        // No pagination metadata - log this for debugging
+        logger.info(
+          `[TPDB] ${type}s page ${page}: ${scenes.length} scenes (NO pagination metadata in response)`
         );
       }
 

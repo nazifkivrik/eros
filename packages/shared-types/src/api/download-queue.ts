@@ -8,6 +8,7 @@ export const DownloadStatusSchema = z.enum([
   "failed",
   "paused",
   "seeding",
+  "add_failed", // Torrent failed to add to qBittorrent
 ]);
 
 export const SceneFileSchema = z.object({

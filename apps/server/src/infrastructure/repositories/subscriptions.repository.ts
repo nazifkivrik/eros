@@ -173,8 +173,10 @@ export class SubscriptionsRepository {
 
   /**
    * Get scenes for a performer subscription
+   * Includes both scenes from junction table AND metadata-less scenes inferred from indexers
    */
   async getPerformerScenes(performerId: string) {
+    // First, get scenes from junction table (metadata from StashDB)
     const sceneRelations = await this.db.query.performersScenes.findMany({
       where: (performersScenes, { eq }) =>
         eq(performersScenes.performerId, performerId),
@@ -186,19 +188,89 @@ export class SubscriptionsRepository {
         },
       },
     });
-    return sceneRelations.map((rel: any) => rel.scene).filter(Boolean);
+    const junctionScenes = sceneRelations.map((rel: any) => rel.scene).filter(Boolean);
+
+    // Also get metadata-less scenes that were inferred from indexers for this performer
+    // These are created during torrent search when a scene title matches but has no metadata
+    const inferredScenes = await this.db.query.scenes.findMany({
+      where: (scenes, { eq, and }) =>
+        and(
+          eq(scenes.inferredFromIndexers, true),
+          eq(scenes.hasMetadata, false)
+        ),
+      with: {
+        sceneFiles: true,
+      },
+    });
+
+    // Merge and deduplicate by scene ID
+    const allScenes = [...junctionScenes];
+    const sceneIds = new Set(junctionScenes.map((s: any) => s.id));
+
+    for (const scene of inferredScenes) {
+      if (!sceneIds.has(scene.id)) {
+        allScenes.push(scene);
+        sceneIds.add(scene.id);
+      }
+    }
+
+    return allScenes;
   }
 
   /**
    * Get scenes for a studio subscription
+   * Includes both scenes with siteId AND metadata-less scenes inferred from indexers
    */
   async getStudioScenes(studioId: string) {
-    return await this.db.query.scenes.findMany({
+    // Get the studio to get its name for filtering metadata-less scenes
+    const studio = await this.db.query.studios.findFirst({
+      where: (studios, { eq }) => eq(studios.id, studioId),
+    });
+
+    // Get scenes with this studio's siteId (metadata from StashDB)
+    const studioScenes = await this.db.query.scenes.findMany({
       where: (scenes, { eq }) => eq(scenes.siteId, studioId),
       with: {
         sceneFiles: true,
       },
     });
+
+    // Get metadata-less scenes inferred from indexers
+    // Filter by studio name in title to only show relevant scenes
+    const allInferredScenes = await this.db.query.scenes.findMany({
+      where: (scenes, { and }) =>
+        and(
+          eq(scenes.inferredFromIndexers, true),
+          eq(scenes.hasMetadata, false)
+        ),
+      with: {
+        sceneFiles: true,
+      },
+    });
+
+    // Filter inferred scenes to only those that might belong to this studio
+    // Match studio name (case-insensitive, ignoring special chars)
+    const inferredScenes = studio
+      ? allInferredScenes.filter((scene: any) => {
+          const studioNameLower = studio.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const titleLower = scene.title?.toLowerCase().replace(/[^a-z0-9]/g, '') || '';
+          // Check if studio name appears in title
+          return titleLower.includes(studioNameLower) || studioNameLower.includes(titleLower.split(' ')[0]);
+        })
+      : [];
+
+    // Merge and deduplicate
+    const allScenes = [...studioScenes];
+    const sceneIds = new Set(studioScenes.map((s: any) => s.id));
+
+    for (const scene of inferredScenes) {
+      if (!sceneIds.has(scene.id)) {
+        allScenes.push(scene);
+        sceneIds.add(scene.id);
+      }
+    }
+
+    return allScenes;
   }
 
   /**

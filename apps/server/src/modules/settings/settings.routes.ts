@@ -119,6 +119,57 @@ const settingsRoutes: FastifyPluginAsyncZod = async (app) => {
       return await settingsController.getQBittorrentStatus();
     }
   );
+
+  // Get AI model status
+  app.get(
+    "/ai/status",
+    {
+      schema: {
+        tags: ["settings"],
+        summary: "Get AI model status",
+        description: "Check AI model loading status and error information",
+        response: {
+          200: z.object({
+            enabled: z.boolean().describe("Whether AI matching is enabled in settings"),
+            modelLoaded: z.boolean().describe("Whether the Cross-Encoder model is loaded in RAM"),
+            modelDownloaded: z.boolean().describe("Whether the model files are downloaded to disk"),
+            modelName: z.string().describe("Name of the model being used"),
+            modelPath: z.string().describe("Path where model files are stored"),
+            error: z.string().nullable().describe("Error message if model failed to load"),
+          }),
+        },
+      },
+    },
+    async () => {
+      return await settingsController.getAIModelStatus(app);
+    }
+  );
+
+  // Manually load AI model
+  app.post(
+    "/ai/load",
+    {
+      schema: {
+        tags: ["settings"],
+        summary: "Download AI model",
+        description: "Download AI model to local cache. Model will be loaded into RAM automatically when needed.",
+        response: {
+          200: z.object({
+            success: z.boolean().describe("Whether the model was downloaded successfully"),
+            message: z.string().describe("Status message"),
+            modelLoaded: z.boolean().describe("Whether the model is loaded after the operation"),
+          }),
+        },
+      },
+    },
+    async () => {
+      try {
+        return await settingsController.loadAIModel(app);
+      } catch (error) {
+        throw error;
+      }
+    }
+  );
 };
 
 export default settingsRoutes;

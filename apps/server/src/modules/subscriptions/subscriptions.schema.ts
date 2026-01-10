@@ -13,8 +13,7 @@ export const SubscriptionSchema = z.object({
   autoDownload: z.boolean(),
   includeMetadataMissing: z.boolean(),
   includeAliases: z.boolean(),
-  status: z.string(),
-  monitored: z.boolean(),
+  isSubscribed: z.boolean(),
   searchCutoffDate: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -37,8 +36,7 @@ export const SubscriptionDetailResponseSchema = z.object({
   autoDownload: z.boolean(),
   includeMetadataMissing: z.boolean(),
   includeAliases: z.boolean(),
-  status: z.string(),
-  monitored: z.boolean(),
+  isSubscribed: z.boolean(),
   searchCutoffDate: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -61,8 +59,7 @@ export const UpdateSubscriptionSchema = z.object({
   autoDownload: z.boolean().optional(),
   includeMetadataMissing: z.boolean().optional(),
   includeAliases: z.boolean().optional(),
-  status: z.string().optional(),
-  monitored: z.boolean().optional(),
+  isSubscribed: z.boolean().optional(),
 });
 
 export const SubscriptionParamsSchema = IdParamsSchema;
@@ -78,7 +75,12 @@ export const CheckSubscriptionParamsSchema = z.object({
 
 export const DeleteSubscriptionQuerySchema = z.object({
   deleteAssociatedScenes: z.coerce.boolean().optional().default(false),
-  removeFiles: z.coerce.boolean().optional().default(false),
+});
+
+export const SubscriptionListQuerySchema = z.object({
+  search: z.string().optional(),
+  includeMetaless: z.coerce.boolean().optional().default(false),
+  showInactive: z.coerce.boolean().optional().default(false),
 });
 
 export const SubscriptionListResponseSchema = z.object({

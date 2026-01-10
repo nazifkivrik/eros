@@ -41,12 +41,11 @@ export function PerformerDetailDialog({
 
   const deleteSubscription = useDeleteSubscription();
 
-  const handleUnsubscribe = (deleteAssociatedScenes: boolean, removeFiles: boolean) => {
+  const handleUnsubscribe = (deleteAssociatedScenes: boolean) => {
     if (subscriptionStatus?.subscription?.id) {
       deleteSubscription.mutate({
         id: subscriptionStatus.subscription.id,
         deleteAssociatedScenes,
-        removeFiles,
       });
     }
   };

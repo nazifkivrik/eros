@@ -6,6 +6,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import fp from "fastify-plugin";
 import cron from "node-cron";
+import cronParser from "cron-parser";
 import { jobsLog } from "@repo/database";
 import { desc, eq } from "drizzle-orm";
 
@@ -31,6 +32,17 @@ const schedulerPlugin: FastifyPluginAsync = async (app) => {
   await app.after();
 
   const jobs: Map<string, cron.ScheduledTask> = new Map();
+  const jobSchedules: Map<string, string> = new Map();
+
+  // Helper function to calculate next execution from cron expression
+  function getNextExecution(cronExpression: string): Date | null {
+    try {
+      const interval = cronParser.parseExpression(cronExpression);
+      return interval.next().toDate();
+    } catch {
+      return null;
+    }
+  }
 
   // Get settings
   const { createSettingsService } = await import("../services/settings.service.js");
@@ -102,6 +114,7 @@ const schedulerPlugin: FastifyPluginAsync = async (app) => {
     );
 
     jobs.set(job.name, task);
+    jobSchedules.set(job.name, job.schedule);
     app.log.info(`Job "${job.name}" registered with schedule: ${job.schedule}`);
   };
 
@@ -208,6 +221,7 @@ const schedulerPlugin: FastifyPluginAsync = async (app) => {
             ? (latestRun.metadata as any).duration ?? null
             : null;
 
+        const schedule = jobSchedules.get(name);
         return {
           name,
           enabled: jobs.has(name),
@@ -216,6 +230,7 @@ const schedulerPlugin: FastifyPluginAsync = async (app) => {
           completedAt: latestRun?.completedAt || null,
           error: latestRun?.errorMessage || null,
           duration,
+          nextRun: schedule ? getNextExecution(schedule) : null,
         };
       })
     );
@@ -337,6 +352,7 @@ declare module "fastify" {
           completedAt: string | null;
           error: string | null;
           duration: number | null;
+          nextRun: Date | null;
         }>
       >;
       getJobHistory: (limit?: number) => Promise<

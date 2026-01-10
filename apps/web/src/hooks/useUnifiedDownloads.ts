@@ -11,7 +11,8 @@ export type UnifiedDownloadStatus =
   | "completed"
   | "seeding"
   | "paused"
-  | "failed";
+  | "failed"
+  | "add_failed";
 
 export interface UnifiedDownload {
   id: string;
@@ -42,15 +43,23 @@ export function useUnifiedDownloads() {
   return useQuery<UnifiedDownloadsResponse>({
     queryKey: queryKeys.downloads.unified,
     queryFn: async () => {
+      console.log("Fetching downloads from /api/download-queue/unified");
       // Use relative URL for browser (works in both dev and Docker)
       const res = await fetch(`/api/download-queue/unified`);
+      console.log("Downloads API response status:", res.status, res.ok);
+
       if (!res.ok) {
-        throw new Error("Failed to fetch unified downloads");
+        const errorText = await res.text();
+        console.error("Downloads API error:", res.status, errorText);
+        throw new Error(`Failed to fetch unified downloads: ${res.status} ${errorText}`);
       }
-      return res.json();
+      const data = await res.json();
+      console.log("Downloads API response:", data);
+      return data;
     },
-    refetchInterval: 5000, // Refresh every 5 seconds for real-time updates
-    staleTime: 3000, // Consider data stale after 3 seconds
+    refetchInterval: 2000, // Refresh every 2 seconds for real-time updates
+    refetchOnWindowFocus: true, // Refresh when window regains focus
+    staleTime: 1000, // Consider data stale after 1 second
   });
 }
 
@@ -86,5 +95,22 @@ export function useRemoveDownload() {
     successMessage: "Download removed",
     invalidateKeys: [queryKeys.downloads.queue, queryKeys.downloads.unified],
     errorMessage: "Failed to remove download",
+  });
+}
+
+export function useRetryDownload() {
+  return useMutationWithToast({
+    mutationFn: async (id: string) => {
+      const response = await fetch(`/api/download-queue/${id}/retry`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Failed to retry download");
+      }
+      return response.json();
+    },
+    successMessage: "Download retry initiated",
+    invalidateKeys: [queryKeys.downloads.queue, queryKeys.downloads.unified],
+    errorMessage: "Failed to retry download",
   });
 }

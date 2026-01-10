@@ -1,7 +1,7 @@
 /**
  * Metadata Refresh Job
- * Re-queries StashDB for subscribed entities to update their metadata
- * Also discovers and fixes scenes with missing metadata
+ * Re-queries TPDB for subscribed entities to update their metadata
+ * Discovers new scenes for subscribed performers/studios
  * Creates folders and metadata files for scenes
  * Runs daily at 2 AM
  */
@@ -9,6 +9,7 @@
 import type { FastifyInstance } from "fastify";
 import { eq, isNull, or } from "drizzle-orm";
 import { subscriptions, performers, studios, scenes } from "@repo/database";
+import { nanoid } from "nanoid";
 
 export async function metadataRefreshJob(app: FastifyInstance) {
   // Get services from DI container
@@ -21,7 +22,7 @@ export async function metadataRefreshJob(app: FastifyInstance) {
   try {
     // Get all active subscriptions
     const activeSubscriptions = await app.db.query.subscriptions.findMany({
-      where: eq(subscriptions.status, "active"),
+      where: eq(subscriptions.isSubscribed, true),
     });
 
     const totalTasks = activeSubscriptions.length;
@@ -76,6 +77,37 @@ export async function metadataRefreshJob(app: FastifyInstance) {
       );
       await refreshStudios(app, Array.from(studioIds));
       processedCount += studioIds.size;
+    }
+
+    // Discover new scenes for performers
+    let discoveredScenes = 0;
+    if (performerIds.size > 0) {
+      progressService.emitProgress(
+        "metadata-refresh",
+        `Discovering new scenes for ${performerIds.size} performers`,
+        processedCount,
+        totalTasks
+      );
+      discoveredScenes += await discoverNewScenesForPerformers(
+        app,
+        Array.from(performerIds),
+        progressService
+      );
+    }
+
+    // Discover new scenes for studios
+    if (studioIds.size > 0) {
+      progressService.emitProgress(
+        "metadata-refresh",
+        `Discovering new scenes for ${studioIds.size} studios`,
+        processedCount,
+        totalTasks
+      );
+      discoveredScenes += await discoverNewScenesForStudios(
+        app,
+        Array.from(studioIds),
+        progressService
+      );
     }
 
     // Refresh subscribed scenes
@@ -138,8 +170,8 @@ export async function metadataRefreshJob(app: FastifyInstance) {
 
     progressService.emitCompleted(
       "metadata-refresh",
-      `Completed: Refreshed ${totalTasks} items and created ${allScenesToProcess.size} folders`,
-      { processedCount: totalTasks, foldersCreated: allScenesToProcess.size }
+      `Completed: Refreshed ${totalTasks} items, discovered ${discoveredScenes} new scenes, created ${allScenesToProcess.size} folders`,
+      { processedCount: totalTasks, discoveredScenes, foldersCreated: allScenesToProcess.size }
     );
 
     app.log.info("Metadata refresh job completed");
@@ -204,16 +236,7 @@ async function refreshScenes(
       let metadata: any = null;
       let source: "tpdb" | "stashdb" | null = null;
 
-      // STRATEGY 1: Hash-based lookup (TPDB only, most accurate)
-      if (settings.metadata.hashLookupEnabled && settings.tpdb.enabled && app.container.tpdbService) {
-        metadata = await tryHashLookup(app, scene);
-        if (metadata) {
-          source = "tpdb";
-          app.log.info({ sceneId: id, method: "hash" }, "Found metadata via hash");
-        }
-      }
-
-      // STRATEGY 2: Use existing ID to refresh (subscribed scenes)
+      // STRATEGY 1: Use existing ID to refresh (subscribed scenes)
       if (!metadata) {
         const tpdbId = scene.externalIds.find(e => e.source === 'tpdb')?.id;
         if (tpdbId && settings.tpdb.enabled && app.container.tpdbService) {
@@ -266,41 +289,246 @@ async function refreshScenes(
   }
 }
 
-async function tryHashLookup(app: FastifyInstance, scene: any) {
-  if (!scene.sceneFiles || scene.sceneFiles.length === 0) return null;
-  if (!app.container.tpdbService) return null;
+/**
+ * Discover new scenes for subscribed performers
+ * Queries TPDB for all scenes of each performer and creates placeholder scenes for new ones
+ */
+async function discoverNewScenesForPerformers(
+  app: FastifyInstance,
+  performerIds: string[],
+  progressService: any
+): Promise<number> {
+  const { settingsService } = app.container;
+  const settings = await settingsService.getSettings();
 
-  for (const file of scene.sceneFiles) {
-    if (!file.fileHashes || file.fileHashes.length === 0) continue;
+  if (!settings.tpdb.enabled || !app.container.tpdbService) {
+    app.log.info("TPDB not enabled, skipping performer scene discovery");
+    return 0;
+  }
 
-    const hashes = file.fileHashes[0];
+  let totalDiscovered = 0;
 
-    // Try OSHASH first
-    if (hashes.oshash) {
-      try {
-        const result = await app.container.tpdbService.getSceneByHash(hashes.oshash, "OSHASH");
-        if (result) {
-          app.log.info({ oshash: hashes.oshash, tpdbId: result.id }, "Found via OSHASH");
-          return result;
-        }
-      } catch (error) {
-        app.log.debug({ error }, "OSHASH lookup failed");
-      }
+  for (let i = 0; i < performerIds.length; i++) {
+    const performerId = performerIds[i];
+
+    // Add delay to avoid TPDB rate limiting (1 second between requests)
+    if (i > 0) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    // Fallback to PHASH
-    if (hashes.phash) {
-      try {
-        const result = await app.container.tpdbService.getSceneByHash(hashes.phash, "PHASH");
-        if (result) {
-          app.log.info({ phash: hashes.phash, tpdbId: result.id }, "Found via PHASH");
-          return result;
-        }
-      } catch (error) {
-        app.log.debug({ error }, "PHASH lookup failed");
+    try {
+      // Get performer details
+      const performer = await app.db.query.performers.findFirst({
+        where: eq(performers.id, performerId),
+      });
+
+      if (!performer) {
+        app.log.warn(`Performer ${performerId} not found, skipping discovery`);
+        continue;
       }
+
+      // Check if performer has a TPDB ID
+      const tpdbId = performer.externalIds?.find(e => e.source === 'tpdb')?.id;
+      if (!tpdbId) {
+        app.log.debug(`Performer ${performer.name} has no TPDB ID, skipping discovery`);
+        continue;
+      }
+
+      // Query TPDB for performer's scenes
+      const tpdbService = app.container.tpdbService;
+      const performerScenes = await tpdbService.getScenesByPerformer(tpdbId);
+
+      if (!performerScenes || performerScenes.length === 0) {
+        app.log.debug(`No scenes found for performer ${performer.name} in TPDB`);
+        continue;
+      }
+
+      // Find scenes that don't exist in our database
+      let newScenesCreated = 0;
+      for (const tpdbScene of performerScenes) {
+        // Check if scene already exists by TPDB ID
+        const existingScene = await app.db.query.scenes.findFirst({
+          where: eq(scenes.id, tpdbScene.id),
+        });
+
+        if (existingScene) {
+          continue;
+        }
+
+        // Check if scene exists by external ID
+        const existingByExternalId = await app.db.query.scenes.findFirst({
+          where: eq(scenes.externalIds, {
+            source: 'tpdb',
+            id: tpdbScene.id,
+          }),
+        });
+
+        if (existingByExternalId) {
+          continue;
+        }
+
+        // Create new placeholder scene
+        const newSceneId = nanoid();
+        await app.db.insert(scenes).values({
+          id: newSceneId,
+          slug: tpdbScene.title?.toLowerCase().replace(/\s+/g, "-") || `tpdb-${tpdbScene.id}`,
+          title: tpdbScene.title || "Unknown Title",
+          date: tpdbScene.date || null,
+          duration: tpdbScene.duration || null,
+          code: tpdbScene.code || null,
+          images: tpdbScene.images || [],
+          hasMetadata: true, // Has metadata from TPDB
+          externalIds: [{ source: 'tpdb', id: tpdbScene.id }],
+          contentType: tpdbScene.type || "scene",
+          inferredFromIndexers: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+
+        newScenesCreated++;
+        totalDiscovered++;
+
+        app.log.info(
+          { sceneId: newSceneId, tpdbId: tpdbScene.id, title: tpdbScene.title },
+          `Discovered new scene for performer ${performer.name}`
+        );
+      }
+
+      if (newScenesCreated > 0) {
+        app.log.info(
+          `Discovered ${newScenesCreated} new scenes for performer ${performer.name}`
+        );
+        progressService.emitProgress(
+          "metadata-refresh",
+          `Discovered ${newScenesCreated} new scenes for ${performer.name}`,
+          i + 1,
+          performerIds.length,
+          { performerName: performer.name, newScenes: newScenesCreated }
+        );
+      }
+    } catch (error) {
+      app.log.error(
+        { error, performerId },
+        `Failed to discover scenes for performer ${performerId}`
+      );
     }
   }
 
-  return null;
+  return totalDiscovered;
+}
+
+/**
+ * Discover new scenes for subscribed studios
+ * Queries TPDB for all scenes of each studio and creates placeholder scenes for new ones
+ */
+async function discoverNewScenesForStudios(
+  app: FastifyInstance,
+  studioIds: string[],
+  progressService: any
+): Promise<number> {
+  const { settingsService } = app.container;
+  const settings = await settingsService.getSettings();
+
+  if (!settings.tpdb.enabled || !app.container.tpdbService) {
+    app.log.info("TPDB not enabled, skipping studio scene discovery");
+    return 0;
+  }
+
+  let totalDiscovered = 0;
+
+  for (let i = 0; i < studioIds.length; i++) {
+    const studioId = studioIds[i];
+
+    // Add delay to avoid TPDB rate limiting
+    if (i > 0) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    try {
+      // Get studio details
+      const studio = await app.db.query.studios.findFirst({
+        where: eq(studios.id, studioId),
+      });
+
+      if (!studio) {
+        app.log.warn(`Studio ${studioId} not found, skipping discovery`);
+        continue;
+      }
+
+      // Check if studio has a TPDB ID
+      const tpdbId = studio.externalIds?.find(e => e.source === 'tpdb')?.id;
+      if (!tpdbId) {
+        app.log.debug(`Studio ${studio.name} has no TPDB ID, skipping discovery`);
+        continue;
+      }
+
+      // Query TPDB for studio's scenes
+      const tpdbService = app.container.tpdbService;
+      const studioScenes = await tpdbService.getScenesByStudio(tpdbId);
+
+      if (!studioScenes || studioScenes.length === 0) {
+        app.log.debug(`No scenes found for studio ${studio.name} in TPDB`);
+        continue;
+      }
+
+      // Find scenes that don't exist in our database
+      let newScenesCreated = 0;
+      for (const tpdbScene of studioScenes) {
+        // Check if scene already exists
+        const existingScene = await app.db.query.scenes.findFirst({
+          where: eq(scenes.id, tpdbScene.id),
+        });
+
+        if (existingScene) {
+          continue;
+        }
+
+        // Create new placeholder scene
+        const newSceneId = nanoid();
+        await app.db.insert(scenes).values({
+          id: newSceneId,
+          slug: tpdbScene.title?.toLowerCase().replace(/\s+/g, "-") || `tpdb-${tpdbScene.id}`,
+          title: tpdbScene.title || "Unknown Title",
+          date: tpdbScene.date || null,
+          duration: tpdbScene.duration || null,
+          code: tpdbScene.code || null,
+          images: tpdbScene.images || [],
+          hasMetadata: true,
+          externalIds: [{ source: 'tpdb', id: tpdbScene.id }],
+          contentType: tpdbScene.type || "scene",
+          inferredFromIndexers: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+
+        newScenesCreated++;
+        totalDiscovered++;
+
+        app.log.info(
+          { sceneId: newSceneId, tpdbId: tpdbScene.id, title: tpdbScene.title },
+          `Discovered new scene for studio ${studio.name}`
+        );
+      }
+
+      if (newScenesCreated > 0) {
+        app.log.info(
+          `Discovered ${newScenesCreated} new scenes for studio ${studio.name}`
+        );
+        progressService.emitProgress(
+          "metadata-refresh",
+          `Discovered ${newScenesCreated} new scenes for ${studio.name}`,
+          i + 1,
+          studioIds.length,
+          { studioName: studio.name, newScenes: newScenesCreated }
+        );
+      }
+    } catch (error) {
+      app.log.error(
+        { error, studioId },
+        `Failed to discover scenes for studio ${studioId}`
+      );
+    }
+  }
+
+  return totalDiscovered;
 }

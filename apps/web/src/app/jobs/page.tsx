@@ -17,6 +17,7 @@ import {
 import { useJobs, useTriggerJob } from "@/hooks/useJobs";
 import { useJobProgress } from "@/hooks/use-job-progress";
 import { formatDistanceToNow } from "date-fns";
+import { useState, useEffect } from "react";
 
 const JOB_INFO = {
   "subscription-search": {
@@ -39,11 +40,6 @@ const JOB_INFO = {
     description: "Remove old logs and cleanup temporary files",
     schedule: "Weekly on Sunday at 3:00 AM",
   },
-  "hash-generation": {
-    name: "Hash Generation",
-    description: "Generate OSHASH for video files without hashes",
-    schedule: "Daily at 5:00 AM",
-  },
 };
 
 export default function JobsPage() {
@@ -55,26 +51,24 @@ export default function JobsPage() {
     triggerJob.mutate(jobName);
   };
 
+  // Simple status badge for history table
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "completed":
         return (
           <Badge variant="default" className="gap-1">
-            <CheckCircle2 className="h-3 w-3" />
             Completed
           </Badge>
         );
       case "running":
         return (
           <Badge variant="secondary" className="gap-1">
-            <Clock className="h-3 w-3" />
             Running
           </Badge>
         );
       case "failed":
         return (
           <Badge variant="destructive" className="gap-1">
-            <XCircle className="h-3 w-3" />
             Failed
           </Badge>
         );
@@ -86,6 +80,74 @@ export default function JobsPage() {
         );
     }
   };
+
+  // Countdown badge component for next execution
+  function NextExecutionBadge({ nextRun, status }: { nextRun: string | Date | null; status: string }) {
+    const [timeUntil, setTimeUntil] = useState("");
+
+    useEffect(() => {
+      if (!nextRun || status === "running") {
+        setTimeUntil("");
+        return;
+      }
+
+      const updateCountdown = () => {
+        const now = new Date();
+        const next = typeof nextRun === "string" ? new Date(nextRun) : nextRun;
+        const diff = next.getTime() - now.getTime();
+
+        if (diff <= 0) {
+          setTimeUntil("Starting soon");
+          return;
+        }
+
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+        if (hours > 24) {
+          const days = Math.floor(hours / 24);
+          setTimeUntil(`in ${days}d`);
+        } else if (hours > 0) {
+          setTimeUntil(`in ${hours}h ${minutes}m`);
+        } else {
+          setTimeUntil(`in ${minutes}m`);
+        }
+      };
+
+      updateCountdown();
+      const interval = setInterval(updateCountdown, 60000); // Update every minute
+      return () => clearInterval(interval);
+    }, [nextRun, status]);
+
+    if (status === "running") {
+      return (
+        <Badge variant="secondary" className="gap-1">
+          <Clock className="h-3 w-3" />
+          Running
+        </Badge>
+      );
+    }
+
+    if (status === "failed") {
+      return (
+        <Badge variant="destructive" className="gap-1">
+          <XCircle className="h-3 w-3" />
+          Failed
+        </Badge>
+      );
+    }
+
+    if (timeUntil) {
+      return (
+        <Badge variant="outline" className="gap-1">
+          <Clock className="h-3 w-3" />
+          Next: {timeUntil}
+        </Badge>
+      );
+    }
+
+    return null;
+  }
 
   return (
     <div className="space-y-6">
@@ -146,7 +208,7 @@ export default function JobsPage() {
                             Running
                           </Badge>
                         )}
-                        {!running && job && getStatusBadge(job.status)}
+                        {!running && <NextExecutionBadge nextRun={job?.nextRun || null} status={job?.status || "idle"} />}
                       </CardTitle>
                       <CardDescription className="mt-1">
                         {jobInfo.description}

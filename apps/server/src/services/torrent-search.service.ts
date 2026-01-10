@@ -7,22 +7,27 @@ import type { Database } from "@repo/database";
 import type { LogsService } from "./logs.service.js";
 import type { SettingsService } from "./settings.service.js";
 import type { AIMatchingService } from "./ai-matching.service.js";
+import type { CrossEncoderService } from "./cross-encoder-matching.service.js";
+import type { AIMatchScoresRepository } from "../infrastructure/repositories/ai-match-scores.repository.js";
+import type { TorrentGroupsRepository } from "../infrastructure/repositories/torrent-groups.repository.js";
 import { SceneMatcher } from "./matching/scene-matcher.service.js";
 import { logger } from "../utils/logger.js";
 import type { MatchSettings, SceneMetadata as MatchSceneMetadata } from "./matching/match-types.js";
-import { eq } from "drizzle-orm";
+import { eq, and, or, ne } from "drizzle-orm";
 import {
   performers,
   studios,
   scenes,
   qualityProfiles,
   performersScenes,
+  subscriptions,
 } from "@repo/database";
 
 interface TorrentResult {
   title: string;
   size: number;
   seeders: number;
+  leechers?: number;
   quality: string;
   source: string;
   indexerId: string;
@@ -30,6 +35,9 @@ interface TorrentResult {
   downloadUrl: string;
   infoHash: string;
   sceneId?: string; // Optional: set when matched with a database scene
+  // Added for deduplication
+  indexers?: string[]; // List of all indexers that have this torrent
+  indexerCount?: number; // Number of unique indexers (popularity signal)
 }
 
 interface SceneMetadata {
@@ -38,6 +46,8 @@ interface SceneMetadata {
   date: string | null;
   performerIds: string[];
   studioId?: string;
+  performerNames?: string[]; // For cross-encoder matching
+  studioName?: string; // For cross-encoder matching
 }
 
 export class TorrentSearchService {
@@ -45,22 +55,30 @@ export class TorrentSearchService {
   private logsService: LogsService;
   private settingsService: SettingsService;
   private aiMatchingService: AIMatchingService;
+  private crossEncoderService: CrossEncoderService;
+  private aiMatchScoresRepository: AIMatchScoresRepository;
 
   constructor({
     db,
     logsService,
     settingsService,
     aiMatchingService,
+    crossEncoderService,
+    aiMatchScoresRepository,
   }: {
     db: Database;
     logsService: LogsService;
     settingsService: SettingsService;
     aiMatchingService: AIMatchingService;
+    crossEncoderService: CrossEncoderService;
+    aiMatchScoresRepository: AIMatchScoresRepository;
   }) {
     this.db = db;
     this.logsService = logsService;
     this.settingsService = settingsService;
     this.aiMatchingService = aiMatchingService;
+    this.crossEncoderService = crossEncoderService;
+    this.aiMatchScoresRepository = aiMatchScoresRepository;
   }
 
   /**
@@ -99,9 +117,25 @@ export class TorrentSearchService {
         indexerIds
       );
 
+      // Step 1.5: Deduplicate by infoHash (same torrent from multiple indexers)
+      const deduplicatedResults = this.deduplicateByInfoHash(rawResults);
+
+      await this.logsService.info(
+        "torrent",
+        `Deduplicated ${rawResults.length} results to ${deduplicatedResults.length} unique torrents`,
+        {
+          before: rawResults.length,
+          after: deduplicatedResults.length,
+          removed: rawResults.length - deduplicatedResults.length,
+        },
+        entityType === "performer"
+          ? { performerId: entityId }
+          : { studioId: entityId }
+      );
+
       // Step 2: Hard Filtering (Name Integrity)
       const filteredResults = await this.applyHardFilters(
-        rawResults,
+        deduplicatedResults,
         entityType,
         entityId
       );
@@ -116,6 +150,31 @@ export class TorrentSearchService {
         entityId
       );
 
+      // Step 4.5: Handle Discovery for unmatched (if Cross-Encoder is enabled)
+      const settings = await this.settingsService.getSettings();
+      if (settings.ai.useCrossEncoder && unmatched.length > 0) {
+        // Get entity for discovery
+        let entity;
+        if (entityType === "performer") {
+          entity = await this.db.query.performers.findFirst({
+            where: eq(performers.id, entityId),
+          });
+        } else {
+          entity = await this.db.query.studios.findFirst({
+            where: eq(studios.id, entityId),
+          });
+        }
+
+        if (entity) {
+          await this.handleDiscovery(
+            unmatched,
+            entity,
+            entityType,
+            entityType // phase is same as entityType for now
+          );
+        }
+      }
+
       // Step 5: Process Matched Results (with quality selection)
       const matchedTorrents = await this.processMatchedResults(
         matched,
@@ -125,13 +184,18 @@ export class TorrentSearchService {
       );
 
       // Step 6: Process Unmatched Results (metadata-less scenes)
+      // Both legacy and Cross-Encoder paths now support metadata-less downloads
+      // Use groupingCount setting to determine minimum group size for metadata-less scenes
+      const minGroupMembers = settings.ai.groupingCount || 2;
+
       const unmatchedTorrents = includeMetadataMissing
         ? await this.processUnmatchedResults(
-          unmatched,
-          qualityProfileId,
-          entityType,
-          entityId
-        )
+            unmatched,
+            qualityProfileId,
+            entityType,
+            entityId,
+            minGroupMembers
+          )
         : [];
 
       const allSelectedTorrents = [...matchedTorrents, ...unmatchedTorrents];
@@ -330,6 +394,58 @@ export class TorrentSearchService {
   }
 
   /**
+   * Deduplicate torrents by infoHash
+   * Same torrent from multiple indexers is merged into one entry with indexerCount
+   * Higher indexerCount = more popular/reliable torrent
+   */
+  private deduplicateByInfoHash(results: TorrentResult[]): TorrentResult[] {
+    const hashMap = new Map<string, TorrentResult>();
+
+    for (const torrent of results) {
+      // Skip torrents without infoHash (can't deduplicate)
+      if (!torrent.infoHash) {
+        // Generate a pseudo-hash from title + size for torrents without infoHash
+        const pseudoHash = `${torrent.title}-${torrent.size}`;
+        if (!hashMap.has(pseudoHash)) {
+          hashMap.set(pseudoHash, {
+            ...torrent,
+            indexers: [torrent.indexerName],
+            indexerCount: 1,
+          });
+        }
+        continue;
+      }
+
+      const existing = hashMap.get(torrent.infoHash);
+      if (existing) {
+        // Merge: add indexer to list
+        if (!existing.indexers) {
+          existing.indexers = [existing.indexerName];
+        }
+        if (!existing.indexers.includes(torrent.indexerName)) {
+          existing.indexers.push(torrent.indexerName);
+        }
+        existing.indexerCount = existing.indexers.length;
+
+        // Keep the best seed/leech ratio
+        if (torrent.seeders > existing.seeders) {
+          existing.seeders = torrent.seeders;
+          existing.leechers = torrent.leechers;
+          existing.downloadUrl = torrent.downloadUrl; // Use the better source
+        }
+      } else {
+        hashMap.set(torrent.infoHash, {
+          ...torrent,
+          indexers: [torrent.indexerName],
+          indexerCount: 1,
+        });
+      }
+    }
+
+    return Array.from(hashMap.values());
+  }
+
+  /**
    * Step 2: Apply hard filters (name integrity)
    * Eliminates false matches like "jade kush" when searching "jade harper"
    */
@@ -433,9 +549,8 @@ export class TorrentSearchService {
   private async groupByScene(
     results: TorrentResult[]
   ): Promise<Array<{ sceneTitle: string; torrents: TorrentResult[] }>> {
-    // Get grouping threshold from settings
-    const settings = await this.settingsService.getSettings();
-    const groupingThreshold = settings.general.groupingThreshold || 0.7;
+    // Default grouping threshold (previously from settings.general.groupingThreshold)
+    const groupingThreshold = 0.7;
 
     // PHASE 1: Strict regex-based grouping
     const phase1Groups = new Map<string, TorrentResult[]>();
@@ -511,122 +626,12 @@ export class TorrentSearchService {
       })
     );
 
-    // PHASE 2: AI-based group merging (only if AI is enabled)
-    const aiEnabled = settings.ai.enabled;
-
-    if (aiEnabled && groupedResults.length > 1) {
-      try {
-        await this.aiMatchingService.initialize();
-
-        // Use groupingThreshold from settings for group merging
-        const AI_MERGE_THRESHOLD = settings.ai.groupingThreshold;
-
-        // Track which groups have been merged
-        const mergedIndices = new Set<number>();
-        const mergedGroups: Array<{
-          sceneTitle: string;
-          torrents: TorrentResult[];
-        }> = [];
-
-        for (let i = 0; i < groupedResults.length; i++) {
-          if (mergedIndices.has(i)) continue;
-
-          const currentGroup = groupedResults[i];
-          const mergedTorrents = [...currentGroup.torrents];
-          let mergedTitle = currentGroup.sceneTitle;
-
-          // Compare with all following groups
-          for (let j = i + 1; j < groupedResults.length; j++) {
-            if (mergedIndices.has(j)) continue;
-
-            const otherGroup = groupedResults[j];
-
-            // Skip if titles are too short
-            if (
-              currentGroup.sceneTitle.length < 30 ||
-              otherGroup.sceneTitle.length < 30
-            ) {
-              continue;
-            }
-
-            // Additional validation: Check if they share similar performer names
-            const currentPerformers = this.extractPerformerNames(
-              currentGroup.sceneTitle
-            );
-            const otherPerformers = this.extractPerformerNames(
-              otherGroup.sceneTitle
-            );
-
-            // If both have performers but they're completely different, skip AI check
-            if (currentPerformers.length > 0 && otherPerformers.length > 0) {
-              const hasCommonPerformer = currentPerformers.some((p1) =>
-                otherPerformers.some(
-                  (p2) => p1.toLowerCase() === p2.toLowerCase()
-                )
-              );
-
-              if (!hasCommonPerformer) {
-                continue;
-              }
-            }
-
-            try {
-              const aiSimilarity =
-                await this.aiMatchingService.calculateSimilarity(
-                  currentGroup.sceneTitle.toLowerCase(),
-                  otherGroup.sceneTitle.toLowerCase()
-                );
-
-              if (aiSimilarity >= AI_MERGE_THRESHOLD) {
-                // Merge the groups
-                mergedTorrents.push(...otherGroup.torrents);
-                mergedIndices.add(j);
-
-                // Use the longer title
-                if (otherGroup.sceneTitle.length > mergedTitle.length) {
-                  mergedTitle = otherGroup.sceneTitle;
-                }
-
-                await this.logsService.info(
-                  "torrent",
-                  `AI merged groups: "${currentGroup.sceneTitle}" + "${otherGroup.sceneTitle}"`,
-                  {
-                    similarity: aiSimilarity,
-                    threshold: AI_MERGE_THRESHOLD,
-                    resultTitle: mergedTitle,
-                    torrentCount: mergedTorrents.length,
-                  }
-                );
-              }
-            } catch (error) {
-              logger.error({ error }, "[AI Merge] Error comparing groups");
-            }
-          }
-
-          // Add the merged group
-          mergedGroups.push({
-            sceneTitle: mergedTitle,
-            torrents: mergedTorrents,
-          });
-        }
-
-        groupedResults = mergedGroups;
-      } catch (error) {
-        await this.logsService.warning(
-          "torrent",
-          "AI group merging failed, using Phase 1 results only",
-          { error: error instanceof Error ? error.message : String(error) }
-        );
-      }
-    }
-
     await this.logsService.info(
       "torrent",
       `Grouped ${results.length} torrents into ${groupedResults.length} scene groups`,
       {
         totalTorrents: results.length,
         sceneGroups: groupedResults.length,
-        aiEnabled,
         groups: groupedResults.map((g) => ({
           title: g.sceneTitle,
           torrentCount: g.torrents.length,
@@ -644,7 +649,7 @@ export class TorrentSearchService {
 
   /**
    * Extract potential performer names from scene title
-   * Used for validation before AI merging
+   * Reserved for future use
    */
   private extractPerformerNames(title: string): string[] {
     // Remove common words and split by common separators
@@ -788,35 +793,50 @@ export class TorrentSearchService {
     matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }>;
     unmatched: Array<{ sceneTitle: string; torrents: TorrentResult[] }>;
   }> {
-    // 1. Pre-fetch all candidate scenes ONCE (optimized query)
+    // Check if Cross-Encoder is enabled
+    const settings = await this.settingsService.getSettings();
+    const useCrossEncoder = settings.ai.useCrossEncoder;
+
+    // If Cross-Encoder is enabled, use the new matching logic
+    if (useCrossEncoder) {
+      await this.logsService.info(
+        "torrent",
+        "Using Cross-Encoder for scene matching",
+        {
+          threshold: settings.ai.crossEncoderThreshold,
+          model: this.crossEncoderService.getModelName(),
+        }
+      );
+
+      // Get entity for Cross-Encoder matching
+      let entity;
+      if (entityType === "performer") {
+        entity = await this.db.query.performers.findFirst({
+          where: eq(performers.id, entityId),
+        });
+      } else {
+        entity = await this.db.query.studios.findFirst({
+          where: eq(studios.id, entityId),
+        });
+      }
+
+      if (!entity) {
+        throw new Error(`Entity not found: ${entityType} ${entityId}`);
+      }
+
+      return await this.matchWithCrossEncoder(groups, entity, entityType);
+    }
+
+    // 1. Pre-fetch all candidate scenes ONCE (optimized query) - LEGACY PATH
     const candidateScenes = await this.fetchCandidateScenes(entityType, entityId);
 
-    // 2. Get match settings - use groupingThreshold for matching
-    const settings = await this.settingsService.getSettings();
+    // 2. Get match settings - use default values for legacy matching
     const matchSettings: MatchSettings = {
-      aiEnabled: settings.ai.enabled,
-      aiThreshold: settings.ai.threshold,
-      groupingThreshold: settings.ai.groupingThreshold, // REUSE for matching
-      levenshteinThreshold: settings.ai.levenshteinThreshold,
+      aiEnabled: false, // Legacy AI matching disabled
+      aiThreshold: 0.7, // Default threshold
+      groupingThreshold: 0.7, // Default grouping threshold
+      levenshteinThreshold: 0.7, // Default Levenshtein threshold
     };
-
-    // Initialize AI if enabled
-    if (matchSettings.aiEnabled) {
-      try {
-        await this.aiMatchingService.initialize();
-        await this.logsService.info(
-          "torrent",
-          "AI matching enabled for scene matching",
-          { model: settings.ai.model, threshold: matchSettings.groupingThreshold }
-        );
-      } catch (error) {
-        await this.logsService.warning(
-          "torrent",
-          "Failed to initialize AI matching, falling back to Levenshtein",
-          { error: error instanceof Error ? error.message : String(error) }
-        );
-      }
-    }
 
     // 3. Initialize SceneMatcher
     const matcher = new SceneMatcher({
@@ -1037,45 +1057,49 @@ export class TorrentSearchService {
 
   /**
    * Step 6: Process unmatched results (save as metadata-less scenes)
-   * Only select groups that have minimum required indexers
+   * Only select groups that have minimum required members (from groupingCount setting)
+   * Works with both deduplication (indexerCount on torrents) and legacy (unique indexerIds)
    */
   private async processUnmatchedResults(
     unmatched: Array<{ sceneTitle: string; torrents: TorrentResult[] }>,
     qualityProfileId: string,
     _entityType: "performer" | "studio",
-    _entityId: string
+    _entityId: string,
+    minGroupMembers: number = 2 // Minimum members in a group to be considered metadata-less
   ): Promise<TorrentResult[]> {
     const selectedTorrents: TorrentResult[] = [];
 
-    // Get minimum indexers setting
-    const settings = await this.settingsService.getSettings();
-    const minIndexers = settings.general.minIndexersForMetadataLess;
-
     for (const unmatchedScene of unmatched) {
-      // For metadata-less scenes, count ALL unique indexers (not just high-priority ones)
-      // This ensures we don't miss scenes just because they're only on lower-priority indexers
-      const uniqueIndexers = new Set(
-        unmatchedScene.torrents.map((t) => t.indexerId)
-      );
-      const indexerCount = uniqueIndexers.size;
+      // Check if group has minimum required members (torrents)
+      // groupingCount setting determines minimum group size for metadata-less scenes
+      const groupSize = unmatchedScene.torrents.length;
 
-      // Skip if not enough unique indexers
-      if (indexerCount < minIndexers) {
-        await this.logsService.info(
+      if (groupSize < minGroupMembers) {
+        await this.logsService.debug(
           "torrent",
-          `Skipping metadata-less scene "${unmatchedScene.sceneTitle}" - insufficient indexers (${indexerCount}/${minIndexers})`,
+          `Skipping metadata-less scene "${unmatchedScene.sceneTitle}" - insufficient group members (${groupSize}/${minGroupMembers})`,
           {
             sceneTitle: unmatchedScene.sceneTitle,
-            indexerCount,
-            minIndexers,
+            groupSize,
+            minGroupMembers,
           }
         );
         continue;
       }
 
-      // Select best torrent from this group (using all torrents, not just high-priority indexers)
+      // Select best torrent from this group
+      // Sort by seeders (higher is better), then by indexerCount (more sources = more reliable)
+      const sortedTorrents = [...unmatchedScene.torrents].sort((a, b) => {
+        // First by seeders (higher is better)
+        if (b.seeders !== a.seeders) return b.seeders - a.seeders;
+        // Then by indexerCount (higher is better)
+        const countA = a.indexerCount || 1;
+        const countB = b.indexerCount || 1;
+        return countB - countA;
+      });
+
       const bestTorrent = await this.selectBestTorrent(
-        unmatchedScene.torrents,
+        sortedTorrents,
         qualityProfileId
       );
 
@@ -1087,10 +1111,12 @@ export class TorrentSearchService {
           `Selected metadata-less scene "${unmatchedScene.sceneTitle}"`,
           {
             sceneTitle: unmatchedScene.sceneTitle,
-            indexerCount,
+            groupSize,
+            minGroupMembers,
             selectedQuality: bestTorrent.quality,
             selectedSource: bestTorrent.source,
             seeders: bestTorrent.seeders,
+            torrentIndexerCount: bestTorrent.indexerCount || 1,
           }
         );
       }
@@ -1103,12 +1129,552 @@ export class TorrentSearchService {
         {
           selectedCount: selectedTorrents.length,
           totalUnmatched: unmatched.length,
-          minIndexers,
+          minGroupMembers,
         }
       );
     }
 
     return selectedTorrents;
+  }
+
+  /**
+   * Match torrent groups with database scenes using Cross-Encoder
+   * Returns matched and unmatched groups
+   * Model is loaded once at the start and unloaded at the end (not per match)
+   */
+  private async matchWithCrossEncoder(
+    groups: Array<{ sceneTitle: string; torrents: TorrentResult[] }>,
+    entity: any,
+    entityType: "performer" | "studio"
+  ): Promise<{
+    matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }>;
+    unmatched: Array<{ sceneTitle: string; torrents: TorrentResult[] }>;
+  }> {
+    const settings = await this.settingsService.getSettings();
+    const threshold = settings.ai.crossEncoderThreshold || 0.7;
+    const unknownThreshold = settings.ai.unknownThreshold || 0.4;
+
+    // Load model once at the start for all matches (job-level load)
+    await this.logsService.info(
+      "torrent",
+      `🔄 Loading Cross-Encoder model once for ${groups.length} groups`,
+      { groupsCount: groups.length }
+    );
+    await this.crossEncoderService.initialize();
+
+    try {
+      // ... rest of the matching logic here
+      return await this.performCrossEncoderMatching(
+        groups,
+        entity,
+        entityType,
+        threshold,
+        unknownThreshold
+      );
+    } finally {
+      // Unload model after all matches complete (job-level unload)
+      await this.logsService.info(
+        "torrent",
+        `🔄 Unloading Cross-Encoder model after matching ${groups.length} groups`
+      );
+      this.crossEncoderService.unload();
+    }
+  }
+
+  /**
+   * Perform the actual Cross-Encoder matching logic
+   * Called after model is loaded, runs all matches before model is unloaded
+   */
+  private async performCrossEncoderMatching(
+    groups: Array<{ sceneTitle: string; torrents: TorrentResult[] }>,
+    entity: any,
+    entityType: "performer" | "studio",
+    threshold: number,
+    unknownThreshold: number
+  ): Promise<{
+    matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }>;
+    unmatched: Array<{ sceneTitle: string; torrents: TorrentResult[] }>;
+  }> {
+
+    // Get candidate scenes from database
+    const candidateScenes = await this.getCandidateScenes(entityType, entity.id);
+
+    const matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }> = [];
+    const unmatched: Array<{ sceneTitle: string; torrents: TorrentResult[] }> = [];
+    const matchedSceneIds = new Set<string>(); // Track matched scenes to prevent duplicates
+
+    // Statistics tracking
+    const stats = {
+      totalGroups: groups.length,
+      candidateScenes: candidateScenes.length,
+      matched: 0,
+      unmatched: 0,
+      unknown: 0, // Below unknown threshold
+      uncertain: 0, // Between unknown and match threshold
+      totalTorrents: groups.reduce((sum, g) => sum + g.torrents.length, 0),
+      matchedTorrents: 0,
+      averageMatchScore: 0,
+      scores: [] as number[],
+    };
+
+    await this.logsService.info(
+      "torrent",
+      `🔍 Cross-Encoder Matching Started`,
+      {
+        entityType,
+        entityName: entity.name,
+        torrentGroups: groups.length,
+        candidateScenes: candidateScenes.length,
+        totalTorrents: stats.totalTorrents,
+        matchThreshold: threshold,
+        unknownThreshold,
+        method: "cross-encoder",
+      }
+    );
+
+    let processedCount = 0;
+    for (const group of groups) {
+      processedCount++;
+      try {
+        // Filter out already-matched scenes to prevent duplicates
+        const availableScenes = candidateScenes.filter(
+          (s) => !matchedSceneIds.has(s.id)
+        );
+
+        if (availableScenes.length === 0) {
+          // All candidate scenes already matched
+          unmatched.push(group);
+          stats.unmatched++;
+          await this.logsService.debug(
+            "torrent",
+            `⏭️ [${processedCount}/${groups.length}] Skipped: "${group.sceneTitle}" (all candidate scenes already matched)`,
+            {
+              torrentTitle: group.sceneTitle,
+              torrentsInGroup: group.torrents.length,
+              status: "skipped",
+            }
+          );
+          continue;
+        }
+
+        // Clean performer/studio names from title - but only at the START
+        // This preserves the scene content while removing the search entity prefix
+        // Example: "Jane Doe - Hot Scene 2024" -> "Hot Scene 2024"
+        // But: "Scene with Jane Doe" stays as "Scene with Jane Doe" (name in middle/end)
+        let cleanedTitle = group.sceneTitle;
+
+        const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+        if (entityType === "performer") {
+          const allNames = [entity.name, ...(entity.aliases || [])];
+
+          // Only remove names at the START of the title (with optional separator)
+          for (const name of allNames) {
+            // Match: "Name - ", "Name: ", "Name, ", "Name " at start
+            const startPattern = new RegExp(`^${escapeRegex(name)}\\s*[-–—:,]?\\s*`, "i");
+            if (startPattern.test(cleanedTitle)) {
+              cleanedTitle = cleanedTitle.replace(startPattern, "");
+              break; // Only remove one occurrence at start
+            }
+          }
+        } else if (entityType === "studio" && entity.name) {
+          // Same for studio - only remove at start
+          const startPattern = new RegExp(`^${escapeRegex(entity.name)}\\s*[-–—:,]?\\s*`, "i");
+          cleanedTitle = cleanedTitle.replace(startPattern, "");
+        }
+
+        // Clean up any remaining leading/trailing punctuation and spaces
+        cleanedTitle = cleanedTitle.replace(/^[-–—:,\s]+|[-–—:,\s]+$/g, "").trim();
+
+        // If title became empty or too short, use original
+        if (cleanedTitle.length < 5) {
+          cleanedTitle = group.sceneTitle;
+        }
+
+        // Construct query with multi-signal information
+        const query = {
+          performer: entityType === "performer" ? entity.name : undefined,
+          studio: entityType === "studio" ? entity.name : (entity.studioName || undefined),
+          title: cleanedTitle,
+        };
+
+        // Find best match using Cross-Encoder (model already loaded at job level)
+        const match = await this.crossEncoderService.findBestMatch(
+          query,
+          availableScenes.map((s) => ({
+            id: s.id,
+            title: s.title,
+            date: s.date || undefined,
+            studio: s.studioName,  // Use studio NAME, not ID
+            performers: s.performerNames,  // Include performer names for better matching
+          })),
+          threshold
+        );
+
+        if (match) {
+          const scene = candidateScenes.find((s) => s.id === match.candidate.id)!;
+
+          // Mark this scene as matched to prevent duplicates
+          matchedSceneIds.add(scene.id);
+
+          // Store AI score for debugging
+          await this.aiMatchScoresRepository.create({
+            sceneId: scene.id,
+            torrentTitle: group.sceneTitle,
+            score: match.score,
+            method: "cross-encoder",
+            model: this.crossEncoderService.getModelName(),
+            threshold,
+            matched: true,
+          });
+
+          // Attach sceneId to all torrents in this group
+          for (const torrent of group.torrents) {
+            torrent.sceneId = scene.id;
+          }
+
+          matched.push({ scene, torrents: group.torrents });
+          stats.matched++;
+          stats.matchedTorrents += group.torrents.length;
+          stats.scores.push(match.score);
+
+          await this.logsService.info(
+            "torrent",
+            `✅ [${processedCount}/${groups.length}] Match: "${group.sceneTitle}" → "${scene.title}"`,
+            {
+              torrentTitle: group.sceneTitle,
+              sceneTitle: scene.title,
+              sceneId: scene.id,
+              score: match.score,
+              threshold,
+              torrentsInGroup: group.torrents.length,
+              confidence: `${(match.score * 100).toFixed(1)}%`,
+            },
+            { sceneId: scene.id }
+          );
+        } else {
+          // No match found - check if it's unknown or uncertain
+          // Get the best score even if below threshold
+          const allScores = await Promise.all(
+            candidateScenes.slice(0, 5).map(async (s) => {
+              const score = await this.crossEncoderService.scorePair(query, {
+                id: s.id,
+                title: s.title,
+                date: s.date || undefined,
+                studio: s.studioId,
+              });
+              return { score, scene: s };
+            })
+          );
+
+          allScores.sort((a, b) => b.score - a.score);
+          const bestScore = allScores[0]?.score || 0;
+
+          unmatched.push(group);
+          stats.unmatched++;
+
+          if (bestScore < unknownThreshold) {
+            stats.unknown++;
+            await this.logsService.info(
+              "torrent",
+              `🆕 [${processedCount}/${groups.length}] Unknown: "${group.sceneTitle}" (best: ${(bestScore * 100).toFixed(1)}%)`,
+              {
+                torrentTitle: group.sceneTitle,
+                bestScore,
+                bestMatch: allScores[0]?.scene.title,
+                threshold,
+                unknownThreshold,
+                torrentsInGroup: group.torrents.length,
+                status: "unknown",
+              }
+            );
+          } else {
+            stats.uncertain++;
+            await this.logsService.debug(
+              "torrent",
+              `⚠️ [${processedCount}/${groups.length}] Uncertain: "${group.sceneTitle}" (best: ${(bestScore * 100).toFixed(1)}%)`,
+              {
+                torrentTitle: group.sceneTitle,
+                bestScore,
+                bestMatch: allScores[0]?.scene.title,
+                threshold,
+                torrentsInGroup: group.torrents.length,
+                status: "uncertain",
+                topMatches: allScores.slice(0, 3).map(a => ({
+                  title: a.scene.title,
+                  score: a.score,
+                })),
+              }
+            );
+          }
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorStack = error instanceof Error ? error.stack : undefined;
+
+        logger.error("Cross-Encoder matching failed for group:", {
+          errorMessage,
+          errorStack,
+          groupTitle: group.sceneTitle,
+        });
+        await this.logsService.error(
+          "torrent",
+          `Cross-Encoder failed for "${group.sceneTitle}": ${errorMessage}`,
+          { error: errorStack || errorMessage }
+        );
+        // On error, treat as unmatched
+        unmatched.push(group);
+        stats.unmatched++;
+      }
+    }
+
+    // Calculate average match score
+    if (stats.scores.length > 0) {
+      stats.averageMatchScore = stats.scores.reduce((sum, s) => sum + s, 0) / stats.scores.length;
+    }
+
+    await this.logsService.info(
+      "torrent",
+      `📊 Cross-Encoder Matching Complete`,
+      {
+        summary: {
+          totalGroups: stats.totalGroups,
+          matched: stats.matched,
+          unmatched: stats.unmatched,
+          unknown: stats.unknown,
+          uncertain: stats.uncertain,
+        },
+        torrents: {
+          total: stats.totalTorrents,
+          matched: stats.matchedTorrents,
+          unmatchedTorrents: stats.totalTorrents - stats.matchedTorrents,
+        },
+        performance: {
+          matchRate: `${((stats.matched / stats.totalGroups) * 100).toFixed(1)}%`,
+          averageMatchScore: stats.averageMatchScore.toFixed(3),
+          candidatesChecked: stats.candidateScenes,
+        },
+        thresholds: {
+          match: threshold,
+          unknown: unknownThreshold,
+        },
+      }
+    );
+
+    return { matched, unmatched };
+  }
+
+  /**
+   * Handle discovery of unknown scenes
+   * Logs discovered groups temporarily - does NOT persist to database
+   * Groups are re-created on each search run to avoid stale data
+   */
+  private async handleDiscovery(
+    unmatchedGroups: Array<{ sceneTitle: string; torrents: TorrentResult[] }>,
+    entity: any,
+    entityType: "performer" | "studio",
+    searchPhase: "performer" | "studio" | "targeted"
+  ): Promise<void> {
+    // Default minimum indexers (previously from settings.general.minIndexersForMetadataLess)
+    const minIndexers = 3;
+
+    await this.logsService.info(
+      "torrent",
+      `🔎 Discovery Phase Started`,
+      {
+        unmatchedGroups: unmatchedGroups.length,
+        minIndexersRequired: minIndexers,
+        searchPhase,
+        entityType,
+        entityName: entity.name,
+      }
+    );
+
+    let discoveredCount = 0;
+    let skippedCount = 0;
+    const discoveryDetails: Array<{
+      title: string;
+      torrents: number;
+      indexers: number;
+    }> = [];
+
+    for (const group of unmatchedGroups) {
+      const uniqueIndexers = new Set(group.torrents.map((t) => t.indexerId));
+
+      // Only log discovery if minimum indexer requirement is met
+      if (uniqueIndexers.size >= minIndexers) {
+        discoveryDetails.push({
+          title: group.sceneTitle,
+          torrents: group.torrents.length,
+          indexers: uniqueIndexers.size,
+        });
+
+        await this.logsService.info(
+          "torrent",
+          `🆕 Discovered: "${group.sceneTitle}"`,
+          {
+            groupTitle: group.sceneTitle,
+            torrentCount: group.torrents.length,
+            indexerCount: uniqueIndexers.size,
+            searchPhase,
+            entityType,
+            entityId: entity.id,
+            entityName: entity.name,
+          },
+          entityType === "performer"
+            ? { performerId: entity.id }
+            : { studioId: entity.id }
+        );
+
+        discoveredCount++;
+      } else {
+        skippedCount++;
+        await this.logsService.debug(
+          "torrent",
+          `⏭️ Skipped: "${group.sceneTitle}" (${uniqueIndexers.size}/${minIndexers} indexers)`,
+          {
+            groupTitle: group.sceneTitle,
+            indexerCount: uniqueIndexers.size,
+            minRequired: minIndexers,
+            reason: "below minimum indexer threshold",
+          }
+        );
+      }
+    }
+
+    await this.logsService.info(
+      "torrent",
+      `📋 Discovery Phase Complete (temporary, not persisted)`,
+      {
+        summary: {
+          totalUnmatched: unmatchedGroups.length,
+          discovered: discoveredCount,
+          skipped: skippedCount,
+          discoveryRate: unmatchedGroups.length > 0
+            ? `${((discoveredCount / unmatchedGroups.length) * 100).toFixed(1)}%`
+            : "0%",
+        },
+        discovered: discoveryDetails,
+        minIndexers,
+        searchPhase,
+        entityType,
+        entityName: entity.name,
+      }
+    );
+  }
+
+  /**
+   * Get candidate scenes for matching based on entity type
+   * Filters out scenes with disabled scene-level subscriptions
+   */
+  private async getCandidateScenes(
+    entityType: "performer" | "studio",
+    entityId: string
+  ): Promise<SceneMetadata[]> {
+    if (entityType === "performer") {
+      // Get scenes for this performer
+      const performerScenes = await this.db.query.performersScenes.findMany({
+        where: eq(performersScenes.performerId, entityId),
+        with: {
+          scene: true,
+        },
+        limit: 500, // Limit to prevent overwhelming the AI
+      });
+
+      // Get all active scene-level subscriptions (whitelist approach)
+      const allowedSceneIds = new Set<string>();
+      const sceneSubscriptions = await this.db.query.subscriptions.findMany({
+        where: and(
+          eq(subscriptions.entityType, "scene"),
+          eq(subscriptions.isSubscribed, true)
+        ),
+      });
+
+      for (const sub of sceneSubscriptions) {
+        allowedSceneIds.add(sub.entityId);
+      }
+
+      // Only include scenes that have an active scene subscription
+      const filteredScenes = performerScenes.filter(
+        (ps) => allowedSceneIds.has(ps.scene.id)
+      );
+
+      await this.logsService.debug(
+        "torrent",
+        `Candidate scenes for performer: ${performerScenes.length} total, ${filteredScenes.length} with active scene subscriptions (${performerScenes.length - filteredScenes.length} excluded)`,
+        {
+          totalScenes: performerScenes.length,
+          withSubscription: filteredScenes.length,
+          withoutSubscription: performerScenes.length - filteredScenes.length,
+          performerId: entityId,
+        }
+      );
+
+      // Fetch performer name for cross-encoder
+      const performer = await this.db.query.performers.findFirst({
+        where: eq(performers.id, entityId),
+      });
+
+      return filteredScenes.map((ps) => ({
+        id: ps.scene.id,
+        title: ps.scene.title,
+        date: ps.scene.date,
+        performerIds: [entityId],
+        studioId: ps.scene.siteId || undefined,
+        performerNames: performer ? [performer.name] : undefined,
+        studioName: undefined, // Could fetch studio name if needed
+      }));
+    } else {
+      // Get scenes for this studio
+      const studioScenes = await this.db.query.scenes.findMany({
+        where: eq(scenes.siteId, entityId),
+        limit: 500,
+      });
+
+      // Get all active scene-level subscriptions (whitelist approach)
+      const allowedSceneIds = new Set<string>();
+      const sceneSubscriptions = await this.db.query.subscriptions.findMany({
+        where: and(
+          eq(subscriptions.entityType, "scene"),
+          eq(subscriptions.isSubscribed, true)
+        ),
+      });
+
+      for (const sub of sceneSubscriptions) {
+        allowedSceneIds.add(sub.entityId);
+      }
+
+      // Only include scenes that have an active scene subscription
+      const filteredScenes = studioScenes.filter(
+        (s) => allowedSceneIds.has(s.id)
+      );
+
+      await this.logsService.debug(
+        "torrent",
+        `Candidate scenes for studio: ${studioScenes.length} total, ${filteredScenes.length} with active scene subscriptions (${studioScenes.length - filteredScenes.length} excluded)`,
+        {
+          totalScenes: studioScenes.length,
+          withSubscription: filteredScenes.length,
+          withoutSubscription: studioScenes.length - filteredScenes.length,
+          studioId: entityId,
+        }
+      );
+
+      // Fetch studio name for cross-encoder
+      const studio = await this.db.query.sites.findFirst({
+        where: eq(sites.id, entityId),
+      });
+
+      return filteredScenes.map((s) => ({
+        id: s.id,
+        title: s.title,
+        date: s.date,
+        performerIds: [],
+        studioId: s.siteId || undefined,
+        performerNames: undefined,
+        studioName: studio?.name,
+      }));
+    }
   }
 
   /**
@@ -1184,12 +1750,16 @@ export function createTorrentSearchService(
   db: Database,
   logsService: LogsService,
   settingsService: SettingsService,
-  aiMatchingService: AIMatchingService
+  aiMatchingService: AIMatchingService,
+  crossEncoderService: CrossEncoderService,
+  aiMatchScoresRepository: AIMatchScoresRepository
 ): TorrentSearchService {
   return new TorrentSearchService({
     db,
     logsService,
     settingsService,
     aiMatchingService,
+    crossEncoderService,
+    aiMatchScoresRepository,
   });
 }

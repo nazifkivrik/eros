@@ -8,6 +8,7 @@ import type {
   SubscriptionDetail,
   EventType,
   LogLevel,
+  AppSettings,
 } from "@repo/shared-types";
 
 // Use relative URL for browser requests to work in any environment (local, Docker, etc.)
@@ -302,8 +303,14 @@ class ApiClient {
     });
   }
 
-  async getSubscriptions() {
-    return this.request<{ data: SubscriptionDetail[] }>("/subscriptions");
+  async getSubscriptions(params?: {
+    search?: string;
+    includeMetaless?: boolean;
+    showInactive?: boolean;
+  }) {
+    return this.request<{ data: SubscriptionDetail[] }>("/subscriptions", {
+      params: params as Record<string, string | number | boolean>,
+    });
   }
 
   async getSubscription(id: string) {
@@ -321,8 +328,7 @@ class ApiClient {
     autoDownload?: boolean;
     includeMetadataMissing?: boolean;
     includeAliases?: boolean;
-    monitored?: boolean;
-    status?: string;
+    isSubscribed?: boolean;
   }) {
     return this.request<Subscription>(`/subscriptions/${id}`, {
       method: "PATCH",
@@ -332,12 +338,11 @@ class ApiClient {
 
   async deleteSubscription(
     id: string,
-    deleteAssociatedScenes: boolean = false,
-    removeFiles: boolean = false
+    deleteAssociatedScenes: boolean = false
   ) {
     return this.request<{ success: boolean }>(`/subscriptions/${id}`, {
       method: "DELETE",
-      params: { deleteAssociatedScenes, removeFiles },
+      params: { deleteAssociatedScenes },
     });
   }
 
@@ -508,68 +513,12 @@ class ApiClient {
   }
 
   // Settings
-  async getSettings() {
-    return this.request<{
-      general: {
-        appName: string;
-        downloadPath: string;
-        enableNotifications: boolean;
-        minIndexersForMetadataLess: number;
-      };
-      stashdb: {
-        apiUrl: string;
-        apiKey: string;
-        enabled: boolean;
-      };
-      prowlarr: {
-        apiUrl: string;
-        apiKey: string;
-        enabled: boolean;
-      };
-      qbittorrent: {
-        url: string;
-        username: string;
-        password: string;
-        enabled: boolean;
-      };
-      ai: {
-        enabled: boolean;
-        model: string;
-        threshold: number;
-      };
-    }>("/settings");
+  async getSettings(): Promise<AppSettings> {
+    return this.request<AppSettings>("/settings");
   }
 
-  async updateSettings(settings: {
-    general: {
-      appName: string;
-      downloadPath: string;
-      enableNotifications: boolean;
-      minIndexersForMetadataLess: number;
-    };
-    stashdb: {
-      apiUrl: string;
-      apiKey: string;
-      enabled: boolean;
-    };
-    prowlarr: {
-      apiUrl: string;
-      apiKey: string;
-      enabled: boolean;
-    };
-    qbittorrent: {
-      url: string;
-      username: string;
-      password: string;
-      enabled: boolean;
-    };
-    ai: {
-      enabled: boolean;
-      model: string;
-      threshold: number;
-    };
-  }) {
-    return this.request<typeof settings>("/settings", {
+  async updateSettings(settings: AppSettings) {
+    return this.request<AppSettings>("/settings", {
       method: "PUT",
       body: JSON.stringify(settings),
     });
@@ -586,6 +535,37 @@ class ApiClient {
         body: config ? JSON.stringify(config) : undefined
       }
     );
+  }
+
+  async getAIModelStatus() {
+    return this.request<{
+      enabled: boolean;
+      modelLoaded: boolean;
+      modelDownloaded: boolean;
+      modelName: string;
+      modelPath: string;
+      error: string | null;
+    }>("/settings/ai/status");
+  }
+
+  async loadAIModel() {
+    return this.request<{
+      success: boolean;
+      message: string;
+      modelLoaded: boolean;
+    }>("/settings/ai/load", {
+      method: "POST",
+    });
+  }
+
+  async getQBittorrentStatus() {
+    return this.request<{
+      connected: boolean;
+      torrentsCount?: number;
+      downloadSpeed?: number;
+      uploadSpeed?: number;
+      error?: string;
+    }>("/settings/qbittorrent/status");
   }
 }
 

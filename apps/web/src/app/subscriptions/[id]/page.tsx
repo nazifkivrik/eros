@@ -1,10 +1,23 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useMemo, useState, Suspense } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Trash2, Film, Calendar, Clock, Users, MapPin, Settings } from "lucide-react";
+import {
+  ArrowLeft,
+  Trash2,
+  Film,
+  Calendar,
+  Clock,
+  Users,
+  MapPin,
+  Settings,
+  Info,
+  Check,
+  X,
+  Plus,
+} from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +31,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -25,7 +39,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -43,18 +56,49 @@ import {
 } from "@/components/ui/carousel";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import { useDeleteSubscription, useSubscriptionScenes, useSubscriptionFiles } from "@/hooks/useSubscriptions";
+import { cn } from "@/lib/utils";
+import {
+  useDeleteSubscription,
+  useSubscriptionScenes,
+  useSubscriptionFiles,
+  useSubscribeScene,
+  useUnsubscribeScene,
+  useResubscribeScene,
+} from "@/hooks/useSubscriptions";
 import { useMutationWithToast } from "@/hooks/useMutationWithToast";
+import { ViewToggle } from "@/components/subscriptions/ViewToggle";
+import { SubscriptionFilters } from "@/components/subscriptions/SubscriptionFilters";
+import { useSubscriptionFilters } from "@/hooks/useSubscriptionFilters";
 
 interface PageProps {
   params: Promise<{ id: string }>;
 }
 
-export default function SubscriptionDetailPage({ params }: PageProps) {
+function SubscriptionDetailPageContent({ params }: PageProps) {
   const { id } = use(params);
   const router = useRouter();
   const deleteSubscription = useDeleteSubscription();
+
+  // Scene subscription hooks - pass parent subscription ID for cache invalidation
+  const subscribeScene = useSubscribeScene();
+  const unsubscribeScene = useUnsubscribeScene(id);
+  const resubscribeScene = useResubscribeScene(id);
+
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+
+  // URL-based filter state for detail page
+  const {
+    filters,
+    setView,
+    setSearch,
+    setShowMetadataLess,
+    setShowInactive,
+    toggleTag,
+    clearAllFilters,
+  } = useSubscriptionFilters({
+    defaultView: "card",
+    isDetailPage: true,
+  });
 
   const { data: subscription, isLoading } = useQuery({
     queryKey: ["subscription", id],
@@ -72,7 +116,49 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
   const { data: scenesData } = useSubscriptionScenes(
     subscription?.entityType === "performer" || subscription?.entityType === "studio" ? id : ""
   );
-  const scenes = scenesData?.data || [];
+  const allScenes = scenesData?.data || [];
+
+  // Get all unique tags from scenes
+  const availableTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    allScenes.forEach((scene: any) => {
+      if (scene?.tags) {
+        scene.tags.forEach((tag: any) => tagSet.add(tag.name));
+      }
+    });
+    return Array.from(tagSet).sort();
+  }, [allScenes]);
+
+  // Filter scenes based on URL state
+  const filteredScenes = useMemo(() => {
+    let filtered = allScenes;
+
+    // Search filtering
+    if (filters.search) {
+      const search = filters.search.toLowerCase();
+      filtered = filtered.filter((s: any) => s.title?.toLowerCase().includes(search));
+    }
+
+    // Tag filtering
+    if (filters.tags.length > 0) {
+      filtered = filtered.filter((s: any) => {
+        const sceneTags = s?.tags?.map((t: any) => t.name) || [];
+        return filters.tags!.some((tag) => sceneTags.includes(tag));
+      });
+    }
+
+    // Show only metadata-less filtering
+    if (filters.showMetadataLess) {
+      filtered = filtered.filter((s: any) => s.hasMetadata === false);
+    }
+
+    // Show inactive filtering - when disabled, hide unsubscribed scenes
+    if (!filters.showInactive) {
+      filtered = filtered.filter((s: any) => s.isSubscribed === true);
+    }
+
+    return filtered;
+  }, [allScenes, filters]);
 
   // Get files for scene subscriptions
   const { data: filesData } = useSubscriptionFiles(
@@ -98,10 +184,6 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
     errorMessage: "Failed to update subscription",
     invalidateKeys: [["subscription", id], ["subscriptions"]],
   });
-
-
-
-
 
   const handleEdit = () => {
     if (subscription) {
@@ -132,6 +214,62 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
         },
       }
     );
+  };
+
+  // Helper to get the best image URL from scene data
+  // For scenes, prefer background (landscape) over poster (portrait)
+  const getSceneImageUrl = (scene: any): string | null => {
+    if (!scene) return null;
+
+    // === PREFER background (landscape) ===
+    if (scene.background) {
+      if (typeof scene.background === "object") {
+        return scene.background.full || scene.background.large || Object.values(scene.background)[0];
+      }
+      return scene.background;
+    }
+    // Fallback to background_back
+    if (scene.background_back) {
+      if (typeof scene.background_back === "object") {
+        return scene.background_back.full || scene.background_back.large || Object.values(scene.background_back)[0];
+      }
+      return scene.background_back;
+    }
+    // Fallback to image (horizontal/landscape)
+    if (scene.image) return scene.image;
+    // Fallback to back_image
+    if (scene.back_image) return scene.back_image;
+
+    // === CHECK images array for background-type images ===
+    if (scene.images && scene.images.length > 0) {
+      // Prefer images with /background/ in URL
+      const backgroundImg = scene.images.find((img: any) =>
+        img.url?.includes("/background/") || img.type === "background"
+      );
+      if (backgroundImg) return backgroundImg.url;
+      // Fallback to first image
+      if (scene.images[0]?.url) return scene.images[0].url;
+    }
+
+    // === LAST RESORT: poster (portrait) ===
+    if (scene.poster) return scene.poster;
+
+    return null;
+  };
+
+  // Handle scene subscribe/unsubscribe
+  const handleSubscribeScene = (sceneId: string) => {
+    // Get quality profile from parent subscription
+    const qualityProfileId = subscription?.qualityProfileId || "";
+    subscribeScene.mutate({ sceneId, qualityProfileId });
+  };
+
+  const handleUnsubscribeScene = (subscriptionId: string) => {
+    unsubscribeScene.mutate({ subscriptionId });
+  };
+
+  const handleResubscribeScene = (subscriptionId: string) => {
+    resubscribeScene.mutate({ subscriptionId });
   };
 
   if (isLoading) {
@@ -168,8 +306,8 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
   // Parse entity data safely
   const entity = subscription?.entity;
   const images = entity?.images || [];
-  const aliases = (entity && 'aliases' in entity) ? entity.aliases : [];
-  const urls = (entity && 'urls' in entity && Array.isArray(entity.urls)) ? entity.urls : [];
+  const aliases = entity && "aliases" in entity ? entity.aliases : [];
+  const urls = entity && "urls" in entity && Array.isArray(entity.urls) ? entity.urls : [];
 
   // Helper functions
   const formatDate = (dateStr: string | null) => {
@@ -201,10 +339,7 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
           </div>
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={handleEdit}
-          >
+          <Button variant="outline" onClick={handleEdit}>
             <Settings className="h-4 w-4 mr-2" />
             Edit Settings
           </Button>
@@ -233,9 +368,7 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
               <Label htmlFor="qualityProfile">Quality Profile</Label>
               <Select
                 value={editForm.qualityProfileId}
-                onValueChange={(value) =>
-                  setEditForm({ ...editForm, qualityProfileId: value })
-                }
+                onValueChange={(value) => setEditForm({ ...editForm, qualityProfileId: value })}
               >
                 <SelectTrigger id="qualityProfile">
                   <SelectValue placeholder="Select quality profile" />
@@ -320,13 +453,17 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                   <CarouselContent>
                     {images.map((img: any, idx: number) => (
                       <CarouselItem key={idx}>
-                        <div className={`relative w-full ${subscription.entityType === "performer" ? "aspect-[3/4]" : "aspect-video"} overflow-hidden rounded-lg`}>
+                        <div
+                          className={`relative w-full ${
+                            subscription.entityType === "performer" ? "aspect-[3/4]" : "aspect-video"
+                          } overflow-hidden rounded-lg`}
+                        >
                           <Image
                             src={img.url}
                             alt={`${subscription.entityName} - Image ${idx + 1}`}
                             fill
                             sizes="(max-width: 768px) 100vw, 33vw"
-                            className="object-cover"
+                            className="object-contain"
                             unoptimized
                           />
                         </div>
@@ -348,7 +485,7 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
               <h2 className="text-2xl font-bold mb-4">{subscription.entityName}</h2>
 
               {/* PERFORMER METADATA */}
-              {subscription.entityType === "performer" && entity && 'gender' in entity && (
+              {subscription.entityType === "performer" && entity && "gender" in entity && (
                 <>
                   {/* Basic Info */}
                   <div className="space-y-3 mb-4">
@@ -364,15 +501,86 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                         <span className="text-sm">Born: {formatDate(entity.birthdate)}</span>
                       </div>
                     )}
-                    {(entity.careerStartYear || entity.careerEndYear) && (
+                    {entity.birthplace && (
                       <div className="flex items-center gap-2">
                         <MapPin className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm">{entity.birthplace}</span>
+                      </div>
+                    )}
+                    {(entity.careerStartYear || entity.careerEndYear) && (
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-4 w-4 text-muted-foreground" />
                         <span className="text-sm">
-                          Career: {entity.careerStartYear || '?'} - {entity.careerEndYear || 'Present'}
+                          Career: {entity.careerStartYear || "?"} - {entity.careerEndYear || "Present"}
                         </span>
                       </div>
                     )}
                   </div>
+
+                  {/* Ethnicity & Nationality */}
+                  {(entity.ethnicity || entity.nationality) && (
+                    <div className="space-y-2 mb-4">
+                      <div className="flex items-center gap-3 text-sm">
+                        {entity.ethnicity && (
+                          <>
+                            <span className="text-muted-foreground">Ethnicity:</span>
+                            <span className="font-medium">{entity.ethnicity}</span>
+                          </>
+                        )}
+                        {entity.ethnicity && entity.nationality && <span className="text-muted-foreground">•</span>}
+                        {entity.nationality && (
+                          <>
+                            <span className="text-muted-foreground">Nationality:</span>
+                            <span className="font-medium">{entity.nationality}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Physical Appearance */}
+                  {(entity.hairColour || entity.eyeColour || entity.height || entity.weight) && (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 p-3 bg-muted/50 rounded-lg">
+                      {entity.hairColour && (
+                        <div>
+                          <h3 className="text-xs text-muted-foreground mb-1">Hair</h3>
+                          <p className="text-sm font-medium capitalize">{entity.hairColour}</p>
+                        </div>
+                      )}
+                      {entity.eyeColour && (
+                        <div>
+                          <h3 className="text-xs text-muted-foreground mb-1">Eyes</h3>
+                          <p className="text-sm font-medium capitalize">{entity.eyeColour}</p>
+                        </div>
+                      )}
+                      {entity.height && (
+                        <div>
+                          <h3 className="text-xs text-muted-foreground mb-1">Height</h3>
+                          <p className="text-sm font-medium">{entity.height} cm</p>
+                        </div>
+                      )}
+                      {entity.weight && (
+                        <div>
+                          <h3 className="text-xs text-muted-foreground mb-1">Weight</h3>
+                          <p className="text-sm font-medium">{entity.weight} kg</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Body Measurements */}
+                  {(entity.measurements || entity.cupsize) && (
+                    <div className="flex items-center gap-3 mb-4 p-3 bg-muted/30 rounded-lg">
+                      <span className="text-sm text-muted-foreground">Measurements:</span>
+                      <span className="text-sm font-medium">{entity.measurements}</span>
+                      {entity.cupsize && (
+                        <>
+                          <span className="text-muted-foreground">•</span>
+                          <span className="text-sm font-medium">{entity.cupsize}</span>
+                        </>
+                      )}
+                    </div>
+                  )}
 
                   {entity.bio && (
                     <div className="space-y-2 mb-4">
@@ -381,32 +589,32 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                     </div>
                   )}
 
-                  {/* Physical Details */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t">
-                    {entity.measurements && (
-                      <div>
-                        <h3 className="text-sm font-medium text-muted-foreground">Measurements</h3>
-                        <p className="text-sm mt-1">{entity.measurements}</p>
-                      </div>
-                    )}
-                    {entity.tattoos && (
-                      <div>
-                        <h3 className="text-sm font-medium text-muted-foreground">Tattoos</h3>
-                        <p className="text-sm mt-1">{entity.tattoos}</p>
-                      </div>
-                    )}
-                    {entity.piercings && (
-                      <div>
-                        <h3 className="text-sm font-medium text-muted-foreground">Piercings</h3>
-                        <p className="text-sm mt-1">{entity.piercings}</p>
-                      </div>
-                    )}
-                  </div>
+                  {/* Body Modifications */}
+                  {(entity.tattoos || entity.piercings) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t">
+                      {entity.tattoos && (
+                        <div>
+                          <h3 className="text-sm font-medium text-muted-foreground mb-1">
+                            Tattoos
+                          </h3>
+                          <p className="text-sm">{entity.tattoos}</p>
+                        </div>
+                      )}
+                      {entity.piercings && (
+                        <div>
+                          <h3 className="text-sm font-medium text-muted-foreground mb-1">
+                            Piercings
+                          </h3>
+                          <p className="text-sm">{entity.piercings}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
 
               {/* SCENE METADATA */}
-              {subscription.entityType === "scene" && entity && 'date' in entity && (
+              {subscription.entityType === "scene" && entity && "date" in entity && (
                 <>
                   {/* Scene Details */}
                   <div className="space-y-3 mb-4">
@@ -440,7 +648,7 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
               )}
 
               {/* STUDIO METADATA */}
-              {subscription.entityType === "studio" && entity && 'parentStudioId' in entity && (
+              {subscription.entityType === "studio" && entity && "parentStudioId" in entity && (
                 <>
                   {entity.url && (
                     <div className="mb-4">
@@ -469,7 +677,9 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                   <h3 className="text-sm font-medium text-muted-foreground mb-2">Aliases</h3>
                   <div className="flex gap-2 flex-wrap">
                     {aliases.map((alias: string, idx: number) => (
-                      <Badge key={idx} variant="outline">{alias}</Badge>
+                      <Badge key={idx} variant="outline">
+                        {alias}
+                      </Badge>
                     ))}
                   </div>
                 </div>
@@ -499,67 +709,167 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
         </Card>
       )}
 
-      {/* Details Card */}
+      {/* Subscription Details Card */}
       <Card>
         <CardHeader>
-          <CardTitle>Subscription Details</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Settings className="h-5 w-5" />
+            Subscription Details
+          </CardTitle>
           <CardDescription>
-            Manage settings for this subscription
+            Configuration and monitoring settings for this subscription
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {/* Entity Type */}
+            <div className="space-y-2">
               <label className="text-sm font-medium text-muted-foreground">Entity Type</label>
-              <p className="mt-1 capitalize">{subscription.entityType}</p>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="capitalize text-sm px-3 py-1">
+                  {subscription.entityType}
+                </Badge>
+              </div>
             </div>
-            <div>
+
+            {/* Status - Different for performer/studio vs scene */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">
+                {subscription.entityType === "scene" ? "Subscribed" : "Auto Download"}
+              </label>
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant={
+                    subscription.entityType === "scene"
+                      ? (subscription.isSubscribed ? "default" : "secondary")
+                      : (subscription.autoDownload ? "default" : "secondary")
+                  }
+                  className="px-3 py-1"
+                >
+                  {subscription.entityType === "scene"
+                    ? (subscription.isSubscribed ? "Yes" : "No")
+                    : (subscription.autoDownload ? "On" : "Off")
+                  }
+                </Badge>
+              </div>
+            </div>
+
+            {/* Quality Profile */}
+            <div className="space-y-2">
               <label className="text-sm font-medium text-muted-foreground">Quality Profile</label>
-              <p className="mt-1">{subscription.qualityProfile?.name || "N/A"}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Status</label>
-              <div className="mt-1">
-                <Badge variant={subscription.status === "active" ? "default" : "secondary"}>
-                  {subscription.status}
-                </Badge>
+              <div className="text-sm font-medium">
+                {subscription.qualityProfile?.name || "N/A"}
               </div>
             </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Monitored</label>
-              <div className="mt-1">
-                <Badge variant={subscription.monitored ? "default" : "outline"}>
-                  {subscription.monitored ? "Yes" : "No"}
-                </Badge>
-              </div>
-            </div>
-            <div>
+
+            {/* Auto Download */}
+            <div className="space-y-2">
               <label className="text-sm font-medium text-muted-foreground">Auto Download</label>
-              <div className="mt-1">
+              <div className="flex items-center gap-2">
                 <Badge variant={subscription.autoDownload ? "default" : "outline"}>
-                  {subscription.autoDownload ? "Yes" : "No"}
+                  {subscription.autoDownload ? "Enabled" : "Disabled"}
                 </Badge>
               </div>
+              {subscription.autoDownload && (
+                <p className="text-xs text-muted-foreground">
+                  Automatically adds matching torrents to download queue
+                </p>
+              )}
             </div>
-            <div>
+
+            {/* Include Metadata Missing */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">
+                Include Metadata Missing
+              </label>
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant={subscription.includeMetadataMissing ? "default" : "outline"}
+                  className={subscription.includeMetadataMissing ? "bg-amber-600" : ""}
+                >
+                  {subscription.includeMetadataMissing ? "Enabled" : "Disabled"}
+                </Badge>
+              </div>
+              {subscription.includeMetadataMissing && (
+                <p className="text-xs text-muted-foreground">
+                  Discovers scenes without metadata from multiple indexers
+                </p>
+              )}
+            </div>
+
+            {/* Include Aliases */}
+            <div className="space-y-2">
               <label className="text-sm font-medium text-muted-foreground">Include Aliases</label>
-              <div className="mt-1">
+              <div className="flex items-center gap-2">
                 <Badge variant={subscription.includeAliases ? "default" : "outline"}>
-                  {subscription.includeAliases ? "Yes" : "No"}
+                  {subscription.includeAliases ? "Enabled" : "Disabled"}
                 </Badge>
               </div>
+              {subscription.includeAliases && aliases.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Searching with {aliases.length} alias{aliases.length > 1 ? "es" : ""}
+                </p>
+              )}
             </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Include Metadata Missing</label>
-              <div className="mt-1">
-                <Badge variant={subscription.includeMetadataMissing ? "default" : "outline"}>
-                  {subscription.includeMetadataMissing ? "Yes" : "No"}
-                </Badge>
-              </div>
-            </div>
-            <div>
+
+            {/* Created Date */}
+            <div className="space-y-2">
               <label className="text-sm font-medium text-muted-foreground">Created</label>
-              <p className="mt-1">{new Date(subscription.createdAt).toLocaleString()}</p>
+              <div className="text-sm">
+                {new Date(subscription.createdAt).toLocaleDateString()} •{" "}
+                {new Date(subscription.createdAt).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </div>
+            </div>
+
+            {/* Stats Summary */}
+            {(subscription.entityType === "performer" || subscription.entityType === "studio") && (
+              <div className="space-y-2 md:col-span-2 lg:col-span-1">
+                <label className="text-sm font-medium text-muted-foreground">Library Stats</label>
+                <div className="flex items-center gap-4 text-sm">
+                  <div>
+                    <span className="font-medium">{allScenes.length}</span>
+                    <span className="text-muted-foreground ml-1">scenes</span>
+                  </div>
+                  <div>
+                    <span className="font-medium">{allScenes.filter((s: any) => s.hasFiles).length}</span>
+                    <span className="text-muted-foreground ml-1">downloaded</span>
+                  </div>
+                  <div>
+                    <span className="font-medium">
+                      {allScenes.filter((s: any) => !s.hasMetadata).length}
+                    </span>
+                    <span className="text-muted-foreground ml-1">no metadata</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Info Box */}
+          <div className="mt-6 p-4 bg-muted/50 rounded-lg border">
+            <div className="flex items-start gap-3">
+              <Info className="h-5 w-5 text-muted-foreground mt-0.5" />
+              <div className="space-y-1 text-sm">
+                <p className="font-medium">About This Subscription</p>
+                <p className="text-muted-foreground">
+                  {subscription.entityType === "performer" &&
+                    "This subscription monitors for new scenes featuring this performer across all indexers."}
+                  {subscription.entityType === "studio" &&
+                    "This subscription monitors for new releases from this studio."}
+                  {subscription.entityType === "scene" &&
+                    "This subscription tracks a specific scene and its download status."}
+                </p>
+                {subscription.includeMetadataMissing && (
+                  <p className="text-amber-700 dark:text-amber-400 mt-2">
+                    <strong>Metadata Missing:</strong> Scenes discovered without metadata will be
+                    shown with a &quot;No Metadata&quot; badge. These are inferred from multiple indexer
+                    matches.
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         </CardContent>
@@ -576,101 +886,413 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                   All Scenes
                 </CardTitle>
                 <CardDescription>
-                  All scenes from this {subscription.entityType} with download status
+                  Scenes from this {subscription.entityType} including metadata-less discoveries
                 </CardDescription>
               </div>
-              <Badge variant="outline">{scenes.length} scenes</Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">
+                  {filteredScenes.length} / {allScenes.length} scenes
+                </Badge>
+                <ViewToggle view={filters.view} onViewChange={setView} />
+              </div>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="pt-4 border-t">
+              <SubscriptionFilters
+                search={filters.search}
+                onSearchChange={setSearch}
+                showMetadataLess={filters.showMetadataLess}
+                onMetadataLessChange={setShowMetadataLess}
+                showInactive={filters.showInactive}
+                onInactiveChange={setShowInactive}
+                selectedTags={filters.tags}
+                onTagToggle={toggleTag}
+                onClearTags={clearAllFilters}
+                availableTags={availableTags}
+                showTagFilter={true}
+              />
             </div>
           </CardHeader>
-          {scenes.length > 0 && (
+
+          {filteredScenes.length > 0 ? (
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Download Status</TableHead>
-                    <TableHead>Files</TableHead>
-                    <TableHead>Subscribed</TableHead>
-                    <TableHead>Date</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {scenes.map((scene: any) => (
-                    <TableRow key={scene.id}>
-                      <TableCell className="font-medium max-w-xs truncate">
-                        {scene.isSubscribed ? (
-                          <Link
-                            href={`/subscriptions/${scene.subscriptionId}`}
-                            className="hover:underline"
-                          >
-                            {scene.title}
-                          </Link>
+              {/* Grid View - Card Layout */}
+              {filters.view === "card" && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredScenes.map((scene: any) => (
+                    <Card
+                      key={scene.id}
+                      className={cn(
+                        "overflow-hidden hover:shadow-md transition-shadow",
+                        !scene.isSubscribed && "opacity-60 grayscale-[50%]"
+                      )}
+                    >
+                      {/* Scene Image/Placeholder */}
+                      <div className="relative aspect-video bg-muted">
+                        {getSceneImageUrl(scene) ? (
+                          <Image
+                            src={getSceneImageUrl(scene)!}
+                            alt={scene.title}
+                            fill
+                            className="object-contain"
+                            unoptimized
+                          />
                         ) : (
-                          <span>{scene.title}</span>
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <Film className="h-12 w-12 text-muted-foreground/30" />
+                          </div>
                         )}
-                      </TableCell>
-                      <TableCell>
+                        {/* Metadata Badge */}
+                        {scene.hasMetadata === false && (
+                          <Badge className="absolute top-2 left-2 bg-amber-500/90 text-white border-amber-600">
+                            <Info className="h-3 w-3 mr-1" />
+                            No Metadata
+                          </Badge>
+                        )}
+                        {/* Download Status Badge */}
                         <Badge
-                          variant={
-                            scene.downloadStatus === "completed" ? "default" :
-                            scene.downloadStatus === "downloading" ? "secondary" :
-                            scene.downloadStatus === "queued" ? "outline" :
-                            "destructive"
-                          }
+                          variant={scene.downloadStatus === "completed" ? "default" : "secondary"}
+                          className="absolute top-2 right-2"
                         >
                           {scene.downloadStatus === "not_queued" ? "Not Queued" : scene.downloadStatus}
                         </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col gap-1">
-                          {scene.hasFiles ? (
-                            <>
-                              <Badge variant="default">{scene.fileCount} file{scene.fileCount !== 1 ? 's' : ''}</Badge>
-                              {scene.sceneFiles && scene.sceneFiles.length > 0 && (
-                                <div className="mt-2 space-y-1">
-                                  {scene.sceneFiles.map((file: any) => (
-                                    <div key={file.id} className="text-xs font-mono bg-muted/50 p-2 rounded">
-                                      <div className="font-medium mb-1">Video:</div>
-                                      <div className="truncate max-w-xs mb-1" title={file.filePath}>
-                                        {file.filePath}
-                                      </div>
-                                      {file.nfoPath && (
-                                        <div className="truncate max-w-xs text-muted-foreground" title={file.nfoPath}>
-                                          NFO: {file.nfoPath}
-                                        </div>
-                                      )}
-                                      {file.posterPath && (
-                                        <div className="truncate max-w-xs text-muted-foreground" title={file.posterPath}>
-                                          Poster: {file.posterPath}
-                                        </div>
-                                      )}
-                                      <div className="text-muted-foreground mt-1">
-                                        {(file.fileSize / (1024 * 1024 * 1024)).toFixed(2)} GB
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </>
-                          ) : (
-                            <span className="text-sm text-muted-foreground">No files</span>
+                      </div>
+
+                      {/* Scene Info */}
+                      <CardContent className="p-4 space-y-3">
+                        <div>
+                          <h3 className="font-medium line-clamp-2" title={scene.title}>
+                            {scene.subscriptionId ? (
+                              <Link
+                                href={`/subscriptions/${scene.subscriptionId}`}
+                                className="hover:text-primary transition-colors"
+                              >
+                                {scene.title}
+                              </Link>
+                            ) : (
+                              scene.title
+                            )}
+                          </h3>
+                          {scene.date && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {formatDate(scene.date)}
+                            </p>
                           )}
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        {scene.isSubscribed ? (
-                          <Badge variant="default">Yes</Badge>
-                        ) : (
-                          <Badge variant="outline">No</Badge>
+
+                        {/* Scene Stats */}
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <Film className="h-3 w-3" />
+                            {scene.fileCount || 0} files
+                          </span>
+
+                          {/* Download Status Badge */}
+                          {scene.downloadStatus !== "not_queued" && scene.downloadStatus && (
+                            <Badge
+                              variant={
+                                scene.downloadStatus === "completed"
+                                  ? "default"
+                                  : scene.downloadStatus === "downloading"
+                                    ? "secondary"
+                                    : "outline"
+                              }
+                              className="text-xs"
+                            >
+                              {scene.downloadStatus === "completed" && "✓"}
+                              {scene.downloadStatus === "downloading" && "⬇"}
+                              {scene.downloadStatus === "queued" && "⏳"}
+                            </Badge>
+                          )}
+                        </div>
+
+                        {/* Subscription Status & Action */}
+                        <div className="flex items-center justify-between pt-2 border-t">
+                          <div>
+                            <Badge
+                              variant={scene.isSubscribed ? "default" : "secondary"}
+                              className={cn(
+                                "text-xs",
+                                scene.isSubscribed ? "bg-green-600" : "bg-muted text-muted-foreground"
+                              )}
+                            >
+                              {scene.isSubscribed ? "✓ Active" : "○ Inactive"}
+                            </Badge>
+                          </div>
+
+                          {/* Action Button */}
+                          {scene.subscriptionId ? (
+                            // Scene has individual subscription - show unsubscribe/resubscribe
+                            <Button
+                              variant={scene.isSubscribed ? "ghost" : "default"}
+                              size="sm"
+                              className="h-7 px-2"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                scene.isSubscribed
+                                  ? handleUnsubscribeScene(scene.subscriptionId)
+                                  : handleResubscribeScene(scene.subscriptionId);
+                              }}
+                              disabled={
+                                (scene.isSubscribed && unsubscribeScene.isPending) ||
+                                (!scene.isSubscribed && resubscribeScene.isPending)
+                              }
+                            >
+                              {scene.isSubscribed ? (
+                                <>
+                                  <X className="h-3.5 w-3.5 mr-1" />
+                                  Unsubscribe
+                                </>
+                              ) : (
+                                <>
+                                  <Check className="h-3.5 w-3.5 mr-1" />
+                                  Resubscribe
+                                </>
+                              )}
+                            </Button>
+                          ) : (
+                            // Scene has no individual subscription - show subscribe button
+                            <Button
+                              variant="default"
+                              size="sm"
+                              className="h-7 px-2"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleSubscribeScene(scene.id);
+                              }}
+                              disabled={subscribeScene.isPending}
+                            >
+                              <Plus className="h-3.5 w-3.5 mr-1" />
+                              Subscribe
+                            </Button>
+                          )}
+                        </div>
+
+                        {/* File Details (if has files) */}
+                        {scene.hasFiles && scene.sceneFiles && scene.sceneFiles.length > 0 && (
+                          <div className="pt-3 border-t space-y-2">
+                            {scene.sceneFiles.map((file: any) => (
+                              <div key={file.id} className="text-xs">
+                                <div className="font-mono text-muted-foreground truncate" title={file.filePath}>
+                                  {file.filePath.split("/").pop()}
+                                </div>
+                                <div className="text-muted-foreground">
+                                  {(file.fileSize / (1024 * 1024 * 1024)).toFixed(2)} GB
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         )}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {scene.date ? new Date(scene.date).toLocaleDateString() : "N/A"}
-                      </TableCell>
-                    </TableRow>
+
+                        {/* Download Progress (if downloading) */}
+                        {scene.downloadProgress && (
+                          <div className="pt-3 border-t">
+                            <div className="flex items-center justify-between text-xs mb-1">
+                              <span className="text-muted-foreground">Download Progress</span>
+                              <span className="font-medium">{scene.downloadProgress.progress || 0}%</span>
+                            </div>
+                            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary transition-all"
+                                style={{ width: `${scene.downloadProgress.progress || 0}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
                   ))}
-                </TableBody>
-              </Table>
+                </div>
+              )}
+
+              {/* Table View */}
+              {filters.view === "table" && (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Title</TableHead>
+                      <TableHead>Metadata</TableHead>
+                      <TableHead>Download Status</TableHead>
+                      <TableHead>Files</TableHead>
+                      <TableHead>Subscription</TableHead>
+                      <TableHead>Actions</TableHead>
+                      <TableHead>Date</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredScenes.map((scene: any) => (
+                      <TableRow
+                        key={scene.id}
+                        className={!scene.isSubscribed ? "opacity-60 bg-muted/30" : ""}
+                      >
+                        <TableCell className="font-medium max-w-xs truncate">
+                          {scene.subscriptionId ? (
+                            <Link
+                              href={`/subscriptions/${scene.subscriptionId}`}
+                              className="hover:underline"
+                            >
+                              {scene.title}
+                            </Link>
+                          ) : (
+                            <span>{scene.title}</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {scene.hasMetadata === false ? (
+                            <Badge variant="outline" className="text-amber-600 border-amber-600">
+                              <Info className="h-3 w-3 mr-1" />
+                              No Metadata
+                            </Badge>
+                          ) : (
+                            <Badge variant="default">Full Metadata</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              scene.downloadStatus === "completed"
+                                ? "default"
+                                : scene.downloadStatus === "downloading"
+                                  ? "secondary"
+                                  : scene.downloadStatus === "queued"
+                                    ? "outline"
+                                    : "destructive"
+                            }
+                          >
+                            {scene.downloadStatus === "not_queued" ? "Not Queued" : scene.downloadStatus}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            {scene.hasFiles ? (
+                              <>
+                                <Badge variant="default">
+                                  {scene.fileCount} file{scene.fileCount !== 1 ? "s" : ""}
+                                </Badge>
+                                {scene.sceneFiles && scene.sceneFiles.length > 0 && (
+                                  <div className="mt-2 space-y-1">
+                                    {scene.sceneFiles.map((file: any) => (
+                                      <div
+                                        key={file.id}
+                                        className="text-xs font-mono bg-muted/50 p-2 rounded"
+                                      >
+                                        <div className="font-medium mb-1">Video:</div>
+                                        <div className="truncate max-w-xs mb-1" title={file.filePath}>
+                                          {file.filePath}
+                                        </div>
+                                        {file.nfoPath && (
+                                          <div className="truncate max-w-xs text-muted-foreground" title={file.nfoPath}>
+                                            NFO: {file.nfoPath}
+                                          </div>
+                                        )}
+                                        {file.posterPath && (
+                                          <div className="truncate max-w-xs text-muted-foreground" title={file.posterPath}>
+                                            Poster: {file.posterPath}
+                                          </div>
+                                        )}
+                                        <div className="text-muted-foreground mt-1">
+                                          {(file.fileSize / (1024 * 1024 * 1024)).toFixed(2)} GB
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">No files</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {/* Subscription Status Badge - shows scene subscription intent, not download status */}
+                          <Badge
+                            variant={scene.isSubscribed ? "default" : "secondary"}
+                            className={cn(
+                              "w-fit",
+                              scene.isSubscribed ? "bg-green-600" : "bg-muted text-muted-foreground"
+                            )}
+                          >
+                            {scene.isSubscribed ? "✓ Active" : "○ Inactive"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {/* Action Button */}
+                          {scene.subscriptionId ? (
+                            // Scene has individual subscription - show unsubscribe/resubscribe
+                            <Button
+                              variant={scene.isSubscribed ? "ghost" : "default"}
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={() =>
+                                scene.isSubscribed
+                                  ? handleUnsubscribeScene(scene.subscriptionId)
+                                  : handleResubscribeScene(scene.subscriptionId)
+                              }
+                              disabled={
+                                (scene.isSubscribed && unsubscribeScene.isPending) ||
+                                (!scene.isSubscribed && resubscribeScene.isPending)
+                              }
+                              title={scene.isSubscribed ? "Unsubscribe" : "Resubscribe"}
+                            >
+                              {scene.isSubscribed ? (
+                                <X className="h-4 w-4" />
+                              ) : (
+                                <Check className="h-4 w-4" />
+                              )}
+                            </Button>
+                          ) : (
+                            // Scene has no individual subscription - show subscribe button
+                            <Button
+                              variant="default"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={() => handleSubscribeScene(scene.id)}
+                              disabled={subscribeScene.isPending}
+                              title="Subscribe"
+                            >
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {scene.date ? formatDate(scene.date) : "N/A"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          ) : (
+            <CardContent>
+              <div className="flex flex-col items-center justify-center gap-3 text-muted-foreground py-12">
+                <Film className="h-8 w-8" />
+                <p>
+                  {filters.search ||
+                  filters.tags.length > 0 ||
+                  filters.showMetadataLess
+                    ? `No scenes match your filters for this ${subscription.entityType}`
+                    : `No scenes found for this ${subscription.entityType}`}
+                </p>
+                {(filters.search ||
+                  filters.tags.length > 0 ||
+                  filters.showMetadataLess) && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSearch("");
+                      setShowMetadataLess(false);
+                      clearAllFilters();
+                    }}
+                  >
+                    Clear all filters
+                  </Button>
+                )}
+              </div>
             </CardContent>
           )}
         </Card>
@@ -690,7 +1312,9 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                   Files in this scene&apos;s folder and download progress
                 </CardDescription>
               </div>
-              <Badge variant="outline">{sceneFiles.length} file{sceneFiles.length !== 1 ? 's' : ''}</Badge>
+              <Badge variant="outline">
+                {sceneFiles.length} file{sceneFiles.length !== 1 ? "s" : ""}
+              </Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -703,10 +1327,13 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                     <div className="mt-1">
                       <Badge
                         variant={
-                          downloadQueue.status === "completed" ? "default" :
-                          downloadQueue.status === "downloading" ? "secondary" :
-                          downloadQueue.status === "queued" ? "outline" :
-                          "destructive"
+                          downloadQueue.status === "completed"
+                            ? "default"
+                            : downloadQueue.status === "downloading"
+                              ? "secondary"
+                              : downloadQueue.status === "queued"
+                                ? "outline"
+                                : "destructive"
                         }
                       >
                         {downloadQueue.status}
@@ -719,7 +1346,9 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                   </div>
                   <div>
                     <label className="text-sm text-muted-foreground">Size</label>
-                    <p className="mt-1 text-sm">{(downloadQueue.size / (1024 * 1024 * 1024)).toFixed(2)} GB</p>
+                    <p className="mt-1 text-sm">
+                      {(downloadQueue.size / (1024 * 1024 * 1024)).toFixed(2)} GB
+                    </p>
                   </div>
                   <div>
                     <label className="text-sm text-muted-foreground">Quality</label>
@@ -732,7 +1361,9 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                   {downloadQueue.completedAt && (
                     <div>
                       <label className="text-sm text-muted-foreground">Completed</label>
-                      <p className="mt-1 text-sm">{new Date(downloadQueue.completedAt).toLocaleString()}</p>
+                      <p className="mt-1 text-sm">
+                        {new Date(downloadQueue.completedAt).toLocaleString()}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -776,7 +1407,7 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                           {(file.fileSize / (1024 * 1024 * 1024)).toFixed(2)} GB
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline">{file.quality || 'N/A'}</Badge>
+                          <Badge variant="outline">{file.quality || "N/A"}</Badge>
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {new Date(file.createdAt).toLocaleDateString()}
@@ -789,7 +1420,9 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
             ) : (
               <div className="space-y-4">
                 {/* Show folder contents if available */}
-                {folderContents.nfoFiles.length > 0 || folderContents.posterFiles.length > 0 || folderContents.videoFiles.length > 0 ? (
+                {folderContents.nfoFiles.length > 0 ||
+                folderContents.posterFiles.length > 0 ||
+                folderContents.videoFiles.length > 0 ? (
                   <div className="space-y-3">
                     <h3 className="font-medium">Folder Contents</h3>
 
@@ -797,11 +1430,15 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                       <div className="p-3 bg-muted/50 rounded-lg">
                         <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
                           <Badge variant="outline">NFO Files</Badge>
-                          <span className="text-xs text-muted-foreground">{folderContents.nfoFiles.length}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {folderContents.nfoFiles.length}
+                          </span>
                         </h4>
                         <ul className="text-xs font-mono space-y-1">
                           {folderContents.nfoFiles.map((file: string, idx: number) => (
-                            <li key={idx} className="text-muted-foreground">✓ {file}</li>
+                            <li key={idx} className="text-muted-foreground">
+                              ✓ {file}
+                            </li>
                           ))}
                         </ul>
                       </div>
@@ -811,11 +1448,15 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                       <div className="p-3 bg-muted/50 rounded-lg">
                         <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
                           <Badge variant="outline">Poster Files</Badge>
-                          <span className="text-xs text-muted-foreground">{folderContents.posterFiles.length}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {folderContents.posterFiles.length}
+                          </span>
                         </h4>
                         <ul className="text-xs font-mono space-y-1">
                           {folderContents.posterFiles.map((file: string, idx: number) => (
-                            <li key={idx} className="text-muted-foreground">✓ {file}</li>
+                            <li key={idx} className="text-muted-foreground">
+                              ✓ {file}
+                            </li>
                           ))}
                         </ul>
                       </div>
@@ -825,15 +1466,20 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                       <div className="p-3 bg-muted/50 rounded-lg">
                         <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
                           <Badge variant="default">Video Files</Badge>
-                          <span className="text-xs text-muted-foreground">{folderContents.videoFiles.length}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {folderContents.videoFiles.length}
+                          </span>
                         </h4>
                         <ul className="text-xs font-mono space-y-1">
                           {folderContents.videoFiles.map((file: string, idx: number) => (
-                            <li key={idx} className="text-muted-foreground">✓ {file}</li>
+                            <li key={idx} className="text-muted-foreground">
+                              ✓ {file}
+                            </li>
                           ))}
                         </ul>
                         <p className="text-xs text-amber-600 mt-2">
-                          ⚠️ Video files found but not in database. The filesystem sync job will add them when it runs.
+                          ⚠️ Video files found but not in database. The filesystem sync job will add them
+                          when it runs.
                         </p>
                       </div>
                     )}
@@ -841,7 +1487,9 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                     {sceneFolder && (
                       <div className="p-3 bg-muted/30 rounded-lg border-l-2 border-primary">
                         <h4 className="font-medium mb-1 text-xs">Folder Path</h4>
-                        <p className="text-xs font-mono text-muted-foreground break-all">{sceneFolder}</p>
+                        <p className="text-xs font-mono text-muted-foreground break-all">
+                          {sceneFolder}
+                        </p>
                       </div>
                     )}
                   </div>
@@ -849,15 +1497,20 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
                   <div className="space-y-4">
                     <div className="flex items-center gap-3 text-muted-foreground p-4">
                       <Film className="h-5 w-5" />
-                      <p>No files found for this scene. {downloadQueue ? "Download in progress." : "This scene has not been downloaded yet."}</p>
+                      <p>
+                        No files found for this scene.{" "}
+                        {downloadQueue ? "Download in progress." : "This scene has not been downloaded yet."}
+                      </p>
                     </div>
                     {sceneFolder && (
                       <div className="p-4 bg-muted/30 rounded-lg border-l-4 border-primary">
                         <h4 className="font-medium mb-2 text-sm">Expected Scene Folder</h4>
-                        <p className="text-sm font-mono text-muted-foreground break-all">{sceneFolder}</p>
+                        <p className="text-sm font-mono text-muted-foreground break-all">
+                          {sceneFolder}
+                        </p>
                         <p className="text-xs text-muted-foreground mt-2">
-                          When you subscribe to a scene, .nfo and poster files are created here.
-                          Video files will appear after download completes.
+                          When you subscribe to a scene, .nfo and poster files are created here. Video
+                          files will appear after download completes.
                         </p>
                       </div>
                     )}
@@ -868,7 +1521,14 @@ export default function SubscriptionDetailPage({ params }: PageProps) {
           </CardContent>
         </Card>
       )}
-
     </div>
+  );
+}
+
+export default function SubscriptionDetailPage({ params }: PageProps) {
+  return (
+    <Suspense fallback={<div className="p-8">Loading...</div>}>
+      <SubscriptionDetailPageContent params={params} />
+    </Suspense>
   );
 }

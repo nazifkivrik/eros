@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const LogLevelSchema = z.enum(["error", "warning", "info", "debug"]);
-export const EventTypeSchema = z.enum(["torrent", "subscription", "download", "metadata", "system", "missing-scenes"]);
+export const EventTypeSchema = z.enum(["torrent", "subscription", "download", "metadata", "system"]);
 
 export const LogSchema = z.object({
   id: z.string(),

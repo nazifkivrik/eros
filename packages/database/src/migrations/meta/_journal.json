@@ -8,6 +8,41 @@
       "when": 1766863731811,
       "tag": "0000_supreme_marrow",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1767358663682,
+      "tag": "0001_silent_excalibur",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1735857600000,
+      "tag": "0002_add_cross_encoder_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1736137600000,
+      "tag": "0003_refine_subscription_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1736400000000,
+      "tag": "0004_replace_status_with_issubscribed",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1737400000000,
+      "tag": "0005_add_torrent_retry_fields",
+      "breakpoints": true
     }
   ]
 }

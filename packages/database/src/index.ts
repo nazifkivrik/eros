@@ -2,13 +2,10 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as schema from "./schema.js";
+import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { dirname, join } from "path";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-export function createDatabase(path: string) {
+export async function createDatabase(path: string) {
   const sqlite = new Database(path);
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
@@ -16,8 +13,16 @@ export function createDatabase(path: string) {
   const db = drizzle(sqlite, { schema });
 
   // Run migrations automatically
+  const __dirname = dirname(fileURLToPath(import.meta.url));
   const migrationsFolder = join(__dirname, "migrations");
-  migrate(db, { migrationsFolder });
+
+  try {
+    await migrate(db, { migrationsFolder });
+    console.log("✅ Database migrations completed successfully");
+  } catch (error) {
+    console.error("❌ Database migration failed:", error);
+    throw error;
+  }
 
   return db;
 }

@@ -1,5 +1,4 @@
 import type { EntityType } from "../core/enums.js";
-import type { SubscriptionStatus } from "../api/subscription.js";
 
 export type SubscriptionDomain = {
   id: string;
@@ -9,8 +8,7 @@ export type SubscriptionDomain = {
   autoDownload: boolean;
   includeMetadataMissing: boolean;
   includeAliases: boolean;
-  status: SubscriptionStatus;
-  monitored: boolean;
+  isSubscribed: boolean;
   searchCutoffDate: string | null;
   createdAt: string;
   updatedAt: string;

@@ -8,6 +8,7 @@ import {
 import { QBittorrentService } from "../../services/qbittorrent.service.js";
 import { TPDBService } from "../../services/tpdb/tpdb.service.js";
 import { StashDBService } from "../../services/stashdb.service.js";
+import { ProwlarrService } from "../../services/prowlarr.service.js";
 import type { AppSettings } from "@repo/shared-types";
 
 /**
@@ -91,8 +92,76 @@ export class SettingsController {
   }
 
   /**
+   * Get AI model status
+   */
+  async getAIModelStatus(app: FastifyInstance) {
+    const crossEncoderService = (app.container as any).crossEncoderService;
+    if (!crossEncoderService) {
+      return {
+        enabled: false,
+        modelLoaded: false,
+        modelDownloaded: false,
+        modelName: 'Xenova/ms-marco-MiniLM-L-6-v2',
+        modelPath: './data/ai/models',
+        error: 'Cross-Encoder service not available'
+      };
+    }
+
+    const settings = await this.settingsService.getSettings();
+    const loadError = crossEncoderService.getLoadError ? crossEncoderService.getLoadError() : null;
+
+    // Check if methods exist and call them
+    const isModelDownloaded = typeof crossEncoderService.isModelDownloaded === 'function'
+      ? crossEncoderService.isModelDownloaded()
+      : false;
+    const isModelLoaded = typeof crossEncoderService.isModelLoaded === 'function'
+      ? crossEncoderService.isModelLoaded()
+      : false;
+
+    this.logger.info({
+      isModelDownloaded,
+      isModelLoaded,
+      hasIsModelDownloadedMethod: typeof crossEncoderService.isModelDownloaded === 'function',
+      hasIsModelLoadedMethod: typeof crossEncoderService.isModelLoaded === 'function'
+    }, 'AI model status check');
+
+    return {
+      enabled: settings.ai.useCrossEncoder,
+      modelLoaded: isModelLoaded,
+      modelDownloaded: isModelDownloaded,
+      modelName: 'Xenova/ms-marco-MiniLM-L-6-v2',
+      modelPath: typeof crossEncoderService.getModelPath === 'function' ? crossEncoderService.getModelPath() : './data/ai/models',
+      error: loadError ? loadError.message : null
+    };
+  }
+
+  /**
+   * Manually load AI model into RAM
+   */
+  async loadAIModel(app: FastifyInstance) {
+    const crossEncoderService = (app.container as any).crossEncoderService;
+    if (!crossEncoderService) {
+      throw new Error('Cross-Encoder service not available');
+    }
+
+    try {
+      this.logger.info('Manual AI model download requested');
+      await crossEncoderService.initialize();
+
+      return {
+        success: true,
+        message: 'Model loaded successfully',
+        modelLoaded: crossEncoderService.isModelLoaded ? crossEncoderService.isModelLoaded() : false,
+      };
+    } catch (error) {
+      this.logger.error({ error }, 'Failed to load AI model');
+      throw error;
+    }
+  }
+
+  /**
    * Reload Fastify plugins with new settings
-   * HTTP Concern: Direct manipulation of Fastify decorators
+   * HTTP Concern: Direct manipulation of Fastify decorators and DI container
    */
   private async reloadPlugins(
     settings: AppSettings,
@@ -104,8 +173,11 @@ export class SettingsController {
         apiUrl: "https://stashdb.org/graphql",
         apiKey: settings.stashdb.apiKey,
       });
-      // Directly reassign the decorator value
+      // Update Fastify decorator
       app.stashdb = stashdb;
+      // Update DI container (direct assignment for runtime update)
+      (app.container as any).stashdbService = stashdb;
+      (app.container as any).stashdb = stashdb;
       this.logger.info("StashDB plugin reloaded with new API key");
     }
 
@@ -115,7 +187,11 @@ export class SettingsController {
         apiUrl: settings.tpdb.apiUrl || "https://api.theporndb.net",
         apiKey: settings.tpdb.apiKey,
       });
+      // Update Fastify decorator
       app.tpdb = tpdb;
+      // Update DI container (direct assignment for runtime update)
+      (app.container as any).tpdbService = tpdb;
+      (app.container as any).tpdb = tpdb;
       this.logger.info("TPDB plugin reloaded with new API key");
     }
 
@@ -131,17 +207,45 @@ export class SettingsController {
         const connected = await qbittorrent.testConnection();
         if (connected) {
           app.qbittorrent = qbittorrent;
+          // Update DI container (direct assignment for runtime update)
+          (app.container as any).qbittorrentService = qbittorrent;
+          (app.container as any).qbittorrent = qbittorrent;
           this.logger.info("qBittorrent plugin reloaded and connected");
         } else {
           app.qbittorrent = null;
+          (app.container as any).qbittorrentService = null;
+          (app.container as any).qbittorrent = null;
           this.logger.warn("qBittorrent plugin reloaded but connection failed");
         }
       } catch (error) {
         app.qbittorrent = null;
+        (app.container as any).qbittorrentService = null;
+        (app.container as any).qbittorrent = null;
         this.logger.error({ error }, "Failed to reload qBittorrent plugin");
       }
     } else {
       app.qbittorrent = null;
+      (app.container as any).qbittorrentService = null;
+      (app.container as any).qbittorrent = null;
+    }
+
+    // Reload Prowlarr plugin
+    if (settings.prowlarr?.enabled && settings.prowlarr?.apiUrl && settings.prowlarr?.apiKey) {
+      const prowlarr = new ProwlarrService({
+        baseUrl: settings.prowlarr.apiUrl, // ProwlarrService expects 'baseUrl'
+        apiKey: settings.prowlarr.apiKey,
+      });
+
+      // Update Fastify decorator
+      app.prowlarr = prowlarr;
+      // Update DI container (direct assignment for runtime update)
+      (app.container as any).prowlarrService = prowlarr;
+      (app.container as any).prowlarr = prowlarr;
+      this.logger.info("Prowlarr plugin reloaded with new configuration");
+    } else {
+      app.prowlarr = null;
+      (app.container as any).prowlarrService = null;
+      (app.container as any).prowlarr = null;
     }
   }
 }

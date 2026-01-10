@@ -5,7 +5,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, lt, and } from "drizzle-orm";
 import { downloadQueue } from "@repo/database";
 
 export async function torrentMonitorJob(app: FastifyInstance) {
@@ -199,6 +199,12 @@ export async function torrentMonitorJob(app: FastifyInstance) {
     // Apply speed profiles if enabled
     await applySpeedProfiles(app);
 
+    // Remove old completed torrents from qBittorrent and download queue
+    await removeOldCompletedTorrents(app);
+
+    // Retry torrents that failed to add to qBittorrent
+    await retryFailedTorrents(app);
+
     progressService.emitCompleted(
       "torrent-monitor",
       `Completed: Processed ${processedCount} torrents`,
@@ -279,4 +285,112 @@ function checkIfStalled(torrent: any): boolean {
   }
 
   return false;
+}
+
+/**
+ * Remove old completed torrents from qBittorrent and download queue
+ * Keeps files on disk, only removes the torrent from qBittorrent
+ */
+async function removeOldCompletedTorrents(app: FastifyInstance) {
+  const { settingsService, qbittorrentService } = app.container;
+
+  if (!qbittorrentService) {
+    return;
+  }
+
+  const settings = await settingsService.getSettings();
+  const daysToKeep = settings.fileManagement.removeFromQbitAfterDays || 7;
+
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+
+  app.log.info(
+    `Checking for completed torrents older than ${cutoffDate.toISOString()}`
+  );
+
+  // Find completed items older than cutoff
+  const oldItems = await app.db.query.downloadQueue.findMany({
+    where: and(
+      eq(downloadQueue.status, "completed"),
+      lt(downloadQueue.completedAt, cutoffDate.toISOString())
+    ),
+  });
+
+  if (oldItems.length === 0) {
+    app.log.debug("No old completed torrents to remove");
+    return;
+  }
+
+  app.log.info(`Found ${oldItems.length} old completed torrents to remove`);
+
+  let removedFromQbit = 0;
+  let removedFromQueue = 0;
+
+  for (const item of oldItems) {
+    try {
+      // Remove from qBittorrent (keep files)
+      if (item.qbitHash) {
+        await qbittorrentService.deleteTorrent(item.qbitHash, false);
+        removedFromQbit++;
+        app.log.debug(
+          `Removed torrent ${item.qbitHash} from qBittorrent (kept files)`
+        );
+      }
+
+      // Remove from download queue database
+      await app.db
+        .update(downloadQueue)
+        .set({ qbitHash: null }) // Clear qbitHash to indicate it's been cleaned
+        .where(eq(downloadQueue.id, item.id));
+      removedFromQueue++;
+    } catch (error) {
+      app.log.error(
+        { error, itemId: item.id },
+        `Failed to remove old torrent from queue`
+      );
+    }
+  }
+
+  app.log.info(
+    `Removed ${removedFromQbit} torrents from qBittorrent and marked ${removedFromQueue} queue items as cleaned`
+  );
+}
+
+/**
+ * Retry torrents that failed to add to qBittorrent
+ * Respects Prowlarr rate limits with exponential backoff
+ * Called every 5 minutes by torrent-monitor job
+ */
+async function retryFailedTorrents(app: FastifyInstance) {
+  const { downloadQueueService } = app.container;
+
+  if (!downloadQueueService) {
+    app.log.warn("DownloadQueueService not available, skipping retry");
+    return;
+  }
+
+  try {
+    const result = await downloadQueueService.retryFailedTorrents(5);
+
+    app.log.info(
+      {
+        total: result.total,
+        succeeded: result.succeeded,
+        permanentFailures: result.permanentFailures,
+      },
+      "Failed torrent retry completed"
+    );
+
+    if (result.succeeded > 0) {
+      app.log.info(`✅ Successfully retried ${result.succeeded} torrents`);
+    }
+
+    if (result.permanentFailures > 0) {
+      app.log.warn(
+        `⚠️  ${result.permanentFailures} torrents permanently failed (max attempts reached)`
+      );
+    }
+  } catch (error) {
+    app.log.error({ error }, "Failed to retry torrents");
+  }
 }

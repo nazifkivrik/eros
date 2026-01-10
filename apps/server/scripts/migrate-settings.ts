@@ -15,20 +15,20 @@ const DEFAULT_SETTINGS: AppSettings = {
     downloadPath: "/downloads",
     scenesPath: "/scenes",
     incompletePath: "/incomplete",
-    enableNotifications: true,
-    minIndexersForMetadataLess: 2,
-    groupingThreshold: 0.7,
   },
   fileManagement: {
     deleteFilesOnRemove: false,
     deleteTorrentOnRemove: false,
     removeFromQbitAfterDays: 7,
     renameOnMetadata: true,
-    autoRedownloadDeletedScenes: false,
-    readdManuallyRemovedTorrents: false,
   },
   stashdb: {
     apiUrl: "https://stashdb.org/graphql",
+    apiKey: "",
+    enabled: false,
+  },
+  tpdb: {
+    apiUrl: "https://api.theporndb.net",
     apiKey: "",
     enabled: false,
   },
@@ -44,9 +44,44 @@ const DEFAULT_SETTINGS: AppSettings = {
     enabled: false,
   },
   ai: {
-    enabled: false,
-    model: "Xenova/all-MiniLM-L6-v2",
-    threshold: 0.75,
+    useCrossEncoder: true,
+    crossEncoderThreshold: 0.65,
+    unknownThreshold: 0.35,
+    groupingCount: 10,
+  },
+  jobs: {
+    subscriptionSearch: {
+      enabled: true,
+      schedule: "0 */6 * * *",
+    },
+    metadataRefresh: {
+      enabled: true,
+      schedule: "0 3 * * *",
+    },
+    torrentMonitor: {
+      enabled: true,
+      schedule: "*/5 * * * *",
+    },
+    cleanup: {
+      enabled: false,
+      schedule: "0 2 * * *",
+    },
+    metadataDiscovery: {
+      enabled: false,
+      schedule: "0 4 * * *",
+    },
+    missingScenesSearch: {
+      enabled: false,
+      schedule: "0 5 * * *",
+    },
+    unifiedSync: {
+      enabled: false,
+      schedule: "*/30 * * * *",
+    },
+    qbittorrentCleanup: {
+      enabled: false,
+      schedule: "0 1 * * *",
+    },
   },
 };
 
@@ -85,6 +120,10 @@ const mergedSettings: AppSettings = {
     ...DEFAULT_SETTINGS.stashdb,
     ...(currentSettings.stashdb || {}),
   },
+  tpdb: {
+    ...DEFAULT_SETTINGS.tpdb,
+    ...(currentSettings.tpdb || {}),
+  },
   prowlarr: {
     ...DEFAULT_SETTINGS.prowlarr,
     ...(currentSettings.prowlarr || {}),
@@ -96,6 +135,40 @@ const mergedSettings: AppSettings = {
   ai: {
     ...DEFAULT_SETTINGS.ai,
     ...(currentSettings.ai || {}),
+  },
+  jobs: {
+    subscriptionSearch: {
+      ...DEFAULT_SETTINGS.jobs.subscriptionSearch,
+      ...(currentSettings.jobs?.subscriptionSearch || {}),
+    },
+    metadataRefresh: {
+      ...DEFAULT_SETTINGS.jobs.metadataRefresh,
+      ...(currentSettings.jobs?.metadataRefresh || {}),
+    },
+    torrentMonitor: {
+      ...DEFAULT_SETTINGS.jobs.torrentMonitor,
+      ...(currentSettings.jobs?.torrentMonitor || {}),
+    },
+    cleanup: {
+      ...DEFAULT_SETTINGS.jobs.cleanup,
+      ...(currentSettings.jobs?.cleanup || {}),
+    },
+    metadataDiscovery: {
+      ...DEFAULT_SETTINGS.jobs.metadataDiscovery,
+      ...(currentSettings.jobs?.metadataDiscovery || {}),
+    },
+    missingScenesSearch: {
+      ...DEFAULT_SETTINGS.jobs.missingScenesSearch,
+      ...(currentSettings.jobs?.missingScenesSearch || {}),
+    },
+    unifiedSync: {
+      ...DEFAULT_SETTINGS.jobs.unifiedSync,
+      ...(currentSettings.jobs?.unifiedSync || {}),
+    },
+    qbittorrentCleanup: {
+      ...DEFAULT_SETTINGS.jobs.qbittorrentCleanup,
+      ...(currentSettings.jobs?.qbittorrentCleanup || {}),
+    },
   },
 };
 

@@ -2,17 +2,15 @@
  * AI settings for scene matching
  */
 export type AISettings = {
-  enabled: boolean; // Enable AI-powered scene matching with local embeddings
-  model: string; // Local embedding model (e.g., "Xenova/all-MiniLM-L6-v2")
-  threshold: number; // Cosine similarity threshold for AI scene matching (0.0-1.0)
-  groupingThreshold: number; // Cosine similarity threshold for AI torrent grouping and matching (0.0-1.0)
-  levenshteinThreshold: number; // Similarity threshold for Levenshtein distance matching (0.0-1.0)
+  useCrossEncoder: boolean; // Use Cross-Encoder for pair-wise ranking (more accurate but slower)
+  crossEncoderThreshold: number; // Match threshold for Cross-Encoder (0.0-1.0)
+  unknownThreshold: number; // Below this score, content is marked as unknown (0.0-1.0)
+  groupingCount: number; // Number of top candidates to evaluate with Cross-Encoder
 };
 
 export const DEFAULT_AI_SETTINGS: AISettings = {
-  enabled: false,
-  model: "Xenova/all-MiniLM-L6-v2", // Local sentence transformer model
-  threshold: 0.75, // 75% cosine similarity for AI scene matching
-  groupingThreshold: 0.92, // 92% cosine similarity for AI torrent grouping (strict to avoid false merges)
-  levenshteinThreshold: 0.7, // 70% similarity for traditional string matching
+  useCrossEncoder: true, // Cross-Encoder enabled by default
+  crossEncoderThreshold: 0.65, // 65% confidence required for Cross-Encoder matches
+  unknownThreshold: 0.35, // Below 35% confidence, mark as unknown/new content
+  groupingCount: 10, // Evaluate top 10 candidates with Cross-Encoder
 };

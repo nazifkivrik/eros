@@ -6,10 +6,22 @@ import type { SubscriptionSettings } from "@repo/shared-types";
 import { queryKeys } from "@/lib/query-keys";
 import { useMutationWithToast } from "./useMutationWithToast";
 
-export function useSubscriptions() {
+interface SubscriptionFilters {
+  search?: string;
+  includeMetaless?: boolean;
+  showInactive?: boolean;
+}
+
+export function useSubscriptions(filters?: SubscriptionFilters) {
+  // Note: showInactive is filtered client-side, not sent to API
+  const queryParams = {
+    search: filters?.search,
+    includeMetaless: filters?.includeMetaless,
+  };
+
   return useQuery({
-    queryKey: queryKeys.subscriptions.all,
-    queryFn: () => apiClient.getSubscriptions(),
+    queryKey: [...queryKeys.subscriptions.all, queryParams],
+    queryFn: () => apiClient.getSubscriptions(queryParams),
   });
 }
 
@@ -79,15 +91,65 @@ export function useDeleteSubscription() {
     mutationFn: ({
       id,
       deleteAssociatedScenes,
-      removeFiles,
     }: {
       id: string;
       deleteAssociatedScenes?: boolean;
-      removeFiles?: boolean;
-    }) => apiClient.deleteSubscription(id, deleteAssociatedScenes, removeFiles),
+    }) => apiClient.deleteSubscription(id, deleteAssociatedScenes),
     successMessage: "Subscription removed",
     invalidateKeys: [queryKeys.subscriptions.all, ["subscription", "check"]],
     errorMessage: "Failed to remove subscription",
+  });
+}
+
+// Subscribe to a scene (creates new subscription with status="active")
+export function useSubscribeScene() {
+  return useMutationWithToast({
+    mutationFn: ({
+      sceneId,
+      qualityProfileId,
+    }: {
+      sceneId: string;
+      qualityProfileId: string;
+    }) =>
+      apiClient.subscribeToScene(sceneId, {
+        qualityProfileId,
+        autoDownload: true,
+        includeMetadataMissing: false,
+        includeAliases: false,
+      }),
+    successMessage: "Scene subscribed",
+    errorMessage: "Failed to subscribe to scene",
+    invalidateKeys: [queryKeys.subscriptions.all],
+  });
+}
+
+// Unsubscribe from a scene (sets isSubscribed to false - doesn't delete)
+// Note: parentSubscriptionId is needed to invalidate the scenes query cache
+export function useUnsubscribeScene(parentSubscriptionId?: string) {
+  return useMutationWithToast({
+    mutationFn: ({ subscriptionId }: { subscriptionId: string }) =>
+      apiClient.updateSubscription(subscriptionId, { isSubscribed: false }),
+    successMessage: "Scene unsubscribed",
+    errorMessage: "Failed to unsubscribe from scene",
+    invalidateKeys: [
+      queryKeys.subscriptions.all,
+      parentSubscriptionId ? queryKeys.subscriptions.scenes(parentSubscriptionId) : null,
+    ].filter(Boolean) as any[],
+  });
+}
+
+// Resubscribe to a scene (sets isSubscribed back to true)
+// Note: parentSubscriptionId is needed to invalidate the scenes query cache
+export function useResubscribeScene(parentSubscriptionId?: string) {
+  return useMutationWithToast({
+    mutationFn: ({ subscriptionId }: { subscriptionId: string }) =>
+      apiClient.updateSubscription(subscriptionId, { isSubscribed: true }),
+    successMessage: "Scene resubscribed",
+    errorMessage: "Failed to resubscribe to scene",
+    invalidateKeys: [
+      queryKeys.subscriptions.all,
+      parentSubscriptionId ? queryKeys.subscriptions.scenes(parentSubscriptionId) : null,
+    ].filter(Boolean) as any[],
   });
 }
 

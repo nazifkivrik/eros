@@ -127,6 +127,14 @@ export class DownloadQueueController {
   }
 
   /**
+   * Manually retry a failed torrent
+   */
+  async retryFailedTorrent(params: { id: string }) {
+    const result = await this.downloadQueueService.retrySingleTorrent(params.id);
+    return result;
+  }
+
+  /**
    * Get unified downloads
    */
   async getUnifiedDownloads() {

@@ -3,7 +3,6 @@ import type { FileManagementSettings } from "./file-management.js";
 import type {
   StashDBSettings,
   TPDBSettings,
-  MetadataSettings,
 } from "./metadata.js";
 import type { ProwlarrSettings, QBittorrentSettings } from "./services.js";
 import type { AISettings } from "./ai.js";
@@ -14,7 +13,6 @@ import { DEFAULT_FILE_MANAGEMENT_SETTINGS } from "./file-management.js";
 import {
   DEFAULT_STASHDB_SETTINGS,
   DEFAULT_TPDB_SETTINGS,
-  DEFAULT_METADATA_SETTINGS,
 } from "./metadata.js";
 import {
   DEFAULT_PROWLARR_SETTINGS,
@@ -32,7 +30,6 @@ export type AppSettings = {
   fileManagement: FileManagementSettings;
   stashdb: StashDBSettings;
   tpdb: TPDBSettings;
-  metadata: MetadataSettings;
   prowlarr: ProwlarrSettings;
   qbittorrent: QBittorrentSettings;
   ai: AISettings;
@@ -48,7 +45,6 @@ export const DEFAULT_SETTINGS = {
   fileManagement: DEFAULT_FILE_MANAGEMENT_SETTINGS,
   stashdb: DEFAULT_STASHDB_SETTINGS,
   tpdb: DEFAULT_TPDB_SETTINGS,
-  metadata: DEFAULT_METADATA_SETTINGS,
   prowlarr: DEFAULT_PROWLARR_SETTINGS,
   qbittorrent: DEFAULT_QBITTORRENT_SETTINGS,
   ai: DEFAULT_AI_SETTINGS,

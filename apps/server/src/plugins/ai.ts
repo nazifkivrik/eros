@@ -16,8 +16,8 @@ const aiPlugin: FastifyPluginAsync = async (app) => {
   const settingsService = createSettingsService(app.db);
   const settings = await settingsService.getSettings();
 
-  if (!settings.ai.enabled) {
-    app.log.info("AI matching is disabled");
+  if (!settings.ai.useCrossEncoder) {
+    app.log.info("Cross-Encoder matching is disabled");
     app.decorate("ai", null);
     return;
   }
@@ -28,10 +28,12 @@ const aiPlugin: FastifyPluginAsync = async (app) => {
   // This prevents blocking startup while downloading AI models
   app.log.info(
     {
-      model: settings.ai.model,
-      threshold: settings.ai.threshold,
+      useCrossEncoder: settings.ai.useCrossEncoder,
+      crossEncoderThreshold: settings.ai.crossEncoderThreshold,
+      unknownThreshold: settings.ai.unknownThreshold,
+      groupingCount: settings.ai.groupingCount,
     },
-    "AI matching service registered (will initialize on first use)"
+    "Cross-Encoder matching service registered (will initialize on first use)"
   );
 
   app.decorate("ai", aiService);

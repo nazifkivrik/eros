@@ -58,76 +58,42 @@ export async function qbittorrentSyncJob(app: FastifyInstance) {
     // Process each removed torrent
     for (const removed of removedTorrents) {
       try {
-        const shouldReAdd = settings.fileManagement.readdManuallyRemovedTorrents;
+        // Cancel download and add to exclusions
+        app.log.info(
+          { sceneId: removed.sceneId, qbitHash: removed.qbitHash },
+          "Cancelling manually removed torrent"
+        );
 
-        if (shouldReAdd && removed.torrentHash) {
-          // Re-add torrent to qBittorrent
-          app.log.info(
-            { sceneId: removed.sceneId, qbitHash: removed.qbitHash },
-            "Re-adding manually removed torrent"
-          );
+        // Update status to cancelled
+        await app.db
+          .update(downloadQueue)
+          .set({ status: "failed", qbitHash: null })
+          .where(eq(downloadQueue.id, removed.id));
 
-          try {
-            await qbittorrentService.addTorrent({
-              magnetLinks: [`magnet:?xt=urn:btih:${removed.torrentHash}`],
-              category: "eros",
-              paused: false,
-            });
+        // Add to exclusions
+        const existingExclusion = await app.db.query.sceneExclusions.findFirst({
+          where: eq(sceneExclusions.sceneId, removed.sceneId),
+        });
 
-            await logsService.info(
-              "torrent",
-              `Re-added manually removed torrent for scene: ${removed.sceneId}`,
-              {
-                sceneId: removed.sceneId,
-                qbitHash: removed.qbitHash,
-                torrentHash: removed.torrentHash,
-              },
-              { sceneId: removed.sceneId }
-            );
-          } catch (error) {
-            app.log.error(
-              { error, sceneId: removed.sceneId },
-              "Failed to re-add torrent to qBittorrent"
-            );
-          }
-        } else {
-          // Cancel download and add to exclusions
-          app.log.info(
-            { sceneId: removed.sceneId, qbitHash: removed.qbitHash },
-            "Cancelling manually removed torrent"
-          );
-
-          // Update status to cancelled
-          await app.db
-            .update(downloadQueue)
-            .set({ status: "failed", qbitHash: null })
-            .where(eq(downloadQueue.id, removed.id));
-
-          // Add to exclusions
-          const existingExclusion = await app.db.query.sceneExclusions.findFirst({
-            where: eq(sceneExclusions.sceneId, removed.sceneId),
+        if (!existingExclusion) {
+          await app.db.insert(sceneExclusions).values({
+            id: crypto.randomUUID(),
+            sceneId: removed.sceneId,
+            reason: "manual_removal",
+            excludedAt: new Date().toISOString(),
           });
-
-          if (!existingExclusion) {
-            await app.db.insert(sceneExclusions).values({
-              id: crypto.randomUUID(),
-              sceneId: removed.sceneId,
-              reason: "manual_removal",
-              excludedAt: new Date().toISOString(),
-            });
-          }
-
-          await logsService.info(
-            "torrent",
-            `Cancelled manually removed torrent for scene: ${removed.sceneId}`,
-            {
-              sceneId: removed.sceneId,
-              qbitHash: removed.qbitHash,
-              reason: "manual_removal",
-            },
-            { sceneId: removed.sceneId }
-          );
         }
+
+        await logsService.info(
+          "torrent",
+          `Cancelled manually removed torrent for scene: ${removed.sceneId}`,
+          {
+            sceneId: removed.sceneId,
+            qbitHash: removed.qbitHash,
+            reason: "manual_removal",
+          },
+          { sceneId: removed.sceneId }
+        );
       } catch (error) {
         app.log.error(
           { error, sceneId: removed.sceneId },

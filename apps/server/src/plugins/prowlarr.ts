@@ -17,10 +17,11 @@ export default fp(async (app) => {
     const settings = await settingsService.getSettings();
 
     // Check if Prowlarr is enabled and configured
-    // Note: Assuming settings structure based on other plugins. 
+    // Note: Assuming settings structure based on other plugins.
     // If prowlarr is not in settings yet, we might need to verify settings types.
     // Using optional chaining just in case.
-    if (!settings.prowlarr?.enabled || !settings.prowlarr?.url) {
+    const prowlarrUrl = settings.prowlarr?.apiUrl
+    if (!settings.prowlarr?.enabled || !prowlarrUrl) {
         app.log.warn("Prowlarr not configured. Indexer management will be disabled.");
         // We explicitly set it to undefined so app.prowlarr is defined but empty
         app.decorate("prowlarr", undefined);
@@ -28,7 +29,7 @@ export default fp(async (app) => {
     }
 
     const prowlarr = new ProwlarrService({
-        baseUrl: settings.prowlarr.url,
+        baseUrl: prowlarrUrl,
         apiKey: settings.prowlarr.apiKey || "",
     });
 

@@ -69,17 +69,21 @@ export class SettingsService {
           ...DEFAULT_SETTINGS.tpdb,
           ...(savedSettings.tpdb || {}),
         },
-        metadata: {
-          ...DEFAULT_SETTINGS.metadata,
-          ...(savedSettings.metadata || {}),
-        },
         prowlarr: {
           ...DEFAULT_SETTINGS.prowlarr,
           ...(savedSettings.prowlarr || {}),
+          // Auto-remove trailing slash from apiUrl to prevent double slashes
+          ...(savedSettings.prowlarr?.apiUrl && {
+            apiUrl: savedSettings.prowlarr.apiUrl.replace(/\/$/, '')
+          }),
         },
         qbittorrent: {
           ...DEFAULT_SETTINGS.qbittorrent,
           ...(savedSettings.qbittorrent || {}),
+          // Auto-remove trailing slash from url to prevent double slashes
+          ...(savedSettings.qbittorrent?.url && {
+            url: savedSettings.qbittorrent.url.replace(/\/$/, '')
+          }),
         },
         ai: {
           ...DEFAULT_SETTINGS.ai,
@@ -144,7 +148,7 @@ export class SettingsService {
    * Business rule: Validate configuration before testing
    */
   async testConnection(dto: TestConnectionDTO): Promise<TestConnectionResult> {
-    this.logger.info({ service: dto.service }, "Testing service connection");
+    this.logger.info({ service: dto.service, serviceType: typeof dto.service }, "Testing service connection");
 
     const settings = await this.getSettings();
 
@@ -159,6 +163,7 @@ export class SettingsService {
         case "qbittorrent":
           return await this.testQBittorrentConnection(settings.qbittorrent);
         default:
+          this.logger.warn({ service: dto.service, receivedType: typeof dto.service }, "Unknown service in switch");
           return { success: false, message: "Unknown service" };
       }
     } catch (error) {

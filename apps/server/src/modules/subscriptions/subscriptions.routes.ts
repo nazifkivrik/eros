@@ -15,6 +15,7 @@ import {
   EntityTypeParamsSchema,
   CheckSubscriptionParamsSchema,
   DeleteSubscriptionQuerySchema,
+  SubscriptionListQuerySchema,
   SubscriptionListResponseSchema,
   SubscriptionsByTypeResponseSchema,
   CheckSubscriptionResponseSchema,
@@ -39,13 +40,14 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
         tags: ["subscriptions"],
         summary: "List subscriptions",
         description: "Get all subscriptions with detailed entity information (performers, studios, scenes)",
+        querystring: SubscriptionListQuerySchema,
         response: {
           200: SubscriptionListResponseSchema,
         },
       },
     },
-    async () => {
-      return await subscriptionsController.list();
+    async (request) => {
+      return await subscriptionsController.list(request.query);
     }
   );
 
@@ -171,25 +173,6 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request) => {
       return await subscriptionsController.delete(request.params, request.query);
-    }
-  );
-
-  // Toggle monitoring
-  app.post(
-    "/:id/toggle-monitoring",
-    {
-      schema: {
-        tags: ["subscriptions"],
-        summary: "Toggle monitoring",
-        description: "Enable or disable automatic monitoring for new content from this subscription",
-        params: SubscriptionParamsSchema,
-        response: {
-          200: SubscriptionSchema,
-        },
-      },
-    },
-    async (request) => {
-      return await subscriptionsController.toggleMonitoring(request.params);
     }
   );
 

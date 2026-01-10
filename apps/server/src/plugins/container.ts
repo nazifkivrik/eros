@@ -73,6 +73,7 @@ export default fp(async (app: FastifyInstance) => {
     entityResolverService: container.cradle.entityResolverService,
     sceneMatcherService: container.cradle.sceneMatcherService,
     aiMatchingService: container.cradle.aiMatchingService,
+    crossEncoderService: container.cradle.crossEncoderService,
     speedProfileService: container.cradle.speedProfileService,
 
     // Clean Architecture - Repositories
@@ -85,6 +86,7 @@ export default fp(async (app: FastifyInstance) => {
     settingsRepository: container.cradle.settingsRepository,
     downloadQueueRepository: container.cradle.downloadQueueRepository,
     searchRepository: container.cradle.searchRepository,
+    aiMatchScoresRepository: container.cradle.aiMatchScoresRepository,
 
     // Clean Architecture - Services
     performersService: container.cradle.performersService,

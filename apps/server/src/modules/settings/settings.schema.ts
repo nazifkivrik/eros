@@ -8,17 +8,12 @@ export const SettingsSchema: z.ZodType<AppSettings> = z.object({
     downloadPath: z.string(),
     scenesPath: z.string(),
     incompletePath: z.string(),
-    enableNotifications: z.boolean(),
-    minIndexersForMetadataLess: z.number(),
-    groupingThreshold: z.number(),
   }),
   fileManagement: z.object({
     deleteFilesOnRemove: z.boolean(),
     deleteTorrentOnRemove: z.boolean(),
     removeFromQbitAfterDays: z.number(),
     renameOnMetadata: z.boolean(),
-    autoRedownloadDeletedScenes: z.boolean(),
-    readdManuallyRemovedTorrents: z.boolean(),
   }),
   stashdb: z.object({
     apiUrl: z.string(),
@@ -29,12 +24,6 @@ export const SettingsSchema: z.ZodType<AppSettings> = z.object({
     apiUrl: z.string(),
     apiKey: z.string(),
     enabled: z.boolean(),
-  }),
-  metadata: z.object({
-    primarySource: z.enum(["stashdb", "tpdb"]),
-    enableMultiSource: z.boolean(),
-    autoLinkOnMatch: z.boolean(),
-    hashLookupEnabled: z.boolean(),
   }),
   prowlarr: z.object({
     apiUrl: z.string(),
@@ -48,11 +37,10 @@ export const SettingsSchema: z.ZodType<AppSettings> = z.object({
     enabled: z.boolean(),
   }),
   ai: z.object({
-    enabled: z.boolean(),
-    model: z.string(),
-    threshold: z.number(),
-    groupingThreshold: z.number(),
-    levenshteinThreshold: z.number(),
+    useCrossEncoder: z.boolean(),
+    crossEncoderThreshold: z.number(),
+    unknownThreshold: z.number(),
+    groupingCount: z.number(),
   }),
   jobs: z.object({
     subscriptionSearch: z.object({
