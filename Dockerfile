@@ -120,7 +120,6 @@ COPY --from=builder --chown=eros:eros /app/apps/server/dist ./apps/server/dist
 COPY --from=builder --chown=eros:eros /app/apps/server/package.json ./apps/server/
 
 # Frontend (Next.js)
-COPY --from=builder --chown=eros:eros /app/apps/web/public ./apps/web/public
 RUN mkdir -p apps/web/.next && chown eros:eros apps/web/.next
 COPY --from=builder --chown=eros:eros /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=eros:eros /app/apps/web/.next/static ./apps/web/.next/static
