@@ -1,5 +1,5 @@
 import type { Logger } from "pino";
-import type { JobProgressService } from "../../services/job-progress.service.js";
+import type { JobProgressService } from "../../infrastructure/job-progress.service.js";
 
 /**
  * Jobs Service Interface
@@ -65,12 +65,17 @@ export class JobsService {
 
   /**
    * Manually trigger a job
+   * Returns immediately without waiting for job completion
    */
   async triggerJob(jobName: string): Promise<void> {
     this.ensureSchedulerAvailable();
 
     try {
-      await this.scheduler!.triggerJob(jobName);
+      // Trigger job without waiting for completion to avoid timeout
+      // Job runs in background, errors are logged but don't affect response
+      this.scheduler!.triggerJob(jobName).catch(error => {
+        this.logger.error({ error, jobName }, "Job execution failed");
+      });
       this.logger.info({ jobName }, "Job triggered successfully");
     } catch (error) {
       this.logger.error({ error, jobName }, "Failed to trigger job");

@@ -288,7 +288,25 @@ container.register({
 
 **Always use Clean Architecture for new code.**
 
-### Component Architecture (Frontend)
+### Feature-Based Architecture (Frontend)
+
+The frontend uses a Feature-Based Architecture to organize code by domain domain rather than technical type.
+
+```
+src/
+├── app/                 # Next.js App Router (pages/layouts)
+├── components/          # Shared UI components (dumb components)
+├── features/            # Feature-based modules
+│   └── torrent-search/  # Example Feature
+│       ├── components/  # Feature-specific components
+│       ├── hooks/       # Feature-specific hooks
+│       ├── types/       # Feature-specific types
+│       └── utils/       # Feature-specific utilities
+├── hooks/               # Shared hooks
+└── lib/                 # Shared libraries/utils
+```
+
+### Component Guidelines
 
 - **Default to Server Components (RSC)**: Only add `'use client'` when using hooks or event listeners
 - **Server Actions**: Use for all data mutations instead of API Routes
@@ -378,15 +396,17 @@ const userRoutes: FastifyPluginAsyncZod = async (app) => {
 
 ```text
 src/
-  ├── app.ts            # App factory (plugin registration)
-  ├── server.ts         # Entry point (port listening)
-  ├── plugins/          # Global plugins (DB, Redis, Auth)
-  └── modules/          # Feature modules
-      └── user/
-          ├── user.routes.ts
-          ├── user.schema.ts
-          ├── user.service.ts
-          └── user.types.ts
+  ├── app.ts            # App factory
+  ├── server.ts         # Entry point
+  ├── container/        # DI Container registration
+  ├── plugins/          # Global plugins
+  ├── interfaces/       # Presentation Layer (Controllers)
+  │   └── http/         # HTTP Controllers
+  ├── application/      # Application Layer (Use Cases/Services)
+  │   └── services/     # Business Logic
+  └── infrastructure/   # Infrastructure Layer
+      ├── repositories/ # Data Access
+      └── external/     # External APIs (e.g. StashDB)
 ```
 
 ## Security Requirements

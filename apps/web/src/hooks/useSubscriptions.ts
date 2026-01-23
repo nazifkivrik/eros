@@ -14,14 +14,19 @@ interface SubscriptionFilters {
 
 export function useSubscriptions(filters?: SubscriptionFilters) {
   // Note: showInactive is filtered client-side, not sent to API
-  const queryParams = {
-    search: filters?.search,
-    includeMetaless: filters?.includeMetaless,
-  };
+  // Only include truthy params in query key to avoid cache issues
+  // Don't send false values as query params (e.g., includeMetaless=false)
+  const queryParams = Object.fromEntries(
+    Object.entries({
+      search: filters?.search,
+      includeMetaless: filters?.includeMetaless,
+    }).filter(([_, v]) => v) // filter out falsy values (undefined, false, empty string)
+  );
 
   return useQuery({
     queryKey: [...queryKeys.subscriptions.all, queryParams],
     queryFn: () => apiClient.getSubscriptions(queryParams),
+    staleTime: 1000 * 30, // 30 seconds - consider data fresh for 30s
   });
 }
 

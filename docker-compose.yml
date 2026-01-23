@@ -21,6 +21,7 @@ services:
       - SCENES_PATH=/app/media/scenes
       - INCOMPLETE_PATH=/app/media/incomplete
       - SESSION_SECRET=${SESSION_SECRET:-change-this-secret}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
       # Don't override NEXT_PUBLIC_API_URL - let Dockerfile default (/api) work for browser
       # Browser needs relative URL, not localhost which resolves to user's machine in Docker
       - PUID=${PUID:-1000}

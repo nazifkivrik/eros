@@ -16,7 +16,7 @@ import {
   qualityProfiles,
 } from "@repo/database";
 import { nanoid } from "nanoid";
-import { createTorrentParserService } from "../services/parser.service.js";
+import { createTorrentParserService } from "../application/services/torrent-quality/parser.service.js";
 
 export async function subscriptionSearchJob(app: FastifyInstance) {
   // Get services from DI container
@@ -318,7 +318,7 @@ async function processSubscription(
       );
 
       // Get qBittorrent settings
-      const { settingsService, qbittorrentService } = app.container;
+      const { settingsService, torrentClient } = app.container;
       const settings = await settingsService.getSettings();
       const qbittorrentConfig = settings.qbittorrent;
 
@@ -326,7 +326,7 @@ async function processSubscription(
         `[Subscription Search] qBittorrent config: enabled=${qbittorrentConfig.enabled}, url=${qbittorrentConfig.url}`
       );
 
-      if (!qbittorrentService || !qbittorrentConfig.enabled || !qbittorrentConfig.url) {
+      if (!torrentClient || !qbittorrentConfig.enabled || !qbittorrentConfig.url) {
         app.log.warn(
           `[Subscription Search] ⚠️ qBittorrent not configured, torrents will only be added to database queue`
         );
@@ -436,7 +436,7 @@ async function processSubscription(
         let addToClientError: string | null = null;
         let qbitHash: string | null = null;
 
-        if (qbittorrentService && (torrent.downloadUrl || torrent.infoHash)) {
+        if (torrentClient && (torrent.downloadUrl || torrent.infoHash)) {
           const downloadPath = settings.general.incompletePath || "/media/incomplete";
 
           // Prefer infoHash to create magnet link (more reliable than Prowlarr's downloadUrl)
@@ -464,7 +464,7 @@ async function processSubscription(
 
           // Use addTorrentAndGetHash to get the qBittorrent hash immediately
           try {
-            qbitHash = await qbittorrentService.addTorrentAndGetHash(
+            qbitHash = await torrentClient.addTorrentAndGetHash(
               {
                 magnetLinks: magnetLink ? [magnetLink] : undefined,
                 urls: torrentUrl ? [torrentUrl] : undefined,
@@ -509,7 +509,7 @@ async function processSubscription(
           }
         } else {
           app.log.info(
-            `[Subscription Search] Skipping qBittorrent: service=${!!qbittorrentService}, downloadUrl=${!!torrent.downloadUrl}, infoHash=${!!torrent.infoHash}`
+            `[Subscription Search] Skipping qBittorrent: service=${!!torrentClient}, downloadUrl=${!!torrent.downloadUrl}, infoHash=${!!torrent.infoHash}`
           );
         }
 
@@ -762,7 +762,7 @@ async function processBulkSceneResults(
   logsService: any,
   progressService: any
 ) {
-  const { settingsService, qbittorrentService } = app.container;
+  const { settingsService, torrentClient } = app.container;
   const settings = await settingsService.getSettings();
   const qbittorrentConfig = settings.qbittorrent;
 
@@ -831,9 +831,9 @@ async function processBulkSceneResults(
       );
     }
 
-    // Add to qBittorrent if configured and autoDownload is enabled
+    // Add to qBittorrent if configured
     let qbitHash: string | null = null;
-    if (subscription.autoDownload && qbittorrentService && qbittorrentConfig.enabled) {
+    if (torrentClient && qbittorrentConfig.enabled) {
       try {
         const downloadPath = settings.general.incompletePath || "/media/incomplete";
 
@@ -842,7 +842,7 @@ async function processBulkSceneResults(
           magnetLink = `magnet:?xt=urn:btih:${selectedTorrent.infoHash}&dn=${encodeURIComponent(selectedTorrent.title)}`;
         }
 
-        qbitHash = await qbittorrentService.addTorrentAndGetHash({
+        qbitHash = await torrentClient.addTorrentAndGetHash({
           magnetLinks: magnetLink ? [magnetLink] : undefined,
           urls: selectedTorrent.downloadUrl ? [selectedTorrent.downloadUrl] : undefined,
           savePath: downloadPath,
@@ -876,7 +876,7 @@ async function processBulkSceneResults(
         size: selectedTorrent.size || 0,
         seeders: selectedTorrent.seeders || 0,
         quality: detectQualityFromTitle(selectedTorrent.title),
-        status: subscription.autoDownload ? "downloading" : "queued",
+        status: "downloading",
         addedAt: new Date().toISOString(),
         completedAt: null,
       });
@@ -1029,6 +1029,13 @@ async function processPerformerSubscription(
     const MAX_TORRENTS_PER_RUN = 50;
     const torrentsToAdd = selectedTorrents.slice(0, MAX_TORRENTS_PER_RUN);
 
+    app.log.info({
+      autoDownload: subscription.autoDownload,
+      torrentsToAdd: torrentsToAdd.length,
+      firstTorrentInfoHash: torrentsToAdd[0]?.infoHash,
+      firstTorrentTitle: torrentsToAdd[0]?.title,
+    }, "[Subscription Search] About to process torrents for queue");
+
     for (const torrent of torrentsToAdd) {
       if (torrent.sceneId) {
         foundSceneIds.add(torrent.sceneId);
@@ -1039,11 +1046,28 @@ async function processPerformerSubscription(
         where: eq(downloadQueue.torrentHash, torrent.infoHash),
       });
 
-      if (existing) continue;
+      if (existing) {
+        app.log.info({
+          title: torrent.title,
+          infoHash: torrent.infoHash,
+          existingId: existing.id,
+        }, "[Subscription Search] Skipping - torrent already in queue");
+        continue;
+      }
+
+      app.log.info({
+        title: torrent.title,
+        infoHash: torrent.infoHash,
+      }, "[Subscription Search] Adding torrent to queue");
 
       // Add to queue
       await addToDownloadQueue(app, torrent, subscription, entity.name);
     }
+  } else {
+    app.log.info({
+      autoDownload: subscription.autoDownload,
+      selectedTorrentsCount: selectedTorrents.length,
+    }, "[Subscription Search] Skipping queue addition - autoDownload disabled or no torrents");
   }
 
   await logsService.info("subscription", `Performer search completed: ${entity.name}`, {
@@ -1206,7 +1230,7 @@ async function addToDownloadQueue(
   subscription: any,
   entityName: string
 ) {
-  const { settingsService, qbittorrentService, fileManagerService } = app.container;
+  const { settingsService, torrentClient, fileManagerService, indexer } = app.container;
   const settings = await settingsService.getSettings();
   const qbittorrentConfig = settings.qbittorrent;
 
@@ -1219,10 +1243,10 @@ async function addToDownloadQueue(
 
     // Remove studio/performer name from the start of the title for metadata-less scenes
     // This prevents "Studio Name - Scene Title" from being saved as the scene title
-    if (entity.name) {
+    if (entityName) {
       const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       // Match at the start: "Name - ", "Name: ", "Name, ", "Name " followed by separator
-      const startPattern = new RegExp(`^${escapeRegex(entity.name)}\\s*[-–—:,]?\\s*`, "i");
+      const startPattern = new RegExp(`^${escapeRegex(entityName)}\\s*[-–—:,]?\\s*`, "i");
       cleanedTitle = cleanedTitle.replace(startPattern, "").trim();
     }
 
@@ -1283,18 +1307,47 @@ async function addToDownloadQueue(
 
   // Add to qBittorrent
   let qbitHash: string | null = null;
-  if (subscription.autoDownload && qbittorrentService && qbittorrentConfig.enabled) {
+
+  if (subscription.autoDownload && torrentClient && qbittorrentConfig.enabled) {
     try {
       const downloadPath = settings.general.incompletePath || "/media/incomplete";
       let magnetLink: string | undefined;
 
-      if (torrent.infoHash) {
+      app.log.info({
+        autoDownload: subscription.autoDownload,
+        torrentClientExists: !!torrentClient,
+        qbittorrentEnabled: qbittorrentConfig.enabled,
+        downloadUrl: torrent.downloadUrl?.substring(0, 100) + "...",
+        infoHash: torrent.infoHash,
+      }, "[Subscription Search] qBittorrent addition check");
+
+      // Check if downloadUrl is already a magnet link (from Prowlarr)
+      if (torrent.downloadUrl?.startsWith("magnet:")) {
+        magnetLink = torrent.downloadUrl;
+        app.log.info({ magnetLinkLength: magnetLink.length }, "[Subscription Search] Using direct magnet link from Prowlarr");
+      } else if (torrent.infoHash) {
+        // Create magnet link from infoHash
         magnetLink = `magnet:?xt=urn:btih:${torrent.infoHash}&dn=${encodeURIComponent(torrent.title)}`;
+        app.log.info({ infoHash: torrent.infoHash }, "[Subscription Search] Created magnet link from infoHash");
+      } else if (torrent.downloadUrl && indexer?.getMagnetLink) {
+        // Use indexer proxy to get magnet link from non-magnet URL
+        app.log.info({ downloadUrl: torrent.downloadUrl.substring(0, 100) }, "[Subscription Search] Using indexer proxy to get magnet link");
+        const proxiedMagnet = await indexer.getMagnetLink(torrent.downloadUrl);
+        if (proxiedMagnet) {
+          magnetLink = proxiedMagnet;
+          app.log.info({ magnetLinkLength: magnetLink.length }, "[Subscription Search] Got magnet link from indexer proxy");
+        }
       }
 
-      qbitHash = await qbittorrentService.addTorrentAndGetHash({
+      app.log.info({
+        hasMagnetLink: !!magnetLink,
+        hasDownloadUrl: !!torrent.downloadUrl,
+        magnetLinkPreview: magnetLink ? magnetLink.substring(0, 100) + "..." : "none",
+      }, "[Subscription Search] About to call addTorrentAndGetHash");
+
+      qbitHash = await torrentClient.addTorrentAndGetHash({
         magnetLinks: magnetLink ? [magnetLink] : undefined,
-        urls: torrent.downloadUrl ? [torrent.downloadUrl] : undefined,
+        urls: magnetLink ? undefined : (torrent.downloadUrl ? [torrent.downloadUrl] : undefined),
         savePath: downloadPath,
         category: "eros",
         paused: false,
@@ -1304,6 +1357,10 @@ async function addToDownloadQueue(
 
       if (qbitHash) {
         app.log.info(`[Subscription Search] ✅ Added to qBittorrent: ${torrent.title} (qbitHash: ${qbitHash})`);
+      } else if (magnetLink) {
+        app.log.warn(`[Subscription Search] Failed to add torrent to qBittorrent: ${torrent.title}`);
+      } else {
+        app.log.warn(`[Subscription Search] No magnet link available for: ${torrent.title}`);
       }
     } catch (error) {
       app.log.error(`[Subscription Search] Failed to add to qBittorrent: ${error}`);

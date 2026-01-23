@@ -7,31 +7,31 @@ import type { Database } from "@repo/database";
 import { downloadQueue, sceneFiles } from "@repo/database";
 import { eq } from "drizzle-orm";
 import type { FileManagerService } from "./file-manager.service.js";
-import type { QBittorrentService } from "./qbittorrent.service.js";
-import type { LogsService } from "./logs.service.js";
+import type { ITorrentClient } from "../infrastructure/adapters/interfaces/torrent-client.interface.js";
+import type { LogsService } from "../application/services/logs.service.js";
 import { logger } from "../utils/logger.js";
 
 export class TorrentCompletionService {
   private db: Database;
   private fileManager: FileManagerService;
   private logsService: LogsService;
-  private qbittorrent?: QBittorrentService;
+  private torrentClient?: ITorrentClient;
 
   constructor({
     db,
     fileManagerService,
     logsService,
-    qbittorrent,
+    torrentClient,
   }: {
     db: Database;
     fileManagerService: FileManagerService;
     logsService: LogsService;
-    qbittorrent?: QBittorrentService;
+    torrentClient?: ITorrentClient;
   }) {
     this.db = db;
     this.fileManager = fileManagerService;
     this.logsService = logsService;
-    this.qbittorrent = qbittorrent;
+    this.torrentClient = torrentClient;
   }
 
   /**
@@ -40,11 +40,11 @@ export class TorrentCompletionService {
    */
   async handleTorrentCompleted(qbitHash: string): Promise<void> {
     try {
-      // Check if qBittorrent is configured
-      if (!this.qbittorrent) {
+      // Check if torrent client is configured
+      if (!this.torrentClient) {
         await this.logsService.error(
           "torrent",
-          "qBittorrent not configured, cannot process completed torrent",
+          "Torrent client not configured, cannot process completed torrent",
           { qbitHash }
         );
         return;
@@ -64,20 +64,20 @@ export class TorrentCompletionService {
         return;
       }
 
-      // 2. Get torrent info from qBittorrent
-      const torrentInfo = await this.qbittorrent.getTorrentProperties(qbitHash);
+      // 2. Get torrent info from torrent client
+      const torrentInfo = await this.torrentClient.getTorrentProperties(qbitHash);
 
       if (!torrentInfo) {
         await this.logsService.error(
           "torrent",
-          `Failed to get torrent info from qBittorrent for hash: ${qbitHash}`,
+          `Failed to get torrent info from torrent client for hash: ${qbitHash}`,
           { qbitHash, sceneId: queueItem.sceneId },
           { sceneId: queueItem.sceneId }
         );
         return;
       }
 
-      // 3. Get torrent save path (where qBittorrent downloaded files)
+      // 3. Get torrent save path (where torrent client downloaded files)
       const sourcePath = torrentInfo.save_path || torrentInfo.content_path;
 
       if (!sourcePath) {
@@ -102,8 +102,8 @@ export class TorrentCompletionService {
         { sceneId: queueItem.sceneId }
       );
 
-      // 4. Move files to scenes folder and generate metadata using qBittorrent API
-      // This preserves seeding by letting qBittorrent track the file location
+      // 4. Move files to scenes folder and generate metadata using torrent client API
+      // This preserves seeding by letting torrent client track the file location
       await this.logsService.info(
         "torrent",
         `Calling moveCompletedTorrentViaQBit for scene: ${queueItem.sceneId}`,
@@ -114,7 +114,7 @@ export class TorrentCompletionService {
       const moveResult = await this.fileManager.moveCompletedTorrentViaQBit(
         queueItem.sceneId,
         qbitHash,
-        this.qbittorrent
+        this.torrentClient
       );
 
       await this.logsService.info(
@@ -248,12 +248,12 @@ export function createTorrentCompletionService(
   db: Database,
   fileManager: FileManagerService,
   logsService: LogsService,
-  qbittorrent?: QBittorrentService
+  torrentClient?: ITorrentClient
 ): TorrentCompletionService {
   return new TorrentCompletionService({
     db,
     fileManagerService: fileManager,
     logsService,
-    qbittorrent,
+    torrentClient,
   });
 }

@@ -155,6 +155,7 @@ export const scenes = sqliteTable("scenes", {
   // System
   hasMetadata: integer("has_metadata", { mode: "boolean" }).notNull().default(true),
   inferredFromIndexers: integer("inferred_from_indexers", { mode: "boolean" }).notNull().default(false),
+  isSubscribed: integer("is_subscribed", { mode: "boolean" }).notNull().default(true),  // Soft delete for scenes - false means unsubscribed but kept for re-subscription
   discoveryGroupId: text("discovery_group_id"),  // Links to torrent group if discovered from indexers
 
   ...timestamps,

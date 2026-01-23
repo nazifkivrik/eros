@@ -1,29 +1,42 @@
 import fp from "fastify-plugin";
-import { TPDBService } from "../services/tpdb/tpdb.service.js";
+import { SettingsRepository } from "../infrastructure/repositories/settings.repository.js";
+
+interface TPDBConfig {
+  apiUrl: string;
+  apiKey: string;
+}
 
 declare module "fastify" {
   interface FastifyInstance {
-    tpdb: TPDBService;
+    tpdbConfig?: TPDBConfig;
   }
 }
 
 export default fp(async (app) => {
   await app.after();
 
-  const { createSettingsService } = await import("../services/settings.service.js");
-  const settingsService = createSettingsService(app.db);
-  const settings = await settingsService.getSettings();
+  // Get settings from database using repository
+  const settingsRepository = new SettingsRepository({ db: app.db });
+  const settingRecord = await settingsRepository.findByKey("app-settings");
+
+  // Use default settings if none found
+  const { DEFAULT_SETTINGS } = await import("@repo/shared-types");
+  const settings = settingRecord
+    ? (settingRecord.value as any)
+    : DEFAULT_SETTINGS;
 
   if (!settings.tpdb?.enabled || !settings.tpdb?.apiKey) {
     app.log.warn("TPDB not configured. Metadata features will be limited.");
+    app.decorate("tpdbConfig", undefined);
+    return;
   }
 
-  const tpdb = new TPDBService({
+  const tpdbConfig: TPDBConfig = {
     apiUrl: settings.tpdb?.apiUrl || "https://api.theporndb.net",
     apiKey: settings.tpdb?.apiKey || "",
-  });
+  };
 
-  app.decorate("tpdb", tpdb);
+  app.decorate("tpdbConfig", tpdbConfig);
 
   app.log.info(
     {
@@ -31,6 +44,6 @@ export default fp(async (app) => {
       hasApiKey: !!settings.tpdb?.apiKey,
       enabled: settings.tpdb?.enabled,
     },
-    "TPDB plugin registered"
+    "TPDB config registered"
   );
 });

@@ -5,10 +5,10 @@ import {
   SettingsSchema,
   TestServiceParamsSchema,
 } from "../../modules/settings/settings.schema.js";
-import { QBittorrentService } from "../../services/qbittorrent.service.js";
-import { TPDBService } from "../../services/tpdb/tpdb.service.js";
-import { StashDBService } from "../../services/stashdb.service.js";
-import { ProwlarrService } from "../../services/prowlarr.service.js";
+import { createQBittorrentAdapter } from "../../infrastructure/adapters/qbittorrent.adapter.js";
+import { createTPDBAdapter } from "../../infrastructure/adapters/tpdb.adapter.js";
+import { createStashDBAdapter } from "../../infrastructure/adapters/stashdb.adapter.js";
+import { createProwlarrAdapter } from "../../infrastructure/adapters/prowlarr.adapter.js";
 import type { AppSettings } from "@repo/shared-types";
 
 /**
@@ -169,12 +169,12 @@ export class SettingsController {
   ): Promise<void> {
     // Reload StashDB plugin
     if (settings.stashdb?.apiKey) {
-      const stashdb = new StashDBService({
+      const stashdb = createStashDBAdapter({
         apiUrl: "https://stashdb.org/graphql",
         apiKey: settings.stashdb.apiKey,
-      });
+      }, this.logger);
       // Update Fastify decorator
-      app.stashdb = stashdb;
+      app.stashdb = stashdb as any;
       // Update DI container (direct assignment for runtime update)
       (app.container as any).stashdbService = stashdb;
       (app.container as any).stashdb = stashdb;
@@ -183,12 +183,12 @@ export class SettingsController {
 
     // Reload TPDB plugin
     if (settings.tpdb?.apiKey) {
-      const tpdb = new TPDBService({
+      const tpdb = createTPDBAdapter({
         apiUrl: settings.tpdb.apiUrl || "https://api.theporndb.net",
         apiKey: settings.tpdb.apiKey,
-      });
+      }, this.logger);
       // Update Fastify decorator
-      app.tpdb = tpdb;
+      app.tpdb = tpdb as any;
       // Update DI container (direct assignment for runtime update)
       (app.container as any).tpdbService = tpdb;
       (app.container as any).tpdb = tpdb;
@@ -197,47 +197,34 @@ export class SettingsController {
 
     // Reload qBittorrent plugin
     if (settings.qbittorrent?.enabled && settings.qbittorrent?.url) {
-      const qbittorrent = new QBittorrentService({
+      const qbittorrent = createQBittorrentAdapter({
         url: settings.qbittorrent.url,
         username: settings.qbittorrent.username || "admin",
         password: settings.qbittorrent.password || "adminadmin",
-      });
+      }, this.logger);
 
-      try {
-        const connected = await qbittorrent.testConnection();
-        if (connected) {
-          app.qbittorrent = qbittorrent;
-          // Update DI container (direct assignment for runtime update)
-          (app.container as any).qbittorrentService = qbittorrent;
-          (app.container as any).qbittorrent = qbittorrent;
-          this.logger.info("qBittorrent plugin reloaded and connected");
-        } else {
-          app.qbittorrent = null;
-          (app.container as any).qbittorrentService = null;
-          (app.container as any).qbittorrent = null;
-          this.logger.warn("qBittorrent plugin reloaded but connection failed");
-        }
-      } catch (error) {
+      // Test connection (adapter method)
+      const connected = await qbittorrent.testConnection();
+      if (connected) {
+        app.qbittorrent = qbittorrent as any;
+        this.logger.info("qBittorrent plugin reloaded and connected");
+      } else {
         app.qbittorrent = null;
-        (app.container as any).qbittorrentService = null;
-        (app.container as any).qbittorrent = null;
-        this.logger.error({ error }, "Failed to reload qBittorrent plugin");
+        this.logger.warn("qBittorrent plugin reloaded but connection failed");
       }
     } else {
       app.qbittorrent = null;
-      (app.container as any).qbittorrentService = null;
-      (app.container as any).qbittorrent = null;
     }
 
     // Reload Prowlarr plugin
     if (settings.prowlarr?.enabled && settings.prowlarr?.apiUrl && settings.prowlarr?.apiKey) {
-      const prowlarr = new ProwlarrService({
-        baseUrl: settings.prowlarr.apiUrl, // ProwlarrService expects 'baseUrl'
+      const prowlarr = createProwlarrAdapter({
+        baseUrl: settings.prowlarr.apiUrl,
         apiKey: settings.prowlarr.apiKey,
-      });
+      }, this.logger);
 
       // Update Fastify decorator
-      app.prowlarr = prowlarr;
+      app.prowlarr = prowlarr as any;
       // Update DI container (direct assignment for runtime update)
       (app.container as any).prowlarrService = prowlarr;
       (app.container as any).prowlarr = prowlarr;

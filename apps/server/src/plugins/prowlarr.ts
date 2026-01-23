@@ -1,49 +1,42 @@
 import fp from "fastify-plugin";
-import { ProwlarrService } from "../services/prowlarr.service.js";
+import { SettingsRepository } from "../infrastructure/repositories/settings.repository.js";
+
+interface ProwlarrConfig {
+  baseUrl: string;
+  apiKey: string;
+}
 
 declare module "fastify" {
-    interface FastifyInstance {
-        prowlarr: ProwlarrService | undefined;
-    }
+  interface FastifyInstance {
+    prowlarrConfig?: ProwlarrConfig;
+  }
 }
 
 export default fp(async (app) => {
-    // Wait for database plugin to be ready
-    await app.after();
+  await app.after();
 
-    // Get settings from database
-    const { createSettingsService } = await import("../services/settings.service.js");
-    const settingsService = createSettingsService(app.db);
-    const settings = await settingsService.getSettings();
+  // Get settings from database using repository
+  const settingsRepository = new SettingsRepository({ db: app.db });
+  const settingRecord = await settingsRepository.findByKey("app-settings");
 
-    // Check if Prowlarr is enabled and configured
-    // Note: Assuming settings structure based on other plugins.
-    // If prowlarr is not in settings yet, we might need to verify settings types.
-    // Using optional chaining just in case.
-    const prowlarrUrl = settings.prowlarr?.apiUrl
-    if (!settings.prowlarr?.enabled || !prowlarrUrl) {
-        app.log.warn("Prowlarr not configured. Indexer management will be disabled.");
-        // We explicitly set it to undefined so app.prowlarr is defined but empty
-        app.decorate("prowlarr", undefined);
-        return;
-    }
+  // Use default settings if none found
+  const { DEFAULT_SETTINGS } = await import("@repo/shared-types");
+  const settings = settingRecord
+    ? (settingRecord.value as any)
+    : DEFAULT_SETTINGS;
 
-    const prowlarr = new ProwlarrService({
-        baseUrl: prowlarrUrl,
-        apiKey: settings.prowlarr.apiKey || "",
-    });
+  const prowlarrUrl = settings.prowlarr?.apiUrl;
+  if (!settings.prowlarr?.enabled || !prowlarrUrl) {
+    app.log.warn("Prowlarr not configured. Indexer management will be disabled.");
+    app.decorate("prowlarrConfig", undefined);
+    return;
+  }
 
-    // Test connection?
-    try {
-        const status = await prowlarr.getSystemStatus();
-        app.log.info({ version: status.version }, "Prowlarr plugin registered and connected");
-    } catch (error) {
-        app.log.error({ error, url: settings.prowlarr.url }, "Failed to connect to Prowlarr");
-        // We still decorate, maybe the service can recover or settings change? 
-        // Usually better to fail open or set null.
-        // Given qbittorrent sets null on failure, let's stick to that pattern or undefined.
-        // But container expects Service | undefined.
-    }
+  const prowlarrConfig: ProwlarrConfig = {
+    baseUrl: prowlarrUrl,
+    apiKey: settings.prowlarr.apiKey || "",
+  };
 
-    app.decorate("prowlarr", prowlarr);
+  app.decorate("prowlarrConfig", prowlarrConfig);
+  app.log.info({ apiUrl: prowlarrUrl }, "Prowlarr config registered");
 });

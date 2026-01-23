@@ -1,6 +1,5 @@
 import type { Logger } from "pino";
-import type { TPDBService } from "../../services/tpdb/tpdb.service.js";
-import type { StashDBService } from "../../services/stashdb.service.js";
+import type { IMetadataProvider } from "../../infrastructure/adapters/interfaces/metadata-provider.interface.js";
 import { SearchRepository } from "../../infrastructure/repositories/search.repository.js";
 import { SettingsRepository } from "../../infrastructure/repositories/settings.repository.js";
 import type { AppSettings } from "@repo/shared-types";
@@ -8,7 +7,7 @@ import type { AppSettings } from "@repo/shared-types";
 type MetadataSource = "tpdb" | "stashdb";
 
 interface MetadataServiceResult {
-  service: TPDBService | StashDBService;
+  service: IMetadataProvider;
   source: MetadataSource;
 }
 
@@ -25,27 +24,27 @@ export class SearchService {
   private searchRepository: SearchRepository;
   private settingsRepository: SettingsRepository;
   private logger: Logger;
-  private tpdbService?: TPDBService;
-  private stashdbService?: StashDBService;
+  private tpdbProvider?: IMetadataProvider;
+  private stashdbProvider?: IMetadataProvider;
 
   constructor({
     searchRepository,
     settingsRepository,
     logger,
-    tpdbService,
-    stashdbService,
+    tpdbProvider,
+    stashdbProvider,
   }: {
     searchRepository: SearchRepository;
     settingsRepository: SettingsRepository;
     logger: Logger;
-    tpdbService?: TPDBService;
-    stashdbService?: StashDBService;
+    tpdbProvider?: IMetadataProvider;
+    stashdbProvider?: IMetadataProvider;
   }) {
     this.searchRepository = searchRepository;
     this.settingsRepository = settingsRepository;
     this.logger = logger;
-    this.tpdbService = tpdbService;
-    this.stashdbService = stashdbService;
+    this.tpdbProvider = tpdbProvider;
+    this.stashdbProvider = stashdbProvider;
   }
 
   /**
@@ -59,18 +58,18 @@ export class SearchService {
     if (
       settings?.tpdb?.enabled &&
       settings.tpdb.apiKey &&
-      this.tpdbService
+      this.tpdbProvider
     ) {
       return {
-        service: this.tpdbService,
+        service: this.tpdbProvider,
         source: "tpdb",
       };
     }
 
     // Fall back to StashDB
-    if (settings?.stashdb?.enabled && this.stashdbService) {
+    if (settings?.stashdb?.enabled && this.stashdbProvider) {
       return {
-        service: this.stashdbService,
+        service: this.stashdbProvider,
         source: "stashdb",
       };
     }
@@ -93,30 +92,23 @@ export class SearchService {
   async searchAll(query: string, limit?: number, page?: number) {
     const { service, source } = await this.getMetadataService();
 
-    const [performers, studios, scenes] = await Promise.all([
+    const [performers, studiosResult, scenes] = await Promise.all([
       service.searchPerformers(query, limit, page).catch((err) => {
         this.logger.error({ err, query, source }, "Failed to search performers");
         return [];
       }),
-      source === "tpdb"
-        ? (service as TPDBService)
-          .searchSites(query, page)
-          .then((sites: any[]) => sites.slice(0, limit || 10))
-          .catch((err: any) => {
-            this.logger.error({ err, query, source }, "Failed to search sites");
-            return [];
-          })
-        : (service as StashDBService)
-          .searchStudios(query, limit, page)
-          .catch((err: any) => {
-            this.logger.error({ err, query, source }, "Failed to search studios");
-            return [];
-          }),
+      service.searchSites(query, page).catch((err) => {
+        this.logger.error({ err, query, source }, "Failed to search studios");
+        return { sites: [] };
+      }),
       service.searchScenes(query, limit, page).catch((err) => {
         this.logger.error({ err, query, source }, "Failed to search scenes");
         return [];
       }),
     ]);
+
+    // searchSites returns { sites: [...] }, extract the sites array
+    const studios = studiosResult.sites?.slice(0, limit || 10) || [];
 
     return {
       performers,
@@ -137,14 +129,10 @@ export class SearchService {
    * Search studios only
    */
   async searchStudios(query: string, limit?: number, page?: number) {
-    const { service, source } = await this.getMetadataService();
+    const { service } = await this.getMetadataService();
 
-    if (source === "tpdb") {
-      const sites = await (service as TPDBService).searchSites(query, page);
-      return sites.slice(0, limit || 10);
-    }
-
-    return await (service as StashDBService).searchStudios(query, limit, page);
+    const result = await service.searchSites(query, page);
+    return result.sites?.slice(0, limit || 10) || [];
   }
 
   /**
@@ -177,8 +165,8 @@ export class SearchService {
     }
 
     try {
-      if (source === "tpdb" && this.tpdbService) {
-        return await this.tpdbService.getPerformerById(externalId);
+      if (source === "tpdb" && this.tpdbProvider) {
+        return await this.tpdbProvider.getPerformerById(externalId);
       }
     } catch (error) {
       this.logger.error(
@@ -202,13 +190,8 @@ export class SearchService {
 
     // Fetch from external service
     try {
-      const { service, source } = await this.getMetadataService();
-
-      if (source === "tpdb") {
-        return await (service as TPDBService).getSiteById(id);
-      }
-
-      return await (service as StashDBService).getStudioDetails(id);
+      const { service } = await this.getMetadataService();
+      return await service.getStudioById(id);
     } catch (error) {
       this.logger.error({ error, id }, "Failed to fetch studio details");
       return null;
@@ -231,13 +214,8 @@ export class SearchService {
 
     // Fetch from external service
     try {
-      const { service, source } = await this.getMetadataService();
-
-      if (source === "tpdb") {
-        return await (service as TPDBService).getSceneById(id);
-      }
-
-      return await (service as StashDBService).getSceneDetails(id);
+      const { service } = await this.getMetadataService();
+      return await service.getSceneById(id);
     } catch (error) {
       this.logger.error({ error, id }, "Failed to fetch scene details");
       return null;

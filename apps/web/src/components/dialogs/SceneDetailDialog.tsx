@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import type { Scene } from "@repo/shared-types";
-import { useSceneDetails } from "@/hooks/useSearch";
-import { useCheckSubscription, useDeleteSubscription } from "@/hooks/useSubscriptions";
+import { useSceneDetails } from "@/features/search";
+import { useCheckSubscription, useDeleteSubscription } from "@/features/subscriptions";
 import {
   Dialog,
   DialogContent,
@@ -45,6 +45,7 @@ export function SceneDetailDialog({
       deleteSubscription.mutate({
         id: subscriptionStatus.subscription.id,
         deleteAssociatedScenes: deleteAssociatedScenes,
+        removeFiles: true, // Always delete files for scene unsubscribe
       });
     }
   };

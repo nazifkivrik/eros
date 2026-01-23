@@ -28,6 +28,7 @@ import subscriptionsRoutes from "./modules/subscriptions/subscriptions.routes.js
 import downloadQueueRoutes from "./modules/download-queue/download-queue.routes.js";
 import jobsRoutes from "./modules/jobs/jobs.routes.js";
 import torrentsRoutes from "./modules/torrents/torrents.routes.js";
+import torrentSearchRoutes from "./modules/torrent-search/torrent-search.routes.js";
 import logsRoutes from "./modules/logs/logs.routes.js";
 import settingsRoutes from "./modules/settings/settings.routes.js";
 
@@ -83,6 +84,7 @@ export async function buildApp() {
   await app.register(downloadQueueRoutes, { prefix: "/api/download-queue" });
   await app.register(jobsRoutes, { prefix: "/api/jobs" });
   await app.register(torrentsRoutes, { prefix: "/api/torrents" });
+  await app.register(torrentSearchRoutes, { prefix: "/api/torrent-search" });
   await app.register(logsRoutes, { prefix: "/api/logs" });
   await app.register(settingsRoutes, { prefix: "/api/settings" });
 

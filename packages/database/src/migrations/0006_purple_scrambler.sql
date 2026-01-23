@@ -1,0 +1,1 @@
+ALTER TABLE `scenes` ADD `is_subscribed` integer DEFAULT true NOT NULL;

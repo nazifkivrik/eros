@@ -10,13 +10,13 @@ import { downloadQueue } from "@repo/database";
 
 export async function torrentMonitorJob(app: FastifyInstance) {
   // Get services from DI container
-  const { jobProgressService, qbittorrentService } = app.container;
+  const { jobProgressService, torrentClient } = app.container;
   const progressService = jobProgressService;
 
   progressService.emitStarted("torrent-monitor", "Starting torrent monitor job");
   app.log.info("Starting torrent monitor job");
 
-  if (!qbittorrentService) {
+  if (!torrentClient) {
     app.log.warn("qBittorrent not configured, skipping torrent monitor job");
     progressService.emitCompleted("torrent-monitor", "Skipped: qBittorrent not configured");
     return;
@@ -24,7 +24,7 @@ export async function torrentMonitorJob(app: FastifyInstance) {
 
   try {
     // Get all torrents from qBittorrent
-    const torrents = await qbittorrentService.getTorrents();
+    const torrents = await torrentClient.getTorrents();
 
     progressService.emitProgress(
       "torrent-monitor",
@@ -105,10 +105,10 @@ export async function torrentMonitorJob(app: FastifyInstance) {
           );
 
           // Move to bottom of queue
-          await qbittorrentService.setTorrentPriority(torrent.hash, "bottom");
+          await torrentClient.setTorrentPriority(torrent.hash, "bottom");
 
           // Pause stalled torrent
-          await qbittorrentService.pauseTorrent(torrent.hash);
+          await torrentClient.pauseTorrent(torrent.hash);
 
           // Update status in database
           await app.db
@@ -226,7 +226,7 @@ export async function torrentMonitorJob(app: FastifyInstance) {
  * Apply speed profile limits to all torrents
  */
 async function applySpeedProfiles(app: FastifyInstance) {
-  const { speedProfileService, qbittorrentService } = app.container;
+  const { speedProfileService, torrentClient } = app.container;
 
   if (!speedProfileService) {
     return;
@@ -249,8 +249,8 @@ async function applySpeedProfiles(app: FastifyInstance) {
 
   try {
     // Apply global speed limits to qBittorrent
-    if (qbittorrentService) {
-      await qbittorrentService.setGlobalSpeedLimits(
+    if (torrentClient) {
+      await torrentClient.setGlobalSpeedLimits(
         limits.downloadLimit,
         limits.uploadLimit
       );
@@ -292,9 +292,9 @@ function checkIfStalled(torrent: any): boolean {
  * Keeps files on disk, only removes the torrent from qBittorrent
  */
 async function removeOldCompletedTorrents(app: FastifyInstance) {
-  const { settingsService, qbittorrentService } = app.container;
+  const { settingsService, torrentClient } = app.container;
 
-  if (!qbittorrentService) {
+  if (!torrentClient) {
     return;
   }
 
@@ -330,7 +330,7 @@ async function removeOldCompletedTorrents(app: FastifyInstance) {
     try {
       // Remove from qBittorrent (keep files)
       if (item.qbitHash) {
-        await qbittorrentService.deleteTorrent(item.qbitHash, false);
+        await torrentClient.deleteTorrent(item.qbitHash, false);
         removedFromQbit++;
         app.log.debug(
           `Removed torrent ${item.qbitHash} from qBittorrent (kept files)`

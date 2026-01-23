@@ -39,9 +39,9 @@ async function checkQBittorrentSync(
   settings: any,
   logsService: any
 ) {
-  const { qbittorrentService } = app.container;
+  const { torrentClient } = app.container;
 
-  if (!qbittorrentService) {
+  if (!torrentClient) {
     app.log.warn("qBittorrent not configured, skipping qBittorrent sync");
     return;
   }
@@ -57,7 +57,7 @@ async function checkQBittorrentSync(
   }
 
   // Get all torrents from qBittorrent
-  const torrents = await qbittorrentService.getTorrents();
+  const torrents = await torrentClient.getTorrents();
   const qbitHashes = new Set(torrents.map((t) => t.hash));
 
   app.log.info(
@@ -91,7 +91,7 @@ async function checkQBittorrentSync(
         );
 
         try {
-          await qbittorrentService.addTorrent({
+          await torrentClient.addTorrent({
             magnetLinks: [`magnet:?xt=urn:btih:${removed.torrentHash}`],
             category: "eros",
             paused: false,

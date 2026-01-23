@@ -1,145 +1,75 @@
 # Eros
 
-Adult content automation platform with performer/studio/scene subscription management, intelligent torrent search, and automated downloading.
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
-## Features
+**The intelligent, automated media manager for your adult content collection.**
 
-- **Multi-Entity Subscription**: Subscribe to performers, studios, or individual scenes
-- **Intelligent Search**: Integration with StashDB for metadata
-- **Quality Profiles**: Customizable quality preferences with fallback options
-- **Automated Downloads**: Background jobs for automatic torrent discovery and download
-- **Metadata Management**: Automatic .nfo file generation and poster downloads
-- **AI-Powered Matching**: Optional AI-based scene matching using vector similarity
-- **Torrent Management**: Built-in torrent client integration with qBittorrent
-- **Docker Ready**: Full Docker Compose setup with volume management
+Eros takes the chaos out of managing a large library. It automates the entire lifecycle of your content—from discovering new scenes from your favorite performers to downloading them with intelligent quality matching and organizing them with rich metadata.
 
-## Tech Stack
+## Why Eros?
 
-- **Monorepo**: Turborepo + pnpm workspaces
-- **Frontend**: Next.js 15 (App Router) + React 19 + Tailwind CSS
-- **Backend**: Fastify + TypeScript + Zod
-- **Database**: SQLite + Drizzle ORM
-- **Torrent**: qBittorrent Web API
-- **Meta Service**: StashDB GraphQL API (extensible)
-- **Indexers**: Prowlarr API
-- **AI**: Xenova/transformers (optional)
+Managing a local collection is often a manual, messy process. You have to check multiple sites for updates, manually search for torrents, rename files, and scrape metadata.
 
-## Project Structure
+**Eros solves this by:**
+- **Automating Discovery**: Automatically finding new content based on your subscriptions.
+- **Ensuring Quality**: downloading the best version available based on your custom profiles.
+- **Organizing Everything**: Keeping your library clean with consistent naming and rich metadata.
 
-```
-.
-├── apps/
-│   ├── web/                 # Next.js frontend
-│   └── server/              # Fastify backend
-├── packages/
-│   ├── database/            # Drizzle schema + migrations
-│   ├── ui/                  # Shared UI components
-│   ├── typescript-config/   # Shared tsconfig
-│   └── shared-types/        # Shared types
-├── docker/
-│   └── docker-compose.yml
-└── turbo.json
-```
+## Key Features
+
+- **🎯 Smart Subscriptions**: Subscribe to **Performers**, **Studios**, or track specific **Scenes**. Eros monitors for new releases automatically.
+- **🔌 Modular Architecture**: Built to be extensible.
+  - **Metadata Providers**: Currently supports **StashDB** with a flexible plugin system for future providers.
+  - **Download Clients**: Integrated with **qBittorrent**, with a design ready for other clients (Transmission, Deluge, etc.).
+  - **Indexers**: Seamless integration with **Prowlarr** to access hundreds of trackers.
+- **🧠 Intelligent Matching**: Uses advanced cross-encoder AI models to ensure the content found matches exactly what you're looking for—no more false positives.
+- **⚡ Quality Profiles**: Define your preferred resolutions and formats (e.g., "2160p Preference", "1080p Only").
+- **📁 Automated Organization**: Moves and renames files automatically, generating `.nfo` and downloading posters for compatibility with media servers like Plex/Jellyfin.
 
 ## Getting Started
 
-### Development
+The easiest way to run Eros is using Docker.
 
-1. **Install dependencies**:
-   ```bash
-   pnpm install
-   ```
+### Prerequisites
 
-2. **Setup environment variables**:
-   ```bash
-   # Copy example env files
-   cp .env.example .env
-   cp apps/server/.env.example apps/server/.env
-   cp apps/web/.env.local.example apps/web/.env.local
-   ```
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
 
-3. **Generate database migrations**:
-   ```bash
-   cd packages/database
-   pnpm db:generate
-   ```
+### Installation
 
-4. **Run development servers**:
-   ```bash
-   pnpm dev
-   ```
+1.  **Clone the repository**
+    ```bash
+    git clone https://github.com/yourusername/eros.git
+    cd eros
+    ```
 
-   This will start:
-   - Frontend: http://localhost:3000
-   - Backend: http://localhost:3001
+2.  **Configure Environment**
+    Copy the example configuration to a production `.env` file.
+    ```bash
+    cp .env.example .env
+    ```
+    *Edit `.env` to set your Download paths and specific preferences.*
 
-### Docker Deployment
+3.  **Start Services**
+    ```bash
+    docker-compose up -d
+    ```
 
-1. **Setup environment**:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
+4.  **Access the Dashboard**
+    Open your browser and navigate to:
+    `http://localhost:3000`
 
-2. **Build and run**:
-   ```bash
-   docker-compose up -d
-   ```
+    *Default Login:*
+    - Username: `admin`
+    - Password: `admin` (Change this immediately in settings!)
 
-3. **Access services**:
-   - Web UI: http://localhost:3000
-   - API: http://localhost:3001
-   - qBittorrent: http://localhost:8080
-   - Prowlarr: http://localhost:9696
 
-## Configuration
 
-### Authentication
+## Contributing
 
-Default credentials:
-- Password: `admin` (change in `.env` via `ADMIN_PASSWORD`)
+We welcome contributions! Whether it's adding a new metadata provider, a new download client integration, or fixing a bug.
 
-### Download Paths
+Please read `CLAUDE.md` for architectural guidelines if you are using AI assistants to help you code.
 
-The application supports multiple download locations via Docker volumes:
+## License
 
-```yaml
-volumes:
-  - /path/to/storage1:/downloads/additional1:rw
-  - /path/to/storage2:/downloads/additional2:rw
-```
-
-### Quality Profiles
-
-Create custom quality profiles in Settings with ordered preferences:
-1. 2160p Bluray
-2. 1080p Bluray
-3. 1080p WebDL
-4. 720p
-5. Any
-
-The system will always try to get the highest quality available based on your profile.
-
-### Background Jobs
-
-Configured via environment variables (cron format):
-- **Subscription Search**: Every 6 hours (searches for new scenes)
-- **Metadata Refresh**: Daily at 2 AM (updates metadata)
-- **Torrent Monitor**: Every 5 minutes (manages torrents)
-- **Cleanup**: Weekly on Sunday at 3 AM
-- **Metadata Discovery**: Daily at 4 AM (finds metadata for inferred scenes)
-
-## API Documentation
-
-Backend API is available at `http://localhost:3001/api`
-
-### Authentication
-- `POST /api/auth/login` - Login
-- `POST /api/auth/logout` - Logout
-- `GET /api/auth/status` - Check authentication status
-
-### Health Check
-- `GET /health` - Server health status
-
-More endpoints will be documented as they are implemented.
-
+This project is licensed under the MIT License - see the LICENSE file for details.

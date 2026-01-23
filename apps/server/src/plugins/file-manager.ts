@@ -1,6 +1,6 @@
 import { FastifyPluginAsync } from "fastify";
 import fp from "fastify-plugin";
-import { createFileManagerService } from "../services/file-manager.service.js";
+import { createFileManagerService } from "../application/services/file-management/file-manager.service.js";
 
 /**
  * FileManager Plugin

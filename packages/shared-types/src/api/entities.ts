@@ -78,14 +78,14 @@ export const StudioSchema = z.object({
   rating: z.number(),
 
   // Hierarchy
-  parentStudioId: z.string().nullable(),
-  networkId: z.string().nullable(),
+  parentStudioId: z.string().nullish(),
+  networkId: z.string().nullish(),
 
   // Media
   images: z.array(ImageSchema),
   logo: z.string().nullish(),
   favicon: z.string().nullish(),
-  poster: z.string().nullable(),
+  poster: z.string().nullish(),
 
   // External links
   links: z.union([

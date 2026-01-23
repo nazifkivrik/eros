@@ -338,12 +338,36 @@ class ApiClient {
 
   async deleteSubscription(
     id: string,
-    deleteAssociatedScenes: boolean = false
+    deleteAssociatedScenes: boolean = false,
+    removeFiles: boolean = false
   ) {
     return this.request<{ success: boolean }>(`/subscriptions/${id}`, {
       method: "DELETE",
-      params: { deleteAssociatedScenes },
+      params: { deleteAssociatedScenes, removeFiles },
     });
+  }
+
+  async toggleSubscriptionStatus(id: string) {
+    return this.request<Subscription>(`/subscriptions/${id}/toggle-status`, {
+      method: "POST",
+    });
+  }
+
+  async getSubscriptionScenes(id: string) {
+    return this.request<{ data: any[] }>(`/subscriptions/${id}/scenes`);
+  }
+
+  async getSubscriptionFiles(id: string) {
+    return this.request<{
+      files: any[];
+      downloadQueue: any | null;
+      sceneFolder: string | null;
+      folderContents: {
+        nfoFiles: string[];
+        posterFiles: string[];
+        videoFiles: string[];
+      };
+    }>(`/subscriptions/${id}/files`);
   }
 
   // Download Queue

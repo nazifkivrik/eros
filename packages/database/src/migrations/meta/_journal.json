@@ -43,6 +43,13 @@
       "when": 1737400000000,
       "tag": "0005_add_torrent_retry_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1768769744559,
+      "tag": "0006_purple_scrambler",
+      "breakpoints": true
     }
   ]
 }

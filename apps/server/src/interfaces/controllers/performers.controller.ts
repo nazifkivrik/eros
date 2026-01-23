@@ -1,6 +1,6 @@
 import type { Logger } from "pino";
 import { PerformersService } from "../../application/services/performers.service.js";
-import type { SubscriptionService } from "../../services/subscription.service.js";
+import type { SubscriptionsService } from "../../application/services/subscriptions.service.js";
 import {
   PerformerListQuerySchema,
   CreatePerformerSchema,
@@ -19,20 +19,20 @@ import {
  */
 export class PerformersController {
   private performersService: PerformersService;
-  private subscriptionService: SubscriptionService;
+  private subscriptionsService: SubscriptionsService;
   private logger: Logger;
 
   constructor({
     performersService,
-    subscriptionService,
+    subscriptionsService,
     logger,
   }: {
     performersService: PerformersService;
-    subscriptionService: SubscriptionService;
+    subscriptionsService: SubscriptionsService;
     logger: Logger;
   }) {
     this.performersService = performersService;
-    this.subscriptionService = subscriptionService;
+    this.subscriptionsService = subscriptionsService;
     this.logger = logger;
   }
 
@@ -130,7 +130,7 @@ export class PerformersController {
         deleteAssociatedScenes: query.deleteAssociatedScenes,
         removeFiles: query.removeFiles,
       },
-      this.subscriptionService
+      this.subscriptionsService
     );
 
     return { success: true };

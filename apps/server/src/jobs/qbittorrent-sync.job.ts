@@ -11,10 +11,10 @@ import { downloadQueue, sceneExclusions } from "@repo/database";
 export async function qbittorrentSyncJob(app: FastifyInstance) {
   app.log.info("Starting qBittorrent sync job");
 
-  // Get services from DI container
-  const { qbittorrentService } = app.container;
+  // Get torrent client from DI container
+  const { torrentClient } = app.container;
 
-  if (!qbittorrentService) {
+  if (!torrentClient) {
     app.log.warn("qBittorrent not configured, skipping sync job");
     return;
   }
@@ -34,7 +34,7 @@ export async function qbittorrentSyncJob(app: FastifyInstance) {
     }
 
     // Get all torrents from qBittorrent
-    const torrents = await qbittorrentService.getTorrents();
+    const torrents = await torrentClient.getTorrents();
     const qbitHashes = new Set(torrents.map((t) => t.hash));
 
     app.log.info(

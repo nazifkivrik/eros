@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import type { Studio } from "@repo/shared-types";
-import { useStudioDetails } from "@/hooks/useSearch";
-import { useCheckSubscription, useDeleteSubscription } from "@/hooks/useSubscriptions";
+import { useStudioDetails } from "@/features/search";
+import { useCheckSubscription, useDeleteSubscription } from "@/features/subscriptions";
 import {
   Dialog,
   DialogContent,
@@ -43,6 +43,7 @@ export function StudioDetailDialog({
       deleteSubscription.mutate({
         id: subscriptionStatus.subscription.id,
         deleteAssociatedScenes,
+        removeFiles: deleteAssociatedScenes, // Always delete files when deleting scenes
       });
     }
   };

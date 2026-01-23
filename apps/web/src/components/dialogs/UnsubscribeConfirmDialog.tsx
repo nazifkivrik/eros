@@ -28,11 +28,11 @@ export function UnsubscribeConfirmDialog({
   entityName,
   onConfirm,
 }: UnsubscribeConfirmDialogProps) {
-  const [deleteAssociatedScenes, setDeleteAssociatedScenes] = useState(true); // Default true for performer/studio
+  const [deleteAssociatedScenes, setDeleteAssociatedScenes] = useState(true);
 
   const handleConfirm = () => {
     onConfirm(deleteAssociatedScenes);
-    setDeleteAssociatedScenes(true); // Reset for next time
+    setDeleteAssociatedScenes(true);
     onOpenChange(false);
   };
 
@@ -42,7 +42,11 @@ export function UnsubscribeConfirmDialog({
 
   const getDescription = () => {
     if (entityType === "scene") {
-      return `Are you sure you want to unsubscribe from this scene? The scene and its files will be removed from your library.`;
+      return `Are you sure you want to unsubscribe from this scene? The scene and its files will be removed from your library and deleted from disk.`;
+    }
+
+    if (deleteAssociatedScenes) {
+      return `Are you sure you want to unsubscribe from ${entityName}? This will remove the ${entityType} subscription and delete all associated scene folders from your disk. This action cannot be undone.`;
     }
 
     return `Are you sure you want to unsubscribe from ${entityName}? This will remove the ${entityType} subscription from your library.`;
@@ -54,7 +58,7 @@ export function UnsubscribeConfirmDialog({
         <DialogHeader>
           <DialogTitle>Unsubscribe from {entityName}?</DialogTitle>
           <DialogDescription className="space-y-4">
-            <p className="pt-2">{getDescription()}</p>
+            <div className="pt-2">{getDescription()}</div>
 
             {/* Show deleteAssociatedScenes option only for performer/studio */}
             {(entityType === "performer" || entityType === "studio") && (
@@ -69,10 +73,10 @@ export function UnsubscribeConfirmDialog({
                     htmlFor="deleteAssociatedScenes"
                     className="text-sm font-medium cursor-pointer"
                   >
-                    Also remove associated scenes
+                    Also remove associated scenes and delete their files
                   </Label>
                   <p className="text-sm text-muted-foreground">
-                    Remove all scenes that were discovered from this {entityType}.
+                    Remove all scenes discovered from this {entityType} and permanently delete their folders from disk.
                     Scenes subscribed through other sources will be kept.
                   </p>
                 </div>

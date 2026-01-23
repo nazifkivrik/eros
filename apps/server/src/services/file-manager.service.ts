@@ -221,7 +221,7 @@ export class FileManagerService {
    * Build NFO XML content (Kodi format)
    */
   private buildNFOContent(scene: NFOMetadata): string {
-    const performers = scene.performers.map((p) => `    <actor>\n      <name>${this.escapeXML(p.name)}</name>\n    </actor>`).join("\n");
+    const performers = (scene.performers || []).map((p) => `    <actor>\n      <name>${this.escapeXML(p.name)}</name>\n    </actor>`).join("\n");
 
     const studio = scene.studios[0]?.name || "";
 

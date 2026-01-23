@@ -2,7 +2,7 @@ import type { Logger } from "pino";
 import { nanoid } from "nanoid";
 import type { DownloadStatus } from "@repo/shared-types";
 import { DownloadQueueRepository } from "../../infrastructure/repositories/download-queue.repository.js";
-import type { QBittorrentService } from "../../services/qbittorrent.service.js";
+import type { ITorrentClient } from "../../infrastructure/adapters/interfaces/torrent-client.interface.js";
 
 /**
  * DTOs for Download Queue Service
@@ -48,24 +48,24 @@ export interface UnifiedDownload {
 /**
  * Download Queue Service (Clean Architecture)
  * Business logic for download queue management
- * Handles: Queue CRUD, qBittorrent integration, unified downloads
+ * Handles: Queue CRUD, torrent client integration, unified downloads
  */
 export class DownloadQueueService {
   private downloadQueueRepository: DownloadQueueRepository;
-  private qbittorrentService: QBittorrentService | undefined;
+  private torrentClient?: ITorrentClient;
   private logger: Logger;
 
   constructor({
     downloadQueueRepository,
-    qbittorrentService,
+    torrentClient,
     logger,
   }: {
     downloadQueueRepository: DownloadQueueRepository;
-    qbittorrentService?: QBittorrentService;
+    torrentClient?: ITorrentClient;
     logger: Logger;
   }) {
     this.downloadQueueRepository = downloadQueueRepository;
-    this.qbittorrentService = qbittorrentService;
+    this.torrentClient = torrentClient;
     this.logger = logger;
   }
 
@@ -105,7 +105,7 @@ export class DownloadQueueService {
    * Business logic:
    * - Validate scene exists
    * - Check for duplicates in queue
-   * - Optionally start download in qBittorrent
+   * - Optionally start download in torrent client
    */
   async addToQueue(dto: CreateDownloadQueueDTO) {
     this.logger.info({ sceneId: dto.sceneId, title: dto.title }, "Adding to queue");
@@ -145,20 +145,20 @@ export class DownloadQueueService {
 
     await this.downloadQueueRepository.create(newItem);
 
-    // Business logic: If magnetLink provided and qBittorrent available, add torrent
-    if (dto.magnetLink && this.qbittorrentService) {
+    // Business logic: If magnetLink provided and torrent client available, add torrent
+    if (dto.magnetLink && this.torrentClient) {
       try {
-        await this.qbittorrentService.addTorrent({
+        await this.torrentClient.addTorrent({
           magnetLinks: [dto.magnetLink],
           category: "eros",
           paused: false,
         });
 
-        this.logger.info({ sceneId: dto.sceneId, title: dto.title }, "Added torrent to qBittorrent");
+        this.logger.info({ sceneId: dto.sceneId, title: dto.title }, "Added torrent to client");
       } catch (error) {
         this.logger.error(
           { error, sceneId: dto.sceneId, title: dto.title },
-          "Failed to add torrent to qBittorrent"
+          "Failed to add torrent to client"
         );
       }
     }
@@ -188,7 +188,7 @@ export class DownloadQueueService {
 
   /**
    * Remove from download queue
-   * Business logic: Optionally delete torrent from qBittorrent
+   * Business logic: Optionally delete torrent from client
    */
   async removeFromQueue(id: string, deleteTorrent: boolean = false) {
     this.logger.info({ id, deleteTorrent }, "Removing from queue");
@@ -198,18 +198,18 @@ export class DownloadQueueService {
       throw new Error("Download queue item not found");
     }
 
-    // Business logic: Remove from qBittorrent if torrent hash exists
-    if (item.torrentHash && deleteTorrent && this.qbittorrentService) {
+    // Business logic: Remove from torrent client if torrent hash exists
+    if (item.torrentHash && deleteTorrent && this.torrentClient) {
       try {
-        await this.qbittorrentService.removeTorrent(item.torrentHash, deleteTorrent);
+        await this.torrentClient.removeTorrent(item.torrentHash, deleteTorrent);
         this.logger.info(
           { torrentHash: item.torrentHash },
-          "Removed torrent from qBittorrent"
+          "Removed torrent from client"
         );
       } catch (error) {
         this.logger.error(
           { error, torrentHash: item.torrentHash },
-          "Failed to remove torrent from qBittorrent"
+          "Failed to remove torrent from client"
         );
       }
     }
@@ -220,7 +220,7 @@ export class DownloadQueueService {
 
   /**
    * Pause download
-   * Business logic: Pause torrent in qBittorrent and update status
+   * Business logic: Pause torrent in client and update status
    */
   async pauseDownload(id: string) {
     this.logger.info({ id }, "Pausing download");
@@ -230,10 +230,10 @@ export class DownloadQueueService {
       throw new Error("Download queue item not found");
     }
 
-    if (item.torrentHash && this.qbittorrentService) {
+    if (item.torrentHash && this.torrentClient) {
       try {
-        await this.qbittorrentService.pauseTorrent(item.torrentHash);
-        this.logger.info({ id, torrentHash: item.torrentHash }, "Paused torrent in qBittorrent");
+        await this.torrentClient.pauseTorrent(item.torrentHash);
+        this.logger.info({ id, torrentHash: item.torrentHash }, "Paused torrent in client");
       } catch (error) {
         this.logger.error({ error, id }, "Failed to pause torrent");
       }
@@ -245,7 +245,7 @@ export class DownloadQueueService {
 
   /**
    * Resume download
-   * Business logic: Resume torrent in qBittorrent and update status
+   * Business logic: Resume torrent in client and update status
    */
   async resumeDownload(id: string) {
     this.logger.info({ id }, "Resuming download");
@@ -255,10 +255,10 @@ export class DownloadQueueService {
       throw new Error("Download queue item not found");
     }
 
-    if (item.torrentHash && this.qbittorrentService) {
+    if (item.torrentHash && this.torrentClient) {
       try {
-        await this.qbittorrentService.resumeTorrent(item.torrentHash);
-        this.logger.info({ id, torrentHash: item.torrentHash }, "Resumed torrent in qBittorrent");
+        await this.torrentClient.resumeTorrent(item.torrentHash);
+        this.logger.info({ id, torrentHash: item.torrentHash }, "Resumed torrent in client");
       } catch (error) {
         this.logger.error({ error, id }, "Failed to resume torrent");
       }
@@ -270,7 +270,7 @@ export class DownloadQueueService {
 
   /**
    * Get unified downloads
-   * Business logic: Merge database queue items with real-time qBittorrent torrent data
+   * Business logic: Merge database queue items with real-time torrent client data
    * Complex status determination based on torrent state
    */
   async getUnifiedDownloads(): Promise<UnifiedDownload[]> {
@@ -279,19 +279,19 @@ export class DownloadQueueService {
     // Get all queue items with full details
     const queueItems = await this.downloadQueueRepository.findAllWithFullDetails();
 
-    // Get torrents from qBittorrent if available
+    // Get torrents from torrent client if available
     let torrentsMap = new Map<string, unknown>();
-    if (this.qbittorrentService) {
+    if (this.torrentClient) {
       try {
-        const torrents = await this.qbittorrentService.getTorrents();
+        const torrents = await this.torrentClient.getTorrents();
         // Normalize hashes to lowercase for consistent matching
         torrentsMap = new Map(torrents.map((t) => [t.hash.toLowerCase(), t]));
-        this.logger.debug({ torrentsCount: torrents.length }, "Fetched torrents from qBittorrent");
+        this.logger.debug({ torrentsCount: torrents.length }, "Fetched torrents from client");
       } catch (error: unknown) {
-        this.logger.error({ error }, "Failed to fetch torrents from qBittorrent");
+        this.logger.error({ error }, "Failed to fetch torrents from client");
       }
     } else {
-      this.logger.warn("qBittorrent service not available - download status will be based on database only");
+      this.logger.warn("Torrent client not available - download status will be based on database only");
     }
 
     // Business logic: Merge data and determine unified status
@@ -309,7 +309,7 @@ export class DownloadQueueService {
         const torrentState = torrent.state as string | undefined;
         const torrentProgress = torrent.progress as number | undefined;
 
-        // Business rule: Map qBittorrent states to our status
+        // Business rule: Map torrent client states to our status
         if (torrentState === "pausedDL" || torrentState === "pausedUP") {
           status = "paused";
         } else if (torrentState === "queuedDL" || torrentState === "queuedUP") {
@@ -362,7 +362,7 @@ export class DownloadQueueService {
   }
 
   /**
-   * Try to add torrent to qBittorrent with proper error handling
+   * Try to add torrent to torrent client with proper error handling
    * Returns true if successful, false otherwise
    * @private
    */
@@ -389,11 +389,11 @@ export class DownloadQueueService {
           torrentUrl: !!options.torrentUrl,
           torrentHash: options.torrentHash,
         },
-        "Attempting to add torrent to qBittorrent"
+        "Attempting to add torrent to client"
       );
 
-      // Use addTorrentAndGetHash to get the qBittorrent hash immediately
-      const qbitHash = await this.qbittorrentService!.addTorrentAndGetHash(
+      // Use addTorrentAndGetHash to get the torrent client hash immediately
+      const qbitHash = await this.torrentClient!.addTorrentAndGetHash(
         {
           magnetLinks: options.magnetLink ? [options.magnetLink] : undefined,
           urls: options.torrentUrl ? [options.torrentUrl] : undefined,
@@ -410,19 +410,19 @@ export class DownloadQueueService {
         // SUCCESS: Update status to "downloading" and save qbitHash
         this.logger.info(
           { queueItemId, qbitHash },
-          "Successfully added to qBittorrent, saved qbitHash"
+          "Successfully added to client, saved qbitHash"
         );
         await this.downloadQueueRepository.updateRetryTracking(queueItemId, {
           addToClientAttempts: currentAttempts,
           addToClientLastAttempt: new Date().toISOString(),
           addToClientError: null,
           status: "downloading",
-          qbitHash, // Save the qBittorrent hash
+          qbitHash, // Save the torrent client hash
         });
         return true;
       } else {
-        // FAILURE: qBittorrent returned false or hash not found
-        throw new Error("qBittorrent.addTorrent failed or hash not found");
+        // FAILURE: Torrent client returned false or hash not found
+        throw new Error("Torrent client addTorrent failed or hash not found");
       }
     } catch (error) {
       // FAILURE: Exception thrown
@@ -433,7 +433,7 @@ export class DownloadQueueService {
           attempt: currentAttempts,
           error: errorMessage,
         },
-        "Failed to add torrent to qBittorrent"
+        "Failed to add torrent to client"
       );
 
       await this.downloadQueueRepository.updateRetryTracking(queueItemId, {

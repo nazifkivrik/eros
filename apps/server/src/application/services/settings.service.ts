@@ -1,9 +1,8 @@
 import type { Logger } from "pino";
 import { DEFAULT_SETTINGS, type AppSettings } from "@repo/shared-types";
 import { SettingsRepository } from "../../infrastructure/repositories/settings.repository.js";
-import { QBittorrentService } from "../../services/qbittorrent.service.js";
-import { TPDBService } from "../../services/tpdb/tpdb.service.js";
-import { StashDBService } from "../../services/stashdb.service.js";
+import type { IMetadataProvider } from "../../infrastructure/adapters/interfaces/metadata-provider.interface.js";
+import type { IIndexer } from "../../infrastructure/adapters/interfaces/indexer.interface.js";
 
 /**
  * DTOs for Settings Service
@@ -33,10 +32,32 @@ export interface QBittorrentStatusDTO {
 export class SettingsService {
   private settingsRepository: SettingsRepository;
   private logger: Logger;
+  private tpdbProvider?: IMetadataProvider;
+  private stashdbProvider?: IMetadataProvider;
+  private indexer?: IIndexer; // For prowlarr testing
+  private torrentClient?: any; // ITorrentClient - for qbittorrent testing
 
-  constructor({ settingsRepository, logger }: { settingsRepository: SettingsRepository; logger: Logger }) {
+  constructor({
+    settingsRepository,
+    logger,
+    tpdbProvider,
+    stashdbProvider,
+    indexer,
+    torrentClient,
+  }: {
+    settingsRepository: SettingsRepository;
+    logger: Logger;
+    tpdbProvider?: IMetadataProvider;
+    stashdbProvider?: IMetadataProvider;
+    indexer?: IIndexer;
+    torrentClient?: any;
+  }) {
     this.settingsRepository = settingsRepository;
     this.logger = logger;
+    this.tpdbProvider = tpdbProvider;
+    this.stashdbProvider = stashdbProvider;
+    this.indexer = indexer;
+    this.torrentClient = torrentClient;
   }
 
   /**
@@ -145,23 +166,21 @@ export class SettingsService {
 
   /**
    * Test connection to an external service
-   * Business rule: Validate configuration before testing
+   * Business rule: Validate configuration before testing, use configured adapters
    */
   async testConnection(dto: TestConnectionDTO): Promise<TestConnectionResult> {
     this.logger.info({ service: dto.service, serviceType: typeof dto.service }, "Testing service connection");
 
-    const settings = await this.getSettings();
-
     try {
       switch (dto.service) {
         case "stashdb":
-          return await this.testStashDBConnection(settings.stashdb);
+          return await this.testStashDBConnectionAdapter();
         case "tpdb":
-          return await this.testTPDBConnection(settings.tpdb);
+          return await this.testTPDBConnectionAdapter();
         case "prowlarr":
-          return await this.testProwlarrConnection(settings.prowlarr);
+          return await this.testProwlarrConnectionAdapter();
         case "qbittorrent":
-          return await this.testQBittorrentConnection(settings.qbittorrent);
+          return await this.testQBittorrentConnectionAdapter();
         default:
           this.logger.warn({ service: dto.service, receivedType: typeof dto.service }, "Unknown service in switch");
           return { success: false, message: "Unknown service" };
@@ -176,15 +195,17 @@ export class SettingsService {
   }
 
   /**
-   * Test TPDB connection with provided credentials
+   * Test TPDB connection with provided credentials (creates temporary adapter)
    * Business logic: Test connection without saving to settings
    */
   async testTPDBConnectionPublic(apiUrl: string, apiKey: string): Promise<boolean> {
     this.logger.info("Testing TPDB connection (public)");
 
     try {
-      const tpdb = new TPDBService({ apiUrl, apiKey });
-      const result = await tpdb.testConnection();
+      // Create adapter instance for testing
+      const { createTPDBAdapter } = await import("../../infrastructure/adapters/tpdb.adapter.js");
+      const adapter = createTPDBAdapter({ apiUrl, apiKey });
+      const result = await adapter.testConnection();
 
       this.logger.info({ success: result }, "TPDB connection test result");
       return result;
@@ -195,32 +216,88 @@ export class SettingsService {
   }
 
   /**
-   * Get qBittorrent status
+   * Test StashDB connection with provided credentials (creates temporary adapter)
+   * Business logic: Test connection without saving to settings
+   */
+  async testStashDBConnectionPublic(apiUrl: string, apiKey: string): Promise<boolean> {
+    this.logger.info("Testing StashDB connection (public)");
+
+    try {
+      // Create adapter instance for testing
+      const { createStashDBAdapter } = await import("../../infrastructure/adapters/stashdb.adapter.js");
+      const adapter = createStashDBAdapter({ apiUrl, apiKey });
+      const result = await adapter.testConnection();
+
+      this.logger.info({ success: result }, "StashDB connection test result");
+      return result;
+    } catch (error) {
+      this.logger.error({ error }, "StashDB connection test failed");
+      return false;
+    }
+  }
+
+  /**
+   * Test qBittorrent connection with provided credentials (creates temporary adapter)
+   * Business logic: Test connection without saving to settings
+   */
+  async testQBittorrentConnectionPublic(url: string, username: string, password: string): Promise<boolean> {
+    this.logger.info("Testing qBittorrent connection (public)");
+
+    try {
+      // Create adapter instance for testing
+      const { createQBittorrentAdapter } = await import("../../infrastructure/adapters/qbittorrent.adapter.js");
+      const adapter = createQBittorrentAdapter({ url, username, password });
+      const result = await adapter.testConnection();
+
+      this.logger.info({ success: result }, "qBittorrent connection test result");
+      return result;
+    } catch (error) {
+      this.logger.error({ error }, "qBittorrent connection test failed");
+      return false;
+    }
+  }
+
+  /**
+   * Test Prowlarr connection with provided credentials (creates temporary adapter)
+   * Business logic: Test connection without saving to settings
+   */
+  async testProwlarrConnectionPublic(apiUrl: string, apiKey: string): Promise<boolean> {
+    this.logger.info("Testing Prowlarr connection (public)");
+
+    try {
+      // Create adapter instance for testing
+      const { ProwlarrAdapter } = await import("../../infrastructure/adapters/prowlarr.adapter.js");
+      const { ProwlarrService } = await import("../../services/prowlarr.service.js");
+      const prowlarrService = new ProwlarrService({ baseUrl: apiUrl, apiKey });
+      const adapter = new ProwlarrAdapter(prowlarrService);
+      const result = await adapter.testConnection();
+
+      this.logger.info({ success: result }, "Prowlarr connection test result");
+      return result;
+    } catch (error) {
+      this.logger.error({ error }, "Prowlarr connection test failed");
+      return false;
+    }
+  }
+
+  /**
+   * Get qBittorrent status using configured adapter
    * Business logic: Check connection and retrieve stats
    */
   async getQBittorrentStatus(): Promise<QBittorrentStatusDTO> {
     this.logger.debug("Fetching qBittorrent status");
 
-    const settings = await this.getSettings();
-    const qbConfig = settings.qbittorrent;
-
-    if (!qbConfig.enabled || !qbConfig.url) {
+    if (!this.torrentClient) {
       return {
         connected: false,
-        error: "qBittorrent not configured",
+        error: "Torrent client not configured",
       };
     }
 
     try {
-      const qbService = new QBittorrentService({
-        url: qbConfig.url,
-        username: qbConfig.username,
-        password: qbConfig.password,
-      });
-
-      const torrents = await qbService.getTorrents();
-      const downloadSpeed = torrents.reduce((sum, t) => sum + (t.dlspeed || 0), 0);
-      const uploadSpeed = torrents.reduce((sum, t) => sum + (t.upspeed || 0), 0);
+      const torrents = await this.torrentClient.getTorrents();
+      const downloadSpeed = torrents.reduce((sum: number, t: any) => sum + (t.downloadSpeed || 0), 0);
+      const uploadSpeed = torrents.reduce((sum: number, t: any) => sum + (t.uploadSpeed || 0), 0);
 
       this.logger.info(
         { torrentsCount: torrents.length, downloadSpeed, uploadSpeed },
@@ -243,179 +320,74 @@ export class SettingsService {
   }
 
   /**
-   * Test TPDB connection (private helper)
+   * Test TPDB connection using configured adapter
    * Business rule: Validate API URL and key before testing
    */
-  private async testTPDBConnection(config: {
-    apiUrl: string;
-    apiKey: string;
-  }): Promise<TestConnectionResult> {
-    if (!config.apiUrl) {
-      return { success: false, message: "API URL is required" };
+  private async testTPDBConnectionAdapter(): Promise<TestConnectionResult> {
+    if (!this.tpdbProvider) {
+      return { success: false, message: "TPDB provider not configured" };
     }
 
-    if (!config.apiKey) {
-      return { success: false, message: "API Key is required" };
-    }
+    const isConnected = await this.tpdbProvider.testConnection();
 
-    try {
-      const tpdb = new TPDBService({ apiUrl: config.apiUrl, apiKey: config.apiKey });
-      const isConnected = await tpdb.testConnection();
-
-      if (isConnected) {
-        return { success: true, message: "Connected to TPDB successfully" };
-      } else {
-        return { success: false, message: "Failed to connect to TPDB" };
-      }
-    } catch (error) {
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : "Connection failed",
-      };
+    if (isConnected) {
+      return { success: true, message: "Connected to TPDB successfully" };
+    } else {
+      return { success: false, message: "Failed to connect to TPDB" };
     }
   }
 
   /**
-   * Test StashDB connection (private helper)
-   * Business rule: Send test GraphQL query to verify connectivity
+   * Test StashDB connection using configured adapter
+   * Business rule: Validate API URL before testing
    */
-  private async testStashDBConnection(config: {
-    apiUrl: string;
-    apiKey: string;
-  }): Promise<TestConnectionResult> {
-    if (!config.apiUrl) {
-      return { success: false, message: "API URL is required" };
+  private async testStashDBConnectionAdapter(): Promise<TestConnectionResult> {
+    if (!this.stashdbProvider) {
+      return { success: false, message: "StashDB provider not configured" };
     }
 
-    try {
-      // Simple query to test connection
-      const response = await fetch(config.apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(config.apiKey ? { ApiKey: config.apiKey } : {}),
-        },
-        body: JSON.stringify({
-          query: "{ __typename }",
-        }),
-      });
+    const isConnected = await this.stashdbProvider.testConnection();
 
-      if (!response.ok) {
-        return {
-          success: false,
-          message: `HTTP ${response.status}: ${response.statusText}`,
-        };
-      }
-
-      const data = (await response.json()) as { errors?: Array<{ message: string }> };
-
-      if (data.errors) {
-        return {
-          success: false,
-          message: `GraphQL error: ${data.errors[0].message}`,
-        };
-      }
-
+    if (isConnected) {
       return { success: true, message: "Connected to StashDB successfully" };
-    } catch (error) {
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : "Connection failed",
-      };
+    } else {
+      return { success: false, message: "Failed to connect to StashDB" };
     }
   }
 
   /**
-   * Test Prowlarr connection (private helper)
-   * Business rule: Validate API key by calling Prowlarr API
+   * Test Prowlarr connection using configured adapter
+   * Business rule: Validate API URL and key before testing
    */
-  private async testProwlarrConnection(config: {
-    apiUrl: string;
-    apiKey: string;
-  }): Promise<TestConnectionResult> {
-    if (!config.apiUrl) {
-      return { success: false, message: "API URL is required" };
+  private async testProwlarrConnectionAdapter(): Promise<TestConnectionResult> {
+    if (!this.indexer) {
+      return { success: false, message: "Indexer provider not configured" };
     }
 
-    if (!config.apiKey) {
-      return { success: false, message: "API Key is required" };
-    }
+    const isConnected = await this.indexer.testConnection();
 
-    try {
-      // Test with /api/v1/indexer endpoint
-      const response = await fetch(`${config.apiUrl}/api/v1/indexer`, {
-        headers: {
-          "X-Api-Key": config.apiKey,
-        },
-      });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          return { success: false, message: "Invalid API key" };
-        }
-        return {
-          success: false,
-          message: `HTTP ${response.status}: ${response.statusText}`,
-        };
-      }
-
+    if (isConnected) {
       return { success: true, message: "Connected to Prowlarr successfully" };
-    } catch (error) {
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : "Connection failed",
-      };
+    } else {
+      return { success: false, message: "Failed to connect to Prowlarr" };
     }
   }
 
   /**
-   * Test qBittorrent connection (private helper)
-   * Business rule: Attempt login to validate credentials
+   * Test qBittorrent connection using configured adapter
+   * Business rule: Validate URL and credentials before testing
    */
-  private async testQBittorrentConnection(config: {
-    url: string;
-    username: string;
-    password: string;
-  }): Promise<TestConnectionResult> {
-    if (!config.url) {
-      return { success: false, message: "URL is required" };
+  private async testQBittorrentConnectionAdapter(): Promise<TestConnectionResult> {
+    if (!this.torrentClient) {
+      return { success: false, message: "Torrent client not configured" };
     }
 
-    try {
-      // Try to login
-      const response = await fetch(`${config.url}/api/v2/auth/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({
-          username: config.username,
-          password: config.password,
-        }),
-      });
+    const isConnected = await this.torrentClient.testConnection();
 
-      if (!response.ok) {
-        return {
-          success: false,
-          message: `HTTP ${response.status}: ${response.statusText}`,
-        };
-      }
-
-      const text = await response.text();
-
-      if (text === "Fails.") {
-        return { success: false, message: "Invalid username or password" };
-      }
-
-      return {
-        success: true,
-        message: "Connected to qBittorrent successfully",
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : "Connection failed",
-      };
+    if (isConnected) {
+      return { success: true, message: "Connected to qBittorrent successfully" };
+    } else {
+      return { success: false, message: "Failed to connect to qBittorrent" };
     }
   }
 }

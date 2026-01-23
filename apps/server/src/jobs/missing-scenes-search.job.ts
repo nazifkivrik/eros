@@ -141,10 +141,10 @@ export async function missingScenesSearchJob(app: FastifyInstance) {
     );
 
     // Step 6: Get services from DI container
-    const { settingsService, prowlarrService, qbittorrentService } = app.container;
+    const { settingsService, indexer, torrentClient } = app.container;
     const settings = await settingsService.getSettings();
 
-    if (!prowlarrService || !settings.prowlarr.enabled || !settings.prowlarr.apiUrl) {
+    if (!indexer || !settings.prowlarr.enabled || !settings.prowlarr.apiUrl) {
       app.log.error("[MissingScenesSearch] Prowlarr not configured, aborting");
       progressService.emitFailed(
         "missing-scenes-search",
@@ -155,7 +155,7 @@ export async function missingScenesSearchJob(app: FastifyInstance) {
     }
 
     // Step 7: Check qBittorrent service
-    if (!qbittorrentService || !settings.qbittorrent.enabled || !settings.qbittorrent.url) {
+    if (!torrentClient || !settings.qbittorrent.enabled || !settings.qbittorrent.url) {
       app.log.warn("[MissingScenesSearch] qBittorrent not configured, torrents will only be added to queue");
     } else {
       app.log.info("[MissingScenesSearch] qBittorrent service available");
@@ -172,7 +172,7 @@ export async function missingScenesSearchJob(app: FastifyInstance) {
         app.log.info(`[MissingScenesSearch] [${i + 1}/${missingScenes.length}] Searching: ${scene.title}`);
 
         // Search Prowlarr for this scene
-        const searchResults = await prowlarrService.searchIndexers(scene.title);
+        const searchResults = await indexer.searchIndexers(scene.title);
 
         if (searchResults.length === 0) {
           app.log.info(`[MissingScenesSearch] No results for: ${scene.title}`);
@@ -182,7 +182,7 @@ export async function missingScenesSearchJob(app: FastifyInstance) {
         app.log.info(`[MissingScenesSearch] Found ${searchResults.length} results for: ${scene.title}`);
 
         // Map results to internal format
-        const mappedResults = prowlarrService.mapSearchResults(searchResults);
+        const mappedResults = indexer.mapSearchResults(searchResults);
 
         // Select best torrent (highest seeders for now - can be enhanced with quality profile)
         const bestTorrent = mappedResults.reduce((best, current) => {
@@ -210,12 +210,12 @@ export async function missingScenesSearchJob(app: FastifyInstance) {
         // Add to qBittorrent if configured
         let qbittorrentStatus = "queued";
         let qbitHash: string | null = null;
-        if (qbittorrentService && bestTorrent.downloadUrl) {
+        if (torrentClient && bestTorrent.downloadUrl) {
           try {
             const downloadPath = settings.general.downloadPath || "/downloads";
             const isMagnet = bestTorrent.downloadUrl.startsWith("magnet:");
 
-            qbitHash = await qbittorrentService.addTorrentAndGetHash({
+            qbitHash = await torrentClient.addTorrentAndGetHash({
               magnetLinks: isMagnet ? [bestTorrent.downloadUrl] : undefined,
               urls: !isMagnet ? [bestTorrent.downloadUrl] : undefined,
               savePath: downloadPath,

@@ -5,16 +5,22 @@
 
 import type { FastifyPluginAsync } from "fastify";
 import fp from "fastify-plugin";
-import { createAIMatchingService } from "../services/ai-matching.service.js";
+import { createAIMatchingService } from "../application/services/ai-matching/ai-matching.service.js";
+import { SettingsRepository } from "../infrastructure/repositories/settings.repository.js";
 
 const aiPlugin: FastifyPluginAsync = async (app) => {
   // Wait for plugins to be ready
   await app.after();
 
-  // Get settings
-  const { createSettingsService } = await import("../services/settings.service.js");
-  const settingsService = createSettingsService(app.db);
-  const settings = await settingsService.getSettings();
+  // Get settings from database using repository
+  const settingsRepository = new SettingsRepository({ db: app.db });
+  const settingRecord = await settingsRepository.findByKey("app-settings");
+
+  // Use default settings if none found
+  const { DEFAULT_SETTINGS } = await import("@repo/shared-types");
+  const settings = settingRecord
+    ? (settingRecord.value as any)
+    : DEFAULT_SETTINGS;
 
   if (!settings.ai.useCrossEncoder) {
     app.log.info("Cross-Encoder matching is disabled");

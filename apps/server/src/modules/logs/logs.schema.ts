@@ -3,14 +3,19 @@ import { IdParamsSchema } from "../../schemas/common.schema.js";
 
 export const LogLevelSchema = z.enum(["error", "warning", "info", "debug"]);
 
-export const EventTypeSchema = z.enum(["torrent", "subscription", "download", "metadata", "system"]);
+// Allow any string for eventType since the database has values like "torrent-search"
+export const EventTypeSchema = z.string();
 
 export const LogSchema = z.object({
   id: z.string(),
   level: LogLevelSchema,
   eventType: EventTypeSchema,
   message: z.string(),
-  details: z.record(z.unknown()).nullable(),
+  details: z.union([
+    z.record(z.unknown()),
+    z.null(),
+    z.undefined()
+  ]).optional(), // Handle all possible return types from DB
   sceneId: z.string().nullable(),
   performerId: z.string().nullable(),
   studioId: z.string().nullable(),

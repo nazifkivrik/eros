@@ -30,6 +30,7 @@ export const QualityProfileSchema = z.object({
 export const SubscriptionDetailResponseSchema = z.object({
   id: z.string(),
   entityType: z.enum(["performer", "studio", "scene"]),
+  entityId: z.string(),
   entity: z.union([PerformerSchema, StudioSchema, SceneSchema]).nullable(),
   entityName: z.string(),
   qualityProfile: QualityProfileSchema.nullable(),
@@ -75,6 +76,7 @@ export const CheckSubscriptionParamsSchema = z.object({
 
 export const DeleteSubscriptionQuerySchema = z.object({
   deleteAssociatedScenes: z.coerce.boolean().optional().default(false),
+  removeFiles: z.coerce.boolean().optional().default(false),
 });
 
 export const SubscriptionListQuerySchema = z.object({

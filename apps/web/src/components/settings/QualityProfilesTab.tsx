@@ -6,7 +6,7 @@ import {
   useCreateQualityProfile,
   useUpdateQualityProfile,
   useDeleteQualityProfile,
-} from "@/hooks/useQualityProfiles";
+} from "@/features/quality-profiles";
 import { type QualityProfile,QualityItem } from "@repo/shared-types"
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";

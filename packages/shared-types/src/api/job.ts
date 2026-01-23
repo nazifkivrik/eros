@@ -12,13 +12,17 @@ export const JobNameSchema = z.enum([
 ]);
 
 export const JobStatusSchema = z.object({
+  id: z.string(),
   name: z.string(),
+  description: z.string(),
+  schedule: z.string(),
   enabled: z.boolean(),
   status: z.string(),
   lastRun: z.string().nullable(),
   completedAt: z.string().nullable(),
   error: z.string().nullable(),
   duration: z.number().nullable(),
+  nextRun: z.string(),
 });
 
 export const JobHistoryItemSchema = z.object({

@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import type { Performer } from "@repo/shared-types";
-import { usePerformerDetails } from "@/hooks/useSearch";
-import { useCheckSubscription, useDeleteSubscription } from "@/hooks/useSubscriptions";
+import { usePerformerDetails } from "@/features/search";
+import { useCheckSubscription, useDeleteSubscription } from "@/features/subscriptions";
 import {
   Dialog,
   DialogContent,
@@ -46,6 +46,7 @@ export function PerformerDetailDialog({
       deleteSubscription.mutate({
         id: subscriptionStatus.subscription.id,
         deleteAssociatedScenes,
+        removeFiles: deleteAssociatedScenes, // Always delete files when deleting scenes
       });
     }
   };

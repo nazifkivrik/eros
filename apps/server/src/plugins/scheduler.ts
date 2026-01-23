@@ -9,6 +9,7 @@ import cron from "node-cron";
 import cronParser from "cron-parser";
 import { jobsLog } from "@repo/database";
 import { desc, eq } from "drizzle-orm";
+import { SettingsRepository } from "../infrastructure/repositories/settings.repository.js";
 
 // Jobs
 import { subscriptionSearchJob } from "../jobs/subscription-search.job.js";
@@ -44,10 +45,15 @@ const schedulerPlugin: FastifyPluginAsync = async (app) => {
     }
   }
 
-  // Get settings
-  const { createSettingsService } = await import("../services/settings.service.js");
-  const settingsService = createSettingsService(app.db);
-  const settings = await settingsService.getSettings();
+  // Get settings from database using repository
+  const settingsRepository = new SettingsRepository({ db: app.db });
+  const settingRecord = await settingsRepository.findByKey("app-settings");
+
+  // Use default settings if none found
+  const { DEFAULT_SETTINGS } = await import("@repo/shared-types");
+  const settings = settingRecord
+    ? (settingRecord.value as any)
+    : DEFAULT_SETTINGS;
 
   // Register a job
   const registerJob = (job: JobDefinition) => {
@@ -192,6 +198,18 @@ const schedulerPlugin: FastifyPluginAsync = async (app) => {
     }
   };
 
+  // Job descriptions for frontend
+  const JOB_DESCRIPTIONS: Record<string, string> = {
+    "subscription-search": "Search for new content from subscribed performers and studios",
+    "metadata-refresh": "Update and fix missing metadata for scenes from StashDB and TPDB",
+    "torrent-monitor": "Monitor torrent downloads and handle completions",
+    "cleanup": "Remove old logs and cleanup temporary files",
+    "metadata-discovery": "Discover new scenes from external metadata sources",
+    "missing-scenes-search": "Search for missing scenes in subscriptions",
+    "unified-sync": "Synchronize all subscription data",
+    "qbittorrent-cleanup": "Clean up completed torrents from qBittorrent",
+  };
+
   const getJobs = async () => {
     // Define all available jobs (including disabled ones)
     const allJobNames = [
@@ -222,15 +240,20 @@ const schedulerPlugin: FastifyPluginAsync = async (app) => {
             : null;
 
         const schedule = jobSchedules.get(name);
+        const nextRun = schedule ? getNextExecution(schedule) : null;
+
         return {
+          id: name, // Use job name as unique ID
           name,
+          description: JOB_DESCRIPTIONS[name] || "",
+          schedule: schedule || "", // Cron pattern for display
           enabled: jobs.has(name),
           status: latestRun?.status || "idle",
           lastRun: latestRun?.startedAt || null,
           completedAt: latestRun?.completedAt || null,
           error: latestRun?.errorMessage || null,
           duration,
-          nextRun: schedule ? getNextExecution(schedule) : null,
+          nextRun: nextRun ? nextRun.toISOString() : "",
         };
       })
     );

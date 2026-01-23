@@ -9,7 +9,7 @@ import {
   DeleteSubscriptionQuerySchema,
   SubscriptionListQuerySchema,
 } from "../../modules/subscriptions/subscriptions.schema.js";
-import type { Subscription } from "../../services/subscription.service.js";
+import type { Subscription } from "@repo/shared-types";
 
 /**
  * Subscriptions Controller

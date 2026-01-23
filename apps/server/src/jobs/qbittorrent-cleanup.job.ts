@@ -12,9 +12,9 @@ export async function qbittorrentCleanupJob(app: FastifyInstance) {
   app.log.info("Starting qBittorrent cleanup job");
 
   // Get services from DI container
-  const { qbittorrentService } = app.container;
+  const { torrentClient } = app.container;
 
-  if (!qbittorrentService) {
+  if (!torrentClient) {
     app.log.warn("qBittorrent not configured, skipping cleanup job");
     return;
   }
@@ -63,7 +63,7 @@ export async function qbittorrentCleanupJob(app: FastifyInstance) {
     for (const torrent of torrentsToRemove) {
       try {
         // Remove from qBittorrent (keep files on disk)
-        await qbittorrentService.removeTorrent(torrent.qbitHash!, false);
+        await torrentClient.removeTorrent(torrent.qbitHash!, false);
 
         // Clear qbitHash from database
         await app.db

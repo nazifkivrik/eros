@@ -1,9 +1,15 @@
 import fp from "fastify-plugin";
-import { QBittorrentService } from "../services/qbittorrent.service.js";
+import { SettingsRepository } from "../infrastructure/repositories/settings.repository.js";
+
+interface QBittorrentConfig {
+  url: string;
+  username: string;
+  password: string;
+}
 
 declare module "fastify" {
   interface FastifyInstance {
-    qbittorrent: QBittorrentService | null;
+    qbittorrentConfig?: QBittorrentConfig;
   }
 }
 
@@ -11,35 +17,28 @@ export default fp(async (app) => {
   // Wait for database plugin to be ready
   await app.after();
 
-  // Get settings from database
-  const { createSettingsService } = await import("../services/settings.service.js");
-  const settingsService = createSettingsService(app.db);
-  const settings = await settingsService.getSettings();
+  // Get settings from database using repository
+  const settingsRepository = new SettingsRepository({ db: app.db });
+  const settingRecord = await settingsRepository.findByKey("app-settings");
+
+  // Use default settings if none found
+  const { DEFAULT_SETTINGS } = await import("@repo/shared-types");
+  const settings = settingRecord
+    ? (settingRecord.value as any)
+    : DEFAULT_SETTINGS;
 
   if (!settings.qbittorrent.enabled || !settings.qbittorrent.url) {
     app.log.warn("qBittorrent not configured. Download functionality will be disabled.");
-    app.decorate("qbittorrent", null);
+    app.decorate("qbittorrentConfig", undefined);
     return;
   }
 
-  const qbittorrent = new QBittorrentService({
+  const qbittorrentConfig: QBittorrentConfig = {
     url: settings.qbittorrent.url,
     username: settings.qbittorrent.username,
     password: settings.qbittorrent.password,
-  });
+  };
 
-  // Test connection
-  try {
-    const connected = await qbittorrent.testConnection();
-    if (!connected) {
-      throw new Error("Connection test failed");
-    }
-    app.log.info({ url: settings.qbittorrent.url }, "qBittorrent plugin registered and connected");
-  } catch (error) {
-    app.log.error({ error, url: settings.qbittorrent.url }, "Failed to connect to qBittorrent");
-    app.decorate("qbittorrent", null);
-    return;
-  }
-
-  app.decorate("qbittorrent", qbittorrent);
+  app.decorate("qbittorrentConfig", qbittorrentConfig);
+  app.log.info({ url: settings.qbittorrent.url }, "qBittorrent config registered");
 });

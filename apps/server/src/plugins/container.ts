@@ -3,14 +3,10 @@ import type { FastifyInstance } from "fastify";
 import type { Database } from "@repo/database";
 import { buildContainer } from "../container/index.js";
 import type { ServiceContainer } from "../container/types.js";
-import { SettingsService } from "../services/settings.service.js";
-import { FileManagerService } from "../services/file-manager.service.js";
+import { FileManagerService } from "../application/services/file-management/file-manager.service.js";
+import { SettingsRepository } from "../infrastructure/repositories/settings.repository.js";
 
 import type { Logger } from "pino";
-import type { TPDBService } from "../services/tpdb/tpdb.service.js";
-import type { StashDBService } from "../services/stashdb.service.js";
-import type { QBittorrentService } from "../services/qbittorrent.service.js";
-import type { ProwlarrService } from "../services/prowlarr.service.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -24,18 +20,26 @@ declare module "fastify" {
  */
 export default fp(async (app: FastifyInstance) => {
   // Load settings BEFORE building container (for services that need runtime config)
-  const tempSettingsService = new SettingsService({ db: app.db });
-  const settings = await tempSettingsService.getSettings();
+  // Use repository directly to avoid circular dependency with SettingsService
+  const settingsRepository = new SettingsRepository({ db: app.db });
+  const settingRecord = await settingsRepository.findByKey("app-settings");
 
-  // Build container with infrastructure dependencies
+  // Use default settings if none found
+  const { DEFAULT_SETTINGS } = await import("@repo/shared-types");
+  const settings = settingRecord
+    ? (settingRecord.value as any)
+    : DEFAULT_SETTINGS;
+
+  // Build container with infrastructure dependencies and external service configs
   const container = buildContainer({
     db: app.db,
     logger: app.log as unknown as Logger,
-    tpdb: app.tpdb,
-    stashdb: app.stashdb,
-    // Use type assertion if global types are not picked up
-    qbittorrent: (app.qbittorrent as QBittorrentService | null) ?? undefined,
-    prowlarr: app.prowlarr as ProwlarrService | undefined,
+    externalServices: {
+      tpdb: app.tpdbConfig,
+      stashdb: app.stashdbConfig,
+      qbittorrent: app.qbittorrentConfig,
+      prowlarr: app.prowlarrConfig,
+    },
     scheduler: app.scheduler,
   });
 
@@ -63,7 +67,6 @@ export default fp(async (app: FastifyInstance) => {
     settingsService: container.cradle.settingsService,
     logsService: container.cradle.logsService,
     jobProgressService: container.cradle.jobProgressService,
-    subscriptionService: container.cradle.subscriptionService,
     torrentSearchService: container.cradle.torrentSearchService,
     fileManagerService: container.cradle.fileManagerService, // Runtime-configured service
     fileManager: container.cradle.fileManager, // Alias for legacy services
@@ -79,6 +82,7 @@ export default fp(async (app: FastifyInstance) => {
     // Clean Architecture - Repositories
     performersRepository: container.cradle.performersRepository,
     subscriptionsRepository: container.cradle.subscriptionsRepository,
+    scenesRepository: container.cradle.scenesRepository,
     qualityProfilesRepository: container.cradle.qualityProfilesRepository,
     setupRepository: container.cradle.setupRepository,
     logsRepository: container.cradle.logsRepository,
@@ -87,16 +91,22 @@ export default fp(async (app: FastifyInstance) => {
     downloadQueueRepository: container.cradle.downloadQueueRepository,
     searchRepository: container.cradle.searchRepository,
     aiMatchScoresRepository: container.cradle.aiMatchScoresRepository,
+    torrentsRepository: container.cradle.torrentsRepository,
 
     // Clean Architecture - Services
     performersService: container.cradle.performersService,
     subscriptionsService: container.cradle.subscriptionsService,
+    subscriptionsCoreService: container.cradle.subscriptionsCoreService,
+    subscriptionsScenesService: container.cradle.subscriptionsScenesService,
+    subscriptionsDiscoveryService: container.cradle.subscriptionsDiscoveryService,
+    subscriptionsManagementService: container.cradle.subscriptionsManagementService,
+    subscriptionsTorrentService: container.cradle.subscriptionsTorrentService,
     qualityProfilesService: container.cradle.qualityProfilesService,
     setupService: container.cradle.setupService,
-    newLogsService: container.cradle.newLogsService,
+    logsService: container.cradle.logsService,
     authService: container.cradle.authService,
     torrentsService: container.cradle.torrentsService,
-    newSettingsService: container.cradle.newSettingsService,
+    settingsService: container.cradle.settingsService,
     downloadQueueService: container.cradle.downloadQueueService,
     searchService: container.cradle.searchService,
     jobsService: container.cradle.jobsService,
@@ -113,24 +123,19 @@ export default fp(async (app: FastifyInstance) => {
     downloadQueueController: container.cradle.downloadQueueController,
     searchController: container.cradle.searchController,
     jobsController: container.cradle.jobsController,
+    torrentSearchController: container.cradle.torrentSearchController,
   };
 
   // Add optional external services only if they are registered
-  if (container.hasRegistration('tpdbService')) {
-    containerCradle.tpdbService = container.cradle.tpdbService;
-  }
-  if (container.hasRegistration('stashdbService')) {
-    containerCradle.stashdbService = container.cradle.stashdbService;
-  }
-  if (container.hasRegistration('qbittorrentService')) {
-    containerCradle.qbittorrentService = container.cradle.qbittorrentService;
-  }
-  if (container.hasRegistration('prowlarrService')) {
-    containerCradle.prowlarrService = container.cradle.prowlarrService;
-  }
   if (container.hasRegistration('scheduler')) {
     containerCradle.scheduler = container.cradle.scheduler;
   }
+  // Always include adapters (will be undefined if none available)
+  containerCradle.metadataProvider = container.cradle.metadataProvider;
+  containerCradle.tpdbProvider = container.cradle.tpdbProvider;
+  containerCradle.stashdbProvider = container.cradle.stashdbProvider;
+  containerCradle.indexer = container.cradle.indexer;
+  containerCradle.torrentClient = container.cradle.torrentClient;
 
   app.decorate("container", containerCradle as ServiceContainer);
 

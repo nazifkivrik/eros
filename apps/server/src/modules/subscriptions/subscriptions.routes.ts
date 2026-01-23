@@ -275,9 +275,15 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
         const result = await subscriptionsController.getSubscriptionFiles(request.params);
 
         // Filesystem scanning logic (kept in route for now)
-        const { createSettingsService } = await import("../../services/settings.service.js");
-        const settingsService = createSettingsService(appWithDb.db);
-        const settings = await settingsService.getSettings();
+        const { SettingsRepository } = await import("../../infrastructure/repositories/settings.repository.js");
+        const settingsRepository = new SettingsRepository({ db: appWithDb.db });
+        const settingRecord = await settingsRepository.findByKey("app-settings");
+
+        // Use default settings if none found
+        const { DEFAULT_SETTINGS } = await import("@repo/shared-types");
+        const settings = settingRecord
+          ? (settingRecord.value as any)
+          : DEFAULT_SETTINGS;
         const { join } = await import("path");
 
         const subscription = await appWithDb.container.subscriptionsService.getById(request.params.id);
