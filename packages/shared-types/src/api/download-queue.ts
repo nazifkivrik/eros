@@ -84,6 +84,10 @@ export const EnhancedDownloadItemSchema = z.object({
   priority: z.number().nullable(),
   addedAt: z.string(),
   completedAt: z.string().nullable(),
+  // Retry tracking for failed torrents
+  addToClientAttempts: z.number().nullable(),
+  addToClientLastAttempt: z.string().nullable(),
+  addToClientError: z.string().nullable(),
 });
 
 export const DownloadQueueListResponseSchema = z.object({

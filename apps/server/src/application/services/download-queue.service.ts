@@ -43,6 +43,10 @@ export interface UnifiedDownload {
   priority: number | null;
   addedAt: string;
   completedAt: string | null;
+  // Retry tracking for failed torrents
+  addToClientAttempts: number | null;
+  addToClientLastAttempt: string | null;
+  addToClientError: string | null;
 }
 
 /**
@@ -353,6 +357,10 @@ export class DownloadQueueService {
         priority: (torrent?.priority as number | undefined) || null,
         addedAt: item.addedAt,
         completedAt: item.completedAt,
+        // Retry tracking for failed torrents
+        addToClientAttempts: item.addToClientAttempts ?? null,
+        addToClientLastAttempt: item.addToClientLastAttempt ?? null,
+        addToClientError: item.addToClientError ?? null,
       };
     });
 
