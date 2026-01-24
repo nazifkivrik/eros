@@ -7,8 +7,8 @@ import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Database } from "@repo/database";
 import { performers, studios, scenes } from "@repo/database";
-import type { IMetadataProvider } from "../../../infrastructure/adapters/interfaces/metadata-provider.interface.js";
-import { logger } from "../../../utils/logger.js";
+import type { IMetadataProvider } from "@/infrastructure/adapters/interfaces/metadata-provider.interface.js";
+import { logger } from "@/utils/logger.js";
 
 export class EntityResolverService {
   private db: Database;
@@ -57,26 +57,25 @@ export class EntityResolverService {
           if (!performer) {
             // Create performer in local DB
             const localId = nanoid();
-            // Generate slug from name if not provided
-            const slug = tpdbPerformer.slug ||
-              tpdbPerformer.name
-                .toLowerCase()
-                .replace(/[^\w\s-]/g, '')
-                .replace(/\s+/g, '-')
-                .replace(/-+/g, '-')
-                .trim();
+            // Generate slug from name
+            const slug = tpdbPerformer.name
+              .toLowerCase()
+              .replace(/[^\w\s-]/g, '')
+              .replace(/\s+/g, '-')
+              .replace(/-+/g, '-')
+              .trim();
 
             await this.db.insert(performers).values({
               id: localId,
               externalIds: [{ source: "tpdb", id: tpdbPerformer.id }],
               slug,
               name: tpdbPerformer.name,
-              fullName: tpdbPerformer.fullName || tpdbPerformer.name,
-              rating: tpdbPerformer.rating || 0,
+              fullName: tpdbPerformer.name,
+              rating: 0,
               aliases: tpdbPerformer.aliases || [],
               disambiguation: tpdbPerformer.disambiguation,
               gender: tpdbPerformer.gender,
-              birthdate: tpdbPerformer.birthdate,
+              birthdate: tpdbPerformer.birthDate,
               deathDate: tpdbPerformer.deathDate,
               careerStartYear: tpdbPerformer.careerStartYear,
               careerEndYear: tpdbPerformer.careerEndYear,
@@ -128,7 +127,7 @@ export class EntityResolverService {
         logger.info(
           `[EntityResolver] Studio ${entityId} not found locally, fetching from TPDB`
         );
-        const tpdbSite = await this.metadataProvider.getSiteById(entityId);
+        const tpdbSite = await this.metadataProvider.getStudioById(entityId);
 
         if (tpdbSite) {
           // Check once more if studio was created in the meantime (race condition)
@@ -142,23 +141,22 @@ export class EntityResolverService {
           if (!studio) {
             // Create studio in local DB
             const localId = nanoid();
-            // Generate slug from name if not provided
-            const slug = tpdbSite.slug ||
-              tpdbSite.name
-                .toLowerCase()
-                .replace(/[^\w\s-]/g, '')
-                .replace(/\s+/g, '-')
-                .replace(/-+/g, '-')
-                .trim();
+            // Generate slug from name
+            const slug = tpdbSite.name
+              .toLowerCase()
+              .replace(/[^\w\s-]/g, '')
+              .replace(/\s+/g, '-')
+              .replace(/-+/g, '-')
+              .trim();
 
             await this.db.insert(studios).values({
               id: localId,
               externalIds: [{ source: "tpdb", id: tpdbSite.id }],
               name: tpdbSite.name,
               slug,
-              rating: tpdbSite.rating || 0,
-              parentStudioId: tpdbSite.parentStudioId,
-              url: tpdbSite.url,
+              rating: 0,
+              parentStudioId: tpdbSite.parent?.id || null,
+              url: tpdbSite.urls[0]?.url || null,
               images: tpdbSite.images || [],
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),

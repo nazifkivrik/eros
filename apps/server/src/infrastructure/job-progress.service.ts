@@ -24,7 +24,7 @@ export class JobProgressService extends EventEmitter {
   /**
    * Emit job started event
    */
-  emitStarted(jobName: JobName, message: string, data?: Record<string, any>) {
+  emitStarted(jobName: JobName, message: string, data?: Record<string, unknown>) {
     const event: JobProgressEvent = {
       jobName,
       status: "started",
@@ -43,7 +43,7 @@ export class JobProgressService extends EventEmitter {
     message: string,
     current: number,
     total: number,
-    data?: Record<string, any>
+    data?: Record<string, unknown>
   ) {
     const event: JobProgressEvent = {
       jobName,
@@ -66,7 +66,7 @@ export class JobProgressService extends EventEmitter {
   emitCompleted(
     jobName: JobName,
     message: string,
-    data?: Record<string, any>
+    data?: Record<string, unknown>
   ) {
     const event: JobProgressEvent = {
       jobName,
@@ -81,7 +81,7 @@ export class JobProgressService extends EventEmitter {
   /**
    * Emit job failed event
    */
-  emitFailed(jobName: JobName, message: string, data?: Record<string, any>) {
+  emitFailed(jobName: JobName, message: string, data?: Record<string, unknown>) {
     const event: JobProgressEvent = {
       jobName,
       status: "failed",

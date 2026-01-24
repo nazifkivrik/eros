@@ -10,19 +10,19 @@
  * - Quality service (quality profile-based selection)
  */
 
-import type { TorrentsRepository } from "../../../infrastructure/repositories/torrents.repository.js";
-import type { IIndexer } from "../../../infrastructure/adapters/interfaces/indexer.interface.js";
-import type { LogsService } from "../logs.service.js";
-import type { SettingsService } from "../settings.service.js";
-import type { AIMatchingService } from "../../../services/ai-matching.service.js";
-import type { CrossEncoderService } from "../../../services/cross-encoder-matching.service.js";
-import type { AIMatchScoresRepository } from "../../../infrastructure/repositories/ai-match-scores.repository.js";
-import type { SceneMetadata } from "../../../infrastructure/repositories/torrents.repository.js";
+import type { TorrentsRepository } from "@/infrastructure/repositories/torrents.repository.js";
+import type { IIndexer } from "@/infrastructure/adapters/interfaces/indexer.interface.js";
+import type { LogsService } from "@/application/services/logs.service.js";
+import type { SettingsService } from "@/application/services/settings.service.js";
+import type { AIMatchingService } from "@/application/services/ai-matching/ai-matching.service.js";
+import type { CrossEncoderService } from "@/application/services/ai-matching/cross-encoder.service.js";
+import type { AIMatchScoresRepository } from "@/infrastructure/repositories/ai-match-scores.repository.js";
+import type { SceneMetadata } from "@/infrastructure/repositories/torrents.repository.js";
 import { TorrentSearchIndexerService } from "./torrent-search.indexer.service.js";
 import { TorrentSearchFilterService } from "./torrent-search.filter.service.js";
 import { TorrentSearchMatchService } from "./torrent-search.match.service.js";
 import { TorrentSearchQualityService } from "./torrent-search.quality.service.js";
-import { logger } from "../../../utils/logger.js";
+import { logger } from "@/utils/logger.js";
 
 /**
  * Torrent result from search

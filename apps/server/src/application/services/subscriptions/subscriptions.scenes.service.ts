@@ -1,8 +1,8 @@
 import { nanoid } from "nanoid";
 import type { Logger } from "pino";
-import { ScenesRepository } from "../../../infrastructure/repositories/scenes.repository.js";
-import { PerformersRepository } from "../../../infrastructure/repositories/performers.repository.js";
-import { SubscriptionsRepository } from "../../../infrastructure/repositories/subscriptions.repository.js";
+import { ScenesRepository } from "@/infrastructure/repositories/scenes.repository.js";
+import { PerformersRepository } from "@/infrastructure/repositories/performers.repository.js";
+import { SubscriptionsRepository } from "@/infrastructure/repositories/subscriptions.repository.js";
 import { scenes, performers, studios, performersScenes } from "@repo/database";
 import type { Database } from "@repo/database";
 import { eq } from "drizzle-orm";

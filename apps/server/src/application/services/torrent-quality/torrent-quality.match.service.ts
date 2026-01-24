@@ -8,9 +8,9 @@
  * - Text normalization for comparison
  */
 
-import type { AIMatchingService } from "../../../ai-matching/ai-matching.service.js";
-import type { LogsService } from "../../logs.service.js";
-import { logger } from "../../../utils/logger.js";
+import type { AIMatchingService } from "@/application/services/ai-matching/ai-matching.service.js";
+import type { LogsService } from "@/application/services/logs.service.js";
+import { logger } from "@/utils/logger.js";
 
 /**
  * Torrent Quality Match Service

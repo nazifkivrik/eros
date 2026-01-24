@@ -5,6 +5,8 @@ import { buildContainer } from "../container/index.js";
 import type { ServiceContainer } from "../container/types.js";
 import { FileManagerService } from "../application/services/file-management/file-manager.service.js";
 import { SettingsRepository } from "../infrastructure/repositories/settings.repository.js";
+import { ExternalServicesManager } from "../config/external-services.js";
+import type { AppSettings } from "@repo/shared-types";
 
 import type { Logger } from "pino";
 
@@ -26,21 +28,20 @@ export default fp(async (app: FastifyInstance) => {
 
   // Use default settings if none found
   const { DEFAULT_SETTINGS } = await import("@repo/shared-types");
-  const settings = settingRecord
-    ? (settingRecord.value as any)
+  const settings: AppSettings = settingRecord
+    ? (settingRecord.value as AppSettings)
     : DEFAULT_SETTINGS;
+
+  // Initialize external services configuration manager
+  const externalServicesManager = new ExternalServicesManager(app.db);
+  await externalServicesManager.initialize();
 
   // Build container with infrastructure dependencies and external service configs
   const container = buildContainer({
     db: app.db,
     logger: app.log as unknown as Logger,
-    externalServices: {
-      tpdb: app.tpdbConfig,
-      stashdb: app.stashdbConfig,
-      qbittorrent: app.qbittorrentConfig,
-      prowlarr: app.prowlarrConfig,
-    },
-    scheduler: app.scheduler,
+    externalServices: externalServicesManager.getConfig(),
+    externalServicesManager,
   });
 
   // Register services that need runtime configuration AFTER container creation
@@ -62,17 +63,15 @@ export default fp(async (app: FastifyInstance) => {
     // Infrastructure
     db: container.cradle.db,
     logger: container.cradle.logger,
+    externalServicesManager, // For config reload capability
 
     // Old services (will be migrated)
-    settingsService: container.cradle.settingsService,
-    logsService: container.cradle.logsService,
     jobProgressService: container.cradle.jobProgressService,
     torrentSearchService: container.cradle.torrentSearchService,
     fileManagerService: container.cradle.fileManagerService, // Runtime-configured service
     fileManager: container.cradle.fileManager, // Alias for legacy services
     downloadService: container.cradle.downloadService,
     parserService: container.cradle.parserService,
-    torrentCompletionService: container.cradle.torrentCompletionService,
     entityResolverService: container.cradle.entityResolverService,
     sceneMatcherService: container.cradle.sceneMatcherService,
     aiMatchingService: container.cradle.aiMatchingService,
@@ -92,6 +91,8 @@ export default fp(async (app: FastifyInstance) => {
     searchRepository: container.cradle.searchRepository,
     aiMatchScoresRepository: container.cradle.aiMatchScoresRepository,
     torrentsRepository: container.cradle.torrentsRepository,
+    jobsRepository: container.cradle.jobsRepository,
+    studiosRepository: container.cradle.studiosRepository,
 
     // Clean Architecture - Services
     performersService: container.cradle.performersService,
@@ -110,6 +111,14 @@ export default fp(async (app: FastifyInstance) => {
     downloadQueueService: container.cradle.downloadQueueService,
     searchService: container.cradle.searchService,
     jobsService: container.cradle.jobsService,
+    schedulerService: container.cradle.schedulerService,
+    torrentCompletionService: container.cradle.torrentCompletionService,
+
+    // Clean Architecture - Jobs
+    cleanupJob: container.cradle.cleanupJob,
+    subscriptionSearchJob: container.cradle.subscriptionSearchJob,
+    torrentMonitorJob: container.cradle.torrentMonitorJob,
+    metadataRefreshJob: container.cradle.metadataRefreshJob,
 
     // Clean Architecture - Controllers
     performersController: container.cradle.performersController,
@@ -126,10 +135,8 @@ export default fp(async (app: FastifyInstance) => {
     torrentSearchController: container.cradle.torrentSearchController,
   };
 
-  // Add optional external services only if they are registered
-  if (container.hasRegistration('scheduler')) {
-    containerCradle.scheduler = container.cradle.scheduler;
-  }
+  // Add optional services
+  containerCradle.scheduler = containerCradle.schedulerService; // Alias for backwards compatibility
   // Always include adapters (will be undefined if none available)
   containerCradle.metadataProvider = container.cradle.metadataProvider;
   containerCradle.tpdbProvider = container.cradle.tpdbProvider;
@@ -138,6 +145,21 @@ export default fp(async (app: FastifyInstance) => {
   containerCradle.torrentClient = container.cradle.torrentClient;
 
   app.decorate("container", containerCradle as ServiceContainer);
+
+  // Set container on schedulerService (to avoid circular dependency)
+  if (containerCradle.schedulerService) {
+    containerCradle.schedulerService.setContainer(containerCradle as ServiceContainer);
+    // Initialize scheduler (registers cron jobs)
+    await containerCradle.schedulerService.initialize();
+
+    // Set schedulerService on jobsService
+    containerCradle.jobsService?.setSchedulerService(containerCradle.schedulerService);
+  }
+
+  // Cleanup on server shutdown
+  app.addHook("onClose", async () => {
+    containerCradle.schedulerService?.stopAllJobs();
+  });
 
   app.log.info("DI container initialized with all services");
 });

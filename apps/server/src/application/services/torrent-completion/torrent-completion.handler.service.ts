@@ -9,11 +9,11 @@
  * - Update download queue status
  */
 
-import type { TorrentsRepository } from "../../../infrastructure/repositories/torrents.repository.js";
-import type { FileManagerService } from "../../../file-management/file-manager.service.js";
-import type { ITorrentClient } from "../../../infrastructure/adapters/interfaces/torrent-client.interface.js";
-import type { LogsService } from "../../logs.service.js";
-import { logger } from "../../../utils/logger.js";
+import type { TorrentsRepository } from "@/infrastructure/repositories/torrents.repository.js";
+import type { FileManagerService } from "@/application/services/file-management/file-manager.service.js";
+import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
+import type { LogsService } from "@/application/services/logs.service.js";
+import { logger } from "@/utils/logger.js";
 
 /**
  * Torrent Completion Handler Service
@@ -25,12 +25,12 @@ export class TorrentCompletionHandlerService {
   private torrentClient?: ITorrentClient;
 
   constructor(deps: {
-    repository: TorrentsRepository;
+    torrentsRepository: TorrentsRepository;
     fileManagerService: FileManagerService;
     logsService: LogsService;
     torrentClient?: ITorrentClient;
   }) {
-    this.repository = deps.repository;
+    this.repository = deps.torrentsRepository;
     this.fileManager = deps.fileManagerService;
     this.logsService = deps.logsService;
     this.torrentClient = deps.torrentClient;

@@ -15,34 +15,42 @@ export interface SchedulerService {
  * Jobs Service
  * Business logic for managing background jobs
  * Responsibilities:
- * - Delegate to scheduler plugin for job management
+ * - Delegate to SchedulerService for job management
  * - Access job progress service for SSE events
- * - No database interaction (jobs are managed by scheduler plugin)
+ * - No database interaction (jobs are managed by SchedulerService)
  */
 export class JobsService {
-  private scheduler: SchedulerService | undefined;
+  private schedulerService: SchedulerService | undefined;
   private jobProgressService: JobProgressService;
   private logger: Logger;
 
   constructor({
-    scheduler,
+    schedulerService,
     jobProgressService,
     logger,
   }: {
-    scheduler?: SchedulerService;
+    schedulerService?: SchedulerService;
     jobProgressService: JobProgressService;
     logger: Logger;
   }) {
-    this.scheduler = scheduler;
+    this.schedulerService = schedulerService;
     this.jobProgressService = jobProgressService;
     this.logger = logger;
+  }
+
+  /**
+   * Set scheduler service after container initialization
+   * This is called by the container plugin to avoid circular dependency
+   */
+  setSchedulerService(schedulerService: SchedulerService): void {
+    this.schedulerService = schedulerService;
   }
 
   /**
    * Ensure scheduler is available
    */
   private ensureSchedulerAvailable(): void {
-    if (!this.scheduler) {
+    if (!this.schedulerService) {
       throw new Error("Scheduler not configured");
     }
   }
@@ -52,7 +60,7 @@ export class JobsService {
    */
   async getAllJobs() {
     this.ensureSchedulerAvailable();
-    return await this.scheduler!.getJobs();
+    return await this.schedulerService!.getJobs();
   }
 
   /**
@@ -60,7 +68,7 @@ export class JobsService {
    */
   async getJobHistory(limit?: number) {
     this.ensureSchedulerAvailable();
-    return await this.scheduler!.getJobHistory(limit || 50);
+    return await this.schedulerService!.getJobHistory(limit || 50);
   }
 
   /**
@@ -73,7 +81,7 @@ export class JobsService {
     try {
       // Trigger job without waiting for completion to avoid timeout
       // Job runs in background, errors are logged but don't affect response
-      this.scheduler!.triggerJob(jobName).catch(error => {
+      this.schedulerService!.triggerJob(jobName).catch(error => {
         this.logger.error({ error, jobName }, "Job execution failed");
       });
       this.logger.info({ jobName }, "Job triggered successfully");

@@ -1,9 +1,9 @@
 import type { Logger } from "pino";
-import type { ITorrentClient } from "../../../infrastructure/adapters/interfaces/torrent-client.interface.js";
-import type { SubscriptionsRepository } from "../../../infrastructure/repositories/subscriptions.repository.js";
-import type { QualityProfilesRepository } from "../../../infrastructure/repositories/quality-profiles.repository.js";
-import type { TorrentSearchService } from "../../torrent-search/index.js";
-import type { DownloadService } from "../../../torrent-selection/download.service.js";
+import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
+import type { SubscriptionsRepository } from "@/infrastructure/repositories/subscriptions.repository.js";
+import type { QualityProfilesRepository } from "@/infrastructure/repositories/quality-profiles.repository.js";
+import type { TorrentSearchService } from "@/application/services/torrent-search/index.js";
+import type { DownloadService } from "@/application/services/torrent-selection/download.service.js";
 import { eq } from "drizzle-orm";
 import { subscriptions, scenes } from "@repo/database";
 import type { Database } from "@repo/database";

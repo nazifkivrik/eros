@@ -10,6 +10,9 @@ import { createTPDBAdapter } from "../../infrastructure/adapters/tpdb.adapter.js
 import { createStashDBAdapter } from "../../infrastructure/adapters/stashdb.adapter.js";
 import { createProwlarrAdapter } from "../../infrastructure/adapters/prowlarr.adapter.js";
 import type { AppSettings } from "@repo/shared-types";
+import type { CrossEncoderService } from "../../application/services/ai-matching/cross-encoder.service.js";
+import type { ExternalServicesManager } from "../../config/external-services.js";
+import type { ServiceContainer } from "../../container/types.js";
 
 /**
  * Settings Controller
@@ -24,16 +27,24 @@ import type { AppSettings } from "@repo/shared-types";
 export class SettingsController {
   private settingsService: SettingsService;
   private logger: Logger;
+  private crossEncoderService?: CrossEncoderService;
+  private externalServicesManager?: ExternalServicesManager;
 
   constructor({
     settingsService,
     logger,
+    crossEncoderService,
+    externalServicesManager,
   }: {
     settingsService: SettingsService;
     logger: Logger;
+    crossEncoderService?: CrossEncoderService;
+    externalServicesManager?: ExternalServicesManager;
   }) {
     this.settingsService = settingsService;
     this.logger = logger;
+    this.crossEncoderService = crossEncoderService;
+    this.externalServicesManager = externalServicesManager;
   }
 
   /**
@@ -94,9 +105,8 @@ export class SettingsController {
   /**
    * Get AI model status
    */
-  async getAIModelStatus(app: FastifyInstance) {
-    const crossEncoderService = (app.container as any).crossEncoderService;
-    if (!crossEncoderService) {
+  async getAIModelStatus() {
+    if (!this.crossEncoderService) {
       return {
         enabled: false,
         modelLoaded: false,
@@ -108,21 +118,14 @@ export class SettingsController {
     }
 
     const settings = await this.settingsService.getSettings();
-    const loadError = crossEncoderService.getLoadError ? crossEncoderService.getLoadError() : null;
+    const loadError = this.crossEncoderService.getLoadError();
 
-    // Check if methods exist and call them
-    const isModelDownloaded = typeof crossEncoderService.isModelDownloaded === 'function'
-      ? crossEncoderService.isModelDownloaded()
-      : false;
-    const isModelLoaded = typeof crossEncoderService.isModelLoaded === 'function'
-      ? crossEncoderService.isModelLoaded()
-      : false;
+    const isModelDownloaded = this.crossEncoderService.isModelDownloaded();
+    const isModelLoaded = this.crossEncoderService.isModelLoaded();
 
     this.logger.info({
       isModelDownloaded,
       isModelLoaded,
-      hasIsModelDownloadedMethod: typeof crossEncoderService.isModelDownloaded === 'function',
-      hasIsModelLoadedMethod: typeof crossEncoderService.isModelLoaded === 'function'
     }, 'AI model status check');
 
     return {
@@ -130,7 +133,7 @@ export class SettingsController {
       modelLoaded: isModelLoaded,
       modelDownloaded: isModelDownloaded,
       modelName: 'Xenova/ms-marco-MiniLM-L-6-v2',
-      modelPath: typeof crossEncoderService.getModelPath === 'function' ? crossEncoderService.getModelPath() : './data/ai/models',
+      modelPath: this.crossEncoderService.getModelPath(),
       error: loadError ? loadError.message : null
     };
   }
@@ -138,20 +141,19 @@ export class SettingsController {
   /**
    * Manually load AI model into RAM
    */
-  async loadAIModel(app: FastifyInstance) {
-    const crossEncoderService = (app.container as any).crossEncoderService;
-    if (!crossEncoderService) {
+  async loadAIModel() {
+    if (!this.crossEncoderService) {
       throw new Error('Cross-Encoder service not available');
     }
 
     try {
       this.logger.info('Manual AI model download requested');
-      await crossEncoderService.initialize();
+      await this.crossEncoderService.initialize();
 
       return {
         success: true,
         message: 'Model loaded successfully',
-        modelLoaded: crossEncoderService.isModelLoaded ? crossEncoderService.isModelLoaded() : false,
+        modelLoaded: this.crossEncoderService.isModelLoaded(),
       };
     } catch (error) {
       this.logger.error({ error }, 'Failed to load AI model');
@@ -160,79 +162,78 @@ export class SettingsController {
   }
 
   /**
-   * Reload Fastify plugins with new settings
-   * HTTP Concern: Direct manipulation of Fastify decorators and DI container
+   * Reload external services adapters with new settings
+   * Uses ExternalServicesManager to reload config and updates container adapters
    */
   private async reloadPlugins(
-    settings: AppSettings,
+    _settings: AppSettings,
     app: FastifyInstance
   ): Promise<void> {
-    // Reload StashDB plugin
-    if (settings.stashdb?.apiKey) {
-      const stashdb = createStashDBAdapter({
-        apiUrl: "https://stashdb.org/graphql",
-        apiKey: settings.stashdb.apiKey,
-      }, this.logger);
-      // Update Fastify decorator
-      app.stashdb = stashdb as any;
-      // Update DI container (direct assignment for runtime update)
-      (app.container as any).stashdbService = stashdb;
-      (app.container as any).stashdb = stashdb;
-      this.logger.info("StashDB plugin reloaded with new API key");
+    // Reload external services configuration from database
+    if (this.externalServicesManager) {
+      await this.externalServicesManager.reload();
+      this.logger.info("External services configuration reloaded");
     }
 
-    // Reload TPDB plugin
-    if (settings.tpdb?.apiKey) {
-      const tpdb = createTPDBAdapter({
-        apiUrl: settings.tpdb.apiUrl || "https://api.theporndb.net",
-        apiKey: settings.tpdb.apiKey,
-      }, this.logger);
-      // Update Fastify decorator
-      app.tpdb = tpdb as any;
-      // Update DI container (direct assignment for runtime update)
-      (app.container as any).tpdbService = tpdb;
-      (app.container as any).tpdb = tpdb;
-      this.logger.info("TPDB plugin reloaded with new API key");
+    // Get updated config
+    const config = this.externalServicesManager?.getConfig() || {};
+
+    // Update StashDB adapter in container
+    if (config.stashdb) {
+      const stashdb = createStashDBAdapter(config.stashdb, this.logger);
+      (app.container as ServiceContainer).stashdbProvider = stashdb;
+      (app.container as ServiceContainer).metadataProvider = stashdb; // Update generic provider
+      this.logger.info("StashDB adapter reloaded with new configuration");
+    } else {
+      (app.container as ServiceContainer).stashdbProvider = undefined;
+      // Update generic provider to TPDB if available
+      if (config.tpdb) {
+        const tpdb = createTPDBAdapter(config.tpdb, this.logger);
+        (app.container as ServiceContainer).metadataProvider = tpdb;
+      } else {
+        (app.container as ServiceContainer).metadataProvider = undefined;
+      }
     }
 
-    // Reload qBittorrent plugin
-    if (settings.qbittorrent?.enabled && settings.qbittorrent?.url) {
-      const qbittorrent = createQBittorrentAdapter({
-        url: settings.qbittorrent.url,
-        username: settings.qbittorrent.username || "admin",
-        password: settings.qbittorrent.password || "adminadmin",
-      }, this.logger);
+    // Update TPDB adapter in container
+    if (config.tpdb) {
+      const tpdb = createTPDBAdapter(config.tpdb, this.logger);
+      (app.container as ServiceContainer).tpdbProvider = tpdb;
+      (app.container as ServiceContainer).metadataProvider = tpdb; // TPDB has priority
+      this.logger.info("TPDB adapter reloaded with new configuration");
+    } else {
+      (app.container as ServiceContainer).tpdbProvider = undefined;
+      // Update generic provider to StashDB if available
+      if (config.stashdb) {
+        const stashdb = createStashDBAdapter(config.stashdb, this.logger);
+        (app.container as ServiceContainer).metadataProvider = stashdb;
+      } else {
+        (app.container as ServiceContainer).metadataProvider = undefined;
+      }
+    }
 
-      // Test connection (adapter method)
+    // Update qBittorrent adapter in container
+    if (config.qbittorrent) {
+      const qbittorrent = createQBittorrentAdapter(config.qbittorrent, this.logger);
       const connected = await qbittorrent.testConnection();
       if (connected) {
-        app.qbittorrent = qbittorrent as any;
-        this.logger.info("qBittorrent plugin reloaded and connected");
+        (app.container as ServiceContainer).torrentClient = qbittorrent;
+        this.logger.info("qBittorrent adapter reloaded and connected");
       } else {
-        app.qbittorrent = null;
-        this.logger.warn("qBittorrent plugin reloaded but connection failed");
+        (app.container as ServiceContainer).torrentClient = undefined;
+        this.logger.warn("qBittorrent adapter reloaded but connection failed");
       }
     } else {
-      app.qbittorrent = null;
+      (app.container as ServiceContainer).torrentClient = undefined;
     }
 
-    // Reload Prowlarr plugin
-    if (settings.prowlarr?.enabled && settings.prowlarr?.apiUrl && settings.prowlarr?.apiKey) {
-      const prowlarr = createProwlarrAdapter({
-        baseUrl: settings.prowlarr.apiUrl,
-        apiKey: settings.prowlarr.apiKey,
-      }, this.logger);
-
-      // Update Fastify decorator
-      app.prowlarr = prowlarr as any;
-      // Update DI container (direct assignment for runtime update)
-      (app.container as any).prowlarrService = prowlarr;
-      (app.container as any).prowlarr = prowlarr;
-      this.logger.info("Prowlarr plugin reloaded with new configuration");
+    // Update Prowlarr adapter in container
+    if (config.prowlarr) {
+      const prowlarr = createProwlarrAdapter(config.prowlarr, this.logger);
+      (app.container as ServiceContainer).indexer = prowlarr;
+      this.logger.info("Prowlarr adapter reloaded with new configuration");
     } else {
-      app.prowlarr = null;
-      (app.container as any).prowlarrService = null;
-      (app.container as any).prowlarr = null;
+      (app.container as ServiceContainer).indexer = undefined;
     }
   }
 }

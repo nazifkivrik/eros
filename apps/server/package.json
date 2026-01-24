@@ -47,8 +47,10 @@
     "@types/node": "^22.10.1",
     "@types/node-cron": "^3.0.11",
     "dotenv": "^16.4.7",
+    "esbuild-plugin-tsconfig-paths": "^1.0.2",
+    "tsconfig-paths": "^4.2.0",
     "tsup": "^8.5.1",
-    "tsx": "^4.19.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.2"
   }
 }

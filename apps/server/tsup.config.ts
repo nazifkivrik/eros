@@ -12,4 +12,8 @@ export default defineConfig({
   keepNames: true,
   // Enable experimental features for better ESM support
   shims: false,
+  esbuildOptions: (options) => {
+    // Preserve tsconfig path aliases - tsup handles this natively with tsconfig
+    options.preserveSymlinks = true;
+  },
 });

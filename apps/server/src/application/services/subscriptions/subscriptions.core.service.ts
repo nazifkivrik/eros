@@ -1,5 +1,5 @@
 import type { Logger } from "pino";
-import { SubscriptionsRepository } from "../../../infrastructure/repositories/subscriptions.repository.js";
+import { SubscriptionsRepository } from "@/infrastructure/repositories/subscriptions.repository.js";
 import { nanoid } from "nanoid";
 
 /**

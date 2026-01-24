@@ -9,13 +9,13 @@
  * - Levenshtein distance calculation
  */
 
-import type { TorrentsRepository, SceneMetadata } from "../../../infrastructure/repositories/torrents.repository.js";
-import type { AIMatchingService } from "../../../ai-matching/ai-matching.service.js";
-import type { CrossEncoderService } from "../../../ai-matching/cross-encoder.service.js";
-import type { AIMatchScoresRepository } from "../../../infrastructure/repositories/ai-match-scores.repository.js";
-import type { LogsService } from "../../logs.service.js";
-import type { SettingsService } from "../../settings.service.js";
-import type { SceneGroup, MatchResult, TorrentResult } from "../torrent-search/index.js";
+import type { TorrentsRepository, SceneMetadata } from "@/infrastructure/repositories/torrents.repository.js";
+import type { AIMatchingService } from "@/application/services/ai-matching/ai-matching.service.js";
+import type { CrossEncoderService } from "@/application/services/ai-matching/cross-encoder.service.js";
+import type { AIMatchScoresRepository } from "@/infrastructure/repositories/ai-match-scores.repository.js";
+import type { LogsService } from "@/application/services/logs.service.js";
+import type { SettingsService } from "@/application/services/settings.service.js";
+import type { SceneGroup, MatchResult, TorrentResult } from "@/application/services/torrent-search/index.js";
 import { eq, and } from "drizzle-orm";
 import { performersScenes, subscriptions } from "@repo/database";
 
@@ -84,7 +84,7 @@ export class TorrentSearchMatchService {
     entityId: string
   ): Promise<MatchResult> {
     // Import SceneMatcher dynamically
-    const { SceneMatcher } = await import("../../../services/matching/scene-matcher.service.js");
+    const { SceneMatcher } = await import("@/application/services/matching/scene-matcher.service.js");
 
     // Get match settings
     const matchSettings = {

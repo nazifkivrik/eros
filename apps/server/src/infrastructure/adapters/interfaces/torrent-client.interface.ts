@@ -129,6 +129,36 @@ export interface ITorrentClient {
   ): Promise<boolean>;
 
   /**
+   * Set torrent priority in queue
+   * @param hash - Torrent hash identifier
+   * @param priority - Priority: "top", "bottom", or a number (higher = higher priority)
+   * @returns true if successful
+   */
+  setTorrentPriority(
+    hash: string,
+    priority: "top" | "bottom" | number
+  ): Promise<boolean>;
+
+  /**
+   * Delete a torrent (alias for removeTorrent)
+   * @param hash - Torrent hash identifier
+   * @param deleteFiles - Whether to delete downloaded files
+   * @returns true if successful
+   */
+  deleteTorrent(hash: string, deleteFiles?: boolean): Promise<boolean>;
+
+  /**
+   * Set global download/upload speed limits
+   * @param downloadLimit - Optional download limit in bytes/s (0 or undefined = unlimited)
+   * @param uploadLimit - Optional upload limit in bytes/s (0 or undefined = unlimited)
+   * @returns true if successful
+   */
+  setGlobalSpeedLimits(
+    downloadLimit?: number,
+    uploadLimit?: number
+  ): Promise<boolean>;
+
+  /**
    * Test connection to the torrent client
    * @returns true if connection successful, false otherwise
    */

@@ -1,5 +1,5 @@
 import { AutoTokenizer, AutoModelForSequenceClassification, env, type Tensor } from "@xenova/transformers";
-import { logger } from "../../../utils/logger.js";
+import { logger } from "@/utils/logger.js";
 import { mkdirSync, existsSync, readdirSync } from "fs";
 import { join, dirname } from "path";
 
@@ -19,19 +19,19 @@ if (!existsSync(modelDir)) {
     mkdirSync(modelDir, { recursive: true });
     logger.info(`Created AI model directory: ${modelDir}`);
   } catch (error) {
-    logger.warn(`Failed to create AI model directory: ${modelDir}`, { error });
+    logger.warn({ error }, `Failed to create AI model directory: ${modelDir}`);
   }
 } else {
   logger.info(`AI model directory exists: ${modelDir}`);
 }
 
 // Log the cache configuration
-logger.info(`AI Model Cache Configuration:`, {
+logger.info({
   cacheDir: env.cacheDir,
   localModelPath: env.localModelPath,
   allowLocalModels: env.allowLocalModels,
   modelDir,
-});
+}, "AI Model Cache Configuration:");
 
 /**
  * Query structure for cross-encoder matching
@@ -110,9 +110,9 @@ export class CrossEncoderService {
           // List files in cache for debugging
           try {
             const files = readdirSync(modelDir, { recursive: true });
-            logger.debug(`Cache contents:`, { files, count: files.length });
+            logger.debug({ files, count: files.length }, `Cache contents:`);
           } catch (e) {
-            logger.debug(`Could not list cache files: ${e}`);
+            logger.debug({ error: e }, `Could not list cache files:`);
           }
         } else {
           logger.warn(`⚠️ Model cache directory NOT found, will download: ${modelDir}`);
@@ -285,7 +285,7 @@ export class CrossEncoderService {
 
       return score;
     } catch (error) {
-      logger.error("Failed to score pair:", { error, query, candidate: candidate.id });
+      logger.error({ error, query, candidate: candidate.id }, "Failed to score pair:");
       throw error;
     }
   }
@@ -346,7 +346,7 @@ export class CrossEncoderService {
 
       return scores;
     } catch (error) {
-      logger.error("Failed to score batch:", { error });
+      logger.error({ error }, "Failed to score batch:");
       throw error;
     }
   }
@@ -387,11 +387,11 @@ export class CrossEncoderService {
 
       // Check threshold
       if (bestScore < threshold) {
-        logger.debug("No match above threshold", {
+        logger.debug({
           query: query.title,
           bestScore,
           threshold,
-        });
+        }, "No match above threshold");
         return null;
       }
 
@@ -401,7 +401,7 @@ export class CrossEncoderService {
         index: bestIdx,
       };
     } catch (error) {
-      logger.error("Failed to find best match:", { error, query });
+      logger.error({ error, query }, "Failed to find best match:");
       throw error;
     }
   }
@@ -438,7 +438,7 @@ export class CrossEncoderService {
       const scoreMatrix = await this.scoreBatch(queries, candidates);
 
       // Find best match for each query
-      return scoreMatrix.map((scores, queryIdx) => {
+      return scoreMatrix.map((scores, _queryIdx) => {
         if (scores.length === 0) return null;
 
         let bestIdx = 0;
@@ -462,7 +462,7 @@ export class CrossEncoderService {
         };
       });
     } catch (error) {
-      logger.error("Failed to batch find matches:", { error, queryCount: queries.length });
+      logger.error({ error, queryCount: queries.length }, "Failed to batch find matches:");
       throw error;
     }
   }

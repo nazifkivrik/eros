@@ -4,7 +4,16 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@/application/*": ["./src/application/*"],
+      "@/infrastructure/*": ["./src/infrastructure/*"],
+      "@/interfaces/*": ["./src/interfaces/*"],
+      "@/modules/*": ["./src/modules/*"],
+      "@/utils/*": ["./src/utils/*"],
+      "@/jobs/*": ["./src/application/jobs/*"],
+      "@/services/*": ["./src/application/services/*"],
+      "@/repositories/*": ["./src/infrastructure/repositories/*"],
+      "@/adapters/*": ["./src/infrastructure/adapters/*"]
     },
     // Allow unused locals for future implementation
     "noUnusedLocals": false

@@ -378,6 +378,90 @@ export class QBittorrentAdapter implements ITorrentClient {
     return true;
   }
 
+  async setTorrentPriority(
+    hash: string,
+    priority: "top" | "bottom" | number
+  ): Promise<boolean> {
+    const formData = new URLSearchParams();
+    formData.append("hashes", hash);
+
+    if (priority === "top") {
+      // qBittorrent uses priority: 1 = top, 7 = bottom
+      formData.append("id", "1");
+      const result = await this.request<string>("/api/v2/torrents/setPriority", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData,
+      });
+      return result === "Ok.";
+    } else if (priority === "bottom") {
+      formData.append("id", "7");
+      const result = await this.request<string>("/api/v2/torrents/setPriority", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData,
+      });
+      return result === "Ok.";
+    } else {
+      // Priority is a number, map to qBittorrent's range (1-7)
+      const qbPriority = Math.max(1, Math.min(7, Math.round(priority)));
+      formData.append("id", qbPriority.toString());
+      const result = await this.request<string>("/api/v2/torrents/setPriority", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData,
+      });
+      return result === "Ok.";
+    }
+  }
+
+  async deleteTorrent(hash: string, deleteFiles?: boolean): Promise<boolean> {
+    // Alias for removeTorrent
+    return this.removeTorrent(hash, deleteFiles);
+  }
+
+  /**
+   * Set global download/upload speed limits
+   */
+  async setGlobalSpeedLimits(
+    downloadLimit?: number,
+    uploadLimit?: number
+  ): Promise<boolean> {
+    if (downloadLimit !== undefined) {
+      const formData = new URLSearchParams();
+      // Set download limit (0 = unlimited)
+      formData.append("limit", downloadLimit.toString());
+      await this.request<string>("/api/v2/transfer/setDownloadLimit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData,
+      });
+    }
+
+    if (uploadLimit !== undefined) {
+      const formData = new URLSearchParams();
+      // Set upload limit (0 = unlimited)
+      formData.append("limit", uploadLimit.toString());
+      await this.request<string>("/api/v2/transfer/setUploadLimit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData,
+      });
+    }
+
+    return true;
+  }
+
   async testConnection(): Promise<boolean> {
     try {
       await this.login();
@@ -445,38 +529,6 @@ export class QBittorrentAdapter implements ITorrentClient {
     );
 
     return result === "Ok.";
-  }
-
-  /**
-   * Set global speed limits
-   */
-  async setGlobalSpeedLimits(
-    downloadLimit: number,
-    uploadLimit: number
-  ): Promise<boolean> {
-    const formData = new URLSearchParams();
-
-    // Set download limit (0 = unlimited)
-    formData.append("limit", downloadLimit.toString());
-    await this.request<string>("/api/v2/transfer/setDownloadLimit", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: formData,
-    });
-
-    // Set upload limit (0 = unlimited)
-    formData.set("limit", uploadLimit.toString());
-    await this.request<string>("/api/v2/transfer/setUploadLimit", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: formData,
-    });
-
-    return true;
   }
 }
 

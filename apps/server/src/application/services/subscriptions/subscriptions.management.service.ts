@@ -1,7 +1,7 @@
 import type { Logger } from "pino";
-import type { FileManagerService } from "../../../file-management/file-manager.service.js";
-import type { SubscriptionsRepository } from "../../../infrastructure/repositories/subscriptions.repository.js";
-import type { SettingsRepository } from "../../../infrastructure/repositories/settings.repository.js";
+import type { FileManagerService } from "@/application/services/file-management/file-manager.service.js";
+import type { SubscriptionsRepository } from "@/infrastructure/repositories/subscriptions.repository.js";
+import type { SettingsRepository } from "@/infrastructure/repositories/settings.repository.js";
 import { eq } from "drizzle-orm";
 import { subscriptions, scenes } from "@repo/database";
 import type { Database } from "@repo/database";

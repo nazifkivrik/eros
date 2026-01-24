@@ -5,10 +5,6 @@ export const JobNameSchema = z.enum([
   "metadata-refresh",
   "torrent-monitor",
   "cleanup",
-  "metadata-discovery",
-  "missing-scenes-search",
-  "unified-sync",
-  "qbittorrent-cleanup",
 ]);
 
 export const JobStatusSchema = z.object({

@@ -1,12 +1,12 @@
 import type { Logger } from "pino";
-import type { IMetadataProvider, MetadataScene } from "../../../infrastructure/adapters/interfaces/metadata-provider.interface.js";
+import type { IMetadataProvider, MetadataScene } from "@/infrastructure/adapters/interfaces/metadata-provider.interface.js";
 import { SubscriptionsScenesService } from "./subscriptions.scenes.service.js";
 import { SubscriptionsCoreService } from "./subscriptions.core.service.js";
 import type { SaveSceneDTO, LinkScenePerformersDTO } from "./subscriptions.scenes.service.js";
 import { eq } from "drizzle-orm";
 import { performers, studios } from "@repo/database";
 import type { Database } from "@repo/database";
-import { deduplicateMetadataScenes, setDeduplicatorLogger } from "../../../utils/scene-deduplicator.js";
+import { deduplicateMetadataScenes, setDeduplicatorLogger } from "@/utils/scene-deduplicator.js";
 
 /**
  * Discovery Options

@@ -8,9 +8,9 @@
  * - Unmatched result processing
  */
 
-import type { TorrentsRepository } from "../../../infrastructure/repositories/torrents.repository.js";
-import type { LogsService } from "../../logs.service.js";
-import type { MatchedScene, TorrentResult, UnmatchedScene } from "../torrent-search/index.js";
+import type { TorrentsRepository } from "@/infrastructure/repositories/torrents.repository.js";
+import type { LogsService } from "@/application/services/logs.service.js";
+import type { MatchedScene, TorrentResult, UnmatchedScene } from "@/application/services/torrent-search/index.js";
 
 /**
  * Quality profile from database

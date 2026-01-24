@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 import type { Database } from "@repo/database";
-import { performers, studios, scenes } from "@repo/database/schema";
+import { performers, studios, scenes, searchHistory } from "@repo/database/schema";
 
 /**
  * Search Repository
@@ -46,5 +46,17 @@ export class SearchRepository {
       },
     });
     return scene || null;
+  }
+
+  /**
+   * Delete old search history
+   */
+  async deleteOldSearchHistory(cutoffDate: string): Promise<number> {
+    const result = await this.db
+      .delete(searchHistory)
+      .where(lt(searchHistory.searchedAt, cutoffDate))
+      .returning({ id: searchHistory.id });
+
+    return result.length;
   }
 }

@@ -1,8 +1,8 @@
 import type { Database } from "@repo/database";
 import { eq } from "drizzle-orm";
 import { qualityProfiles } from "@repo/database";
-import type { AIMatchingService } from "../ai-matching/ai-matching.service.js";
-import { logger } from "../../../utils/logger.js";
+import type { AIMatchingService } from "@/application/services/ai-matching/ai-matching.service.js";
+import { logger } from "@/utils/logger.js";
 
 export type TorrentResult = {
   title: string;

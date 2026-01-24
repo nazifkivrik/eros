@@ -28,5 +28,6 @@ export async function createDatabase(path: string) {
 }
 
 export * from "./schema.js";
-export type Database = ReturnType<typeof createDatabase>;
+// Use Awaited to unwrap the Promise from the async function's return type
+export type Database = Awaited<ReturnType<typeof createDatabase>>;
 export type DatabaseInstance = Database;

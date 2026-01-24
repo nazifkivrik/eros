@@ -2,6 +2,7 @@ import { createContainer, asClass, asValue, InjectionMode } from "awilix";
 import type { Database } from "@repo/database";
 import type { Logger } from "pino";
 import type { ServiceContainer } from "./types.js";
+import type { ExternalServicesManager } from "../config/external-services.js";
 import { JobProgressService } from "../infrastructure/job-progress.service.js";
 import { getJobProgressService } from "../infrastructure/job-progress.service.js";
 import { TorrentSearchService } from "../application/services/torrent-search/index.js";
@@ -13,7 +14,6 @@ import { SceneMatcher } from "../application/services/matching/scene-matcher.ser
 import { AIMatchingService } from "../application/services/ai-matching/ai-matching.service.js";
 import { CrossEncoderService } from "../application/services/ai-matching/cross-encoder.service.js";
 import { SpeedProfileService } from "../application/services/speed-profile.service.js";
-import { TorrentCompletionService } from "../services/torrent-completion.service.js";
 
 // Adapters (now self-contained, no longer wrap old services)
 import { createProwlarrAdapter } from "../infrastructure/adapters/prowlarr.adapter.js";
@@ -37,6 +37,8 @@ import { DownloadQueueRepository } from "../infrastructure/repositories/download
 import { SearchRepository } from "../infrastructure/repositories/search.repository.js";
 import { AIMatchScoresRepository } from "../infrastructure/repositories/ai-match-scores.repository.js";
 import { TorrentsRepository } from "../infrastructure/repositories/torrents.repository.js";
+import { JobsLogRepository } from "../infrastructure/repositories/jobs.repository.js";
+import { StudiosRepository } from "../infrastructure/repositories/studios.repository.js";
 
 // Clean Architecture - Application Services
 import { PerformersService } from "../application/services/performers.service.js";
@@ -54,7 +56,15 @@ import { TorrentsService } from "../application/services/torrents.service.js";
 import { SettingsService as NewSettingsService } from "../application/services/settings.service.js";
 import { DownloadQueueService } from "../application/services/download-queue.service.js";
 import { SearchService } from "../application/services/search.service.js";
-import { JobsService, type SchedulerService } from "../application/services/jobs.service.js";
+import { JobsService } from "../application/services/jobs.service.js";
+import { SchedulerService } from "../application/services/scheduler.service.js";
+import { TorrentCompletionHandlerService } from "../application/services/torrent-completion/torrent-completion.handler.service.js";
+
+// Clean Architecture - Jobs
+import { CleanupJob } from "../application/jobs/cleanup.job.js";
+import { SubscriptionSearchJob } from "../application/jobs/subscription-search.job.js";
+import { TorrentMonitorJob } from "../application/jobs/torrent-monitor.job.js";
+import { MetadataRefreshJob } from "../application/jobs/metadata-refresh.job.js";
 
 // Clean Architecture - Controllers
 import { PerformersController } from "../interfaces/controllers/performers.controller.js";
@@ -101,7 +111,7 @@ export interface ContainerConfig {
   db: Database;
   logger: Logger;
   externalServices?: ExternalServiceConfig;
-  scheduler?: SchedulerService;
+  externalServicesManager?: ExternalServicesManager;
 }
 
 /**
@@ -116,18 +126,22 @@ export function buildContainer(config: ContainerConfig) {
   container.register({
     db: asValue(config.db),
     logger: asValue(config.logger),
+    ...(config.externalServicesManager
+      ? { externalServicesManager: asValue(config.externalServicesManager) }
+      : {}),
   });
 
   // Register core services
   container.register({
     jobProgressService: asValue(getJobProgressService()),
+    // Alias for BaseJob
+    progressService: asValue(getJobProgressService()),
   });
 
   // Register business logic services (old structure - will be migrated)
   container.register({
     downloadService: asClass(DownloadService).scoped(),
     parserService: asClass(TorrentParserService).scoped(),
-    torrentCompletionService: asClass(TorrentCompletionService).scoped(),
     entityResolverService: asClass(EntityResolverService).scoped(),
     sceneMatcherService: asClass(SceneMatcher).scoped(),
     aiMatchingService: asClass(AIMatchingService).scoped(),
@@ -151,6 +165,8 @@ export function buildContainer(config: ContainerConfig) {
     searchRepository: asClass(SearchRepository).scoped(),
     aiMatchScoresRepository: asClass(AIMatchScoresRepository).scoped(),
     torrentsRepository: asClass(TorrentsRepository).scoped(),
+    jobsRepository: asClass(JobsLogRepository).scoped(),
+    studiosRepository: asClass(StudiosRepository).scoped(),
   });
 
   // Register Application Services (Business Logic Layer)
@@ -172,6 +188,16 @@ export function buildContainer(config: ContainerConfig) {
     downloadQueueService: asClass(DownloadQueueService).scoped(),
     searchService: asClass(SearchService).scoped(),
     jobsService: asClass(JobsService).scoped(),
+    schedulerService: asClass(SchedulerService).scoped(),
+    torrentCompletionService: asClass(TorrentCompletionHandlerService).scoped(),
+  });
+
+  // Register Jobs
+  container.register({
+    cleanupJob: asClass(CleanupJob).scoped(),
+    subscriptionSearchJob: asClass(SubscriptionSearchJob).scoped(),
+    torrentMonitorJob: asClass(TorrentMonitorJob).scoped(),
+    metadataRefreshJob: asClass(MetadataRefreshJob).scoped(),
   });
 
   // Register Controllers (Interface Layer)
@@ -240,13 +266,6 @@ export function buildContainer(config: ContainerConfig) {
   } else {
     container.register({
       stashdbProvider: asValue(undefined),
-    });
-  }
-
-  // Register scheduler if provided
-  if (config.scheduler) {
-    container.register({
-      scheduler: asValue(config.scheduler),
     });
   }
 

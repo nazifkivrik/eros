@@ -9,13 +9,6 @@ import sensible from "@fastify/sensible";
 
 import databasePlugin from "./plugins/database.js";
 import authPlugin from "./plugins/auth.js";
-import tpdbPlugin from "./plugins/tpdb.js";
-import stashdbPlugin from "./plugins/stashdb.js";
-import qbittorrentPlugin from "./plugins/qbittorrent.js";
-import prowlarrPlugin from "./plugins/prowlarr.js";
-import schedulerPlugin from "./plugins/scheduler.js";
-import aiPlugin from "./plugins/ai.js";
-import fileManagerPlugin from "./plugins/file-manager.js";
 import swaggerPlugin from "./plugins/swagger.js";
 import containerPlugin from "./plugins/container.js";
 
@@ -61,13 +54,6 @@ export async function buildApp() {
   // Register infrastructure plugins
   await app.register(databasePlugin);
   await app.register(authPlugin);
-  await app.register(tpdbPlugin);
-  await app.register(stashdbPlugin);
-  await app.register(qbittorrentPlugin);
-  await app.register(prowlarrPlugin);
-  await app.register(fileManagerPlugin);
-  await app.register(schedulerPlugin);
-  await app.register(aiPlugin);
 
   // Register DI container (must be after infrastructure plugins)
   await app.register(containerPlugin);

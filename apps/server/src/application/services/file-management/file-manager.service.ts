@@ -5,9 +5,9 @@ import { eq } from "drizzle-orm";
 import { scenes, performers, studios, sceneFiles, sceneExclusions } from "@repo/database";
 import { constants } from "fs";
 import type { NFOMetadata } from "@repo/shared-types";
-import type { ITorrentClient } from "../../../infrastructure/adapters/interfaces/torrent-client.interface.js";
-import { createTorrentParserService } from "../torrent-quality/parser.service.js";
-import { logger } from "../../../utils/logger.js";
+import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
+import { createTorrentParserService } from "@/application/services/torrent-quality/parser.service.js";
+import { logger } from "@/utils/logger.js";
 
 export class FileManagerService {
   private scenesPath: string;
@@ -131,7 +131,7 @@ export class FileManagerService {
 
       return posterPath;
     } catch (error) {
-      logger.error(`Failed to download poster for scene ${sceneId}:`, error);
+      logger.error({ error }, `Failed to download poster for scene ${sceneId}:`);
       return null;
     }
   }
@@ -303,13 +303,13 @@ export class FileManagerService {
     try {
       nfoPath = await this.generateNFO(sceneId, destinationFolder);
     } catch (error) {
-      logger.error(`Failed to generate NFO for scene ${sceneId}:`, error);
+      logger.error({ error }, `Failed to generate NFO for scene ${sceneId}:`);
     }
 
     try {
       posterPath = await this.downloadPoster(sceneId, destinationFolder);
     } catch (error) {
-      logger.error(`Failed to download poster for scene ${sceneId}:`, error);
+      logger.error({ error }, `Failed to download poster for scene ${sceneId}:`);
     }
 
     return {
@@ -335,8 +335,8 @@ export class FileManagerService {
 
       // Check if save_path matches expected path
       if (
-        torrentInfo.save_path === expectedPath ||
-        torrentInfo.content_path.startsWith(expectedPath)
+        torrentInfo.savePath === expectedPath ||
+        torrentInfo.contentPath.startsWith(expectedPath)
       ) {
         return; // Move completed successfully
       }
@@ -409,13 +409,13 @@ export class FileManagerService {
     try {
       nfoPath = await this.generateNFO(sceneId, destinationFolder);
     } catch (error) {
-      logger.error(`Failed to generate NFO for scene ${sceneId}:`, error);
+      logger.error({ error }, `Failed to generate NFO for scene ${sceneId}:`);
     }
 
     try {
       posterPath = await this.downloadPoster(sceneId, destinationFolder);
     } catch (error) {
-      logger.error(`Failed to download poster for scene ${sceneId}:`, error);
+      logger.error({ error }, `Failed to download poster for scene ${sceneId}:`);
     }
 
     return {
@@ -511,7 +511,7 @@ export class FileManagerService {
       }
     } catch (error) {
       // If scenes directory doesn't exist or can't be accessed, just log and continue
-      logger.error(`Failed to scan scenes directory ${this.scenesPath}:`, error);
+      logger.error({ error }, `Failed to scan scenes directory ${this.scenesPath}:`);
     }
 
     return {
@@ -542,7 +542,7 @@ export class FileManagerService {
         }
       }
     } catch (error) {
-      logger.error(`Failed to scan directory ${dirPath}:`, error);
+      logger.error({ error }, `Failed to scan directory ${dirPath}:`);
     }
 
     return filePaths;
@@ -567,7 +567,7 @@ export class FileManagerService {
           deletedFolders.add(folderPath);
           logger.info(`[FileManager] Deleted folder: ${folderPath}`);
         } catch (error) {
-          logger.error(`[FileManager] Failed to delete folder ${folderPath}:`, error);
+          logger.error({ error }, `[FileManager] Failed to delete folder ${folderPath}:`);
         }
       }
     }
@@ -592,7 +592,7 @@ export class FileManagerService {
               logger.info(`[FileManager] Deleted folder by title: ${potentialFolder}`);
             }
           } catch (error) {
-            logger.error(`[FileManager] Failed to delete potential folder ${potentialFolder}:`, error);
+            logger.error({ error }, `[FileManager] Failed to delete potential folder ${potentialFolder}:`);
           }
 
           // Also check for folders with random suffixes (collision avoidance)
@@ -606,16 +606,16 @@ export class FileManagerService {
                   await rm(folderPath, { recursive: true, force: true });
                   logger.info(`[FileManager] Deleted matching folder: ${folderPath}`);
                 } catch (error) {
-                  logger.error(`[FileManager] Failed to delete matching folder ${folderPath}:`, error);
+                  logger.error({ error }, `[FileManager] Failed to delete matching folder ${folderPath}:`);
                 }
               }
             }
           } catch (error) {
-            logger.error(`[FileManager] Failed to scan scenes directory:`, error);
+            logger.error({ error }, `[FileManager] Failed to scan scenes directory:`);
           }
         }
       } catch (error) {
-        logger.error(`[FileManager] Failed to delete folder for scene ${sceneId}:`, error);
+        logger.error({ error }, `[FileManager] Failed to delete folder for scene ${sceneId}:`);
       }
     }
 

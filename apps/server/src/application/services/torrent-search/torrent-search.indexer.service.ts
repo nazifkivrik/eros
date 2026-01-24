@@ -8,9 +8,9 @@
  * - Raw result transformation
  */
 
-import type { IIndexer, SearchResult } from "../../../infrastructure/adapters/interfaces/indexer.interface.js";
-import type { LogsService } from "../../logs.service.js";
-import type { TorrentResult } from "../torrent-search/index.js";
+import type { IIndexer, SearchResult } from "@/infrastructure/adapters/interfaces/indexer.interface.js";
+import type { LogsService } from "@/application/services/logs.service.js";
+import type { TorrentResult } from "@/application/services/torrent-search/index.js";
 
 /**
  * Torrent Search Indexer Service

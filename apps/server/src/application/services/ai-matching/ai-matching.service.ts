@@ -1,5 +1,5 @@
 import { pipeline, type FeatureExtractionPipeline } from "@xenova/transformers";
-import { logger } from "../../../utils/logger.js";
+import { logger } from "@/utils/logger.js";
 
 /**
  * AI Matching Service
@@ -36,7 +36,7 @@ export class AIMatchingService {
         this.isInitialized = true;
         logger.info("AI model loaded successfully");
       } catch (error) {
-        logger.error("Failed to load AI model:", error);
+        logger.error({ error }, "Failed to load AI model:");
         throw error;
       }
     })();
@@ -68,7 +68,7 @@ export class AIMatchingService {
 
       return embedding;
     } catch (error) {
-      logger.error("Failed to generate embedding:", error);
+      logger.error({ error }, "Failed to generate embedding:");
       throw error;
     }
   }
