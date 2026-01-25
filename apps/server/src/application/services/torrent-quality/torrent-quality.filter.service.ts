@@ -7,7 +7,7 @@
  * - Hard filters (size, match score)
  */
 
-import type { LogsService } from "../../logs.service.js";
+import type { LogsService } from "@/application/services/logs.service.js";
 import type { ParsedTorrent, QualityProfileItem } from "./torrent-quality.types.js";
 
 /**

@@ -1,18 +1,18 @@
 import type { Logger } from "pino";
 import type { FastifyInstance } from "fastify";
-import { SettingsService } from "../../application/services/settings.service.js";
+import { SettingsService } from "@/application/services/settings.service.js";
 import {
   SettingsSchema,
   TestServiceParamsSchema,
-} from "../../modules/settings/settings.schema.js";
-import { createQBittorrentAdapter } from "../../infrastructure/adapters/qbittorrent.adapter.js";
-import { createTPDBAdapter } from "../../infrastructure/adapters/tpdb.adapter.js";
-import { createStashDBAdapter } from "../../infrastructure/adapters/stashdb.adapter.js";
-import { createProwlarrAdapter } from "../../infrastructure/adapters/prowlarr.adapter.js";
+} from "@/modules/settings/settings.schema.js";
+import { createQBittorrentAdapter } from "@/infrastructure/adapters/qbittorrent.adapter.js";
+import { createTPDBAdapter } from "@/infrastructure/adapters/tpdb.adapter.js";
+import { createStashDBAdapter } from "@/infrastructure/adapters/stashdb.adapter.js";
+import { createProwlarrAdapter } from "@/infrastructure/adapters/prowlarr.adapter.js";
 import type { AppSettings } from "@repo/shared-types";
-import type { CrossEncoderService } from "../../application/services/ai-matching/cross-encoder.service.js";
-import type { ExternalServicesManager } from "../../config/external-services.js";
-import type { ServiceContainer } from "../../container/types.js";
+import type { CrossEncoderService } from "@/application/services/ai-matching/cross-encoder.service.js";
+import type { ExternalServicesManager } from "@/config/external-services.js";
+import type { ServiceContainer } from "@/container/types.js";
 
 /**
  * Settings Controller

@@ -1,8 +1,9 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
+import { z } from "zod";
 import {
   ErrorResponseSchema,
   SuccessResponseSchema,
-} from "../../schemas/common.schema.js";
+} from "@/schemas/common.schema.js";
 import {
   QualityProfileResponseSchema,
   QualityProfileParamsSchema,
@@ -33,7 +34,7 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async () => {
-      return await qualityProfilesController.list();
+      return await qualityProfilesController.list() as z.infer<typeof QualityProfileListResponseSchema>;
     }
   );
 
@@ -55,7 +56,7 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       try {
         const profile = await qualityProfilesController.getById(request.params);
-        return profile;
+        return profile as z.infer<typeof QualityProfileResponseSchema>;
       } catch (error) {
         if (error instanceof Error && error.message === "Quality profile not found") {
           return reply.code(404).send({ error: "Quality profile not found" });
@@ -82,7 +83,7 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       const profile = await qualityProfilesController.create(request.body);
-      return reply.code(201).send(profile);
+      return reply.code(201).send(profile as z.infer<typeof QualityProfileResponseSchema>);
     }
   );
 
@@ -106,7 +107,7 @@ const qualityProfilesRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       try {
         const updated = await qualityProfilesController.update(request.params, request.body);
-        return updated;
+        return updated as z.infer<typeof QualityProfileResponseSchema>;
       } catch (error) {
         if (error instanceof Error && error.message === "Quality profile not found") {
           return reply.code(404).send({ error: "Quality profile not found" });

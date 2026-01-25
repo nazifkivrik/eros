@@ -1,6 +1,6 @@
 import type { Logger } from "pino";
-import { SetupService } from "../../application/services/setup.service.js";
-import { SetupDataSchema } from "../../modules/setup/setup.schema.js";
+import { SetupService } from "@/application/services/setup.service.js";
+import { SetupDataSchema } from "@/modules/setup/setup.schema.js";
 
 /**
  * Setup Controller

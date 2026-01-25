@@ -137,17 +137,37 @@ export interface IMetadataProvider {
   getSceneById(id: string): Promise<MetadataScene | null>;
 
   /**
-   * Get scenes for a performer
+   * Get scenes for a performer (optional, not all providers support this)
    * @param performerId - Performer ID (TPDB/StashDB ID)
    * @param contentType - Content type (scene, jav, movie)
    * @param page - Page number for pagination
    * @returns Object containing scenes array and pagination info
    */
-  getPerformerScenes(
+  getPerformerScenes?: (
     performerId: string,
     contentType: "scene" | "jav" | "movie",
     page: number
-  ): Promise<{
+  ) => Promise<{
+    scenes: MetadataScene[];
+    pagination?: {
+      total: number;
+      page: number;
+      pageSize: number;
+    };
+  }>;
+
+  /**
+   * Get scenes for a studio (optional, not all providers support this)
+   * @param studioId - Studio ID (TPDB/StashDB ID)
+   * @param contentType - Content type (scene, jav, movie)
+   * @param page - Page number for pagination
+   * @returns Object containing scenes array and pagination info
+   */
+  getStudioScenes?: (
+    studioId: string,
+    contentType: "scene" | "jav" | "movie",
+    page: number
+  ) => Promise<{
     scenes: MetadataScene[];
     pagination?: {
       total: number;

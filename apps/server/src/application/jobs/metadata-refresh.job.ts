@@ -8,12 +8,12 @@
 
 import { BaseJob } from "./base.job.js";
 import type { Logger } from "pino";
-import type { JobProgressService } from "../../infrastructure/job-progress.service.js";
-import type { SubscriptionsRepository } from "../../infrastructure/repositories/subscriptions.repository.js";
-import type { PerformersRepository } from "../../infrastructure/repositories/performers.repository.js";
-import type { StudiosRepository } from "../../infrastructure/repositories/studios.repository.js";
-import type { ScenesRepository } from "../../infrastructure/repositories/scenes.repository.js";
-import type { IMetadataProvider } from "../../infrastructure/adapters/interfaces/metadata-provider.interface.js";
+import type { JobProgressService } from "@/infrastructure/job-progress.service.js";
+import type { SubscriptionsRepository } from "@/infrastructure/repositories/subscriptions.repository.js";
+import type { PerformersRepository } from "@/infrastructure/repositories/performers.repository.js";
+import type { StudiosRepository } from "@/infrastructure/repositories/studios.repository.js";
+import type { ScenesRepository } from "@/infrastructure/repositories/scenes.repository.js";
+import type { IMetadataProvider } from "@/infrastructure/adapters/interfaces/metadata-provider.interface.js";
 import type { FileManagerService } from "../../application/services/file-management/file-manager.service.js";
 import type { SettingsService } from "../../application/services/settings.service.js";
 import type { Database } from "@repo/database";
@@ -30,19 +30,19 @@ export class MetadataRefreshJob extends BaseJob {
   private studiosRepository: StudiosRepository;
   private scenesRepository: ScenesRepository;
   private tpdbProvider: IMetadataProvider | undefined;
-  private fileManagerService: FileManagerService;
+  private fileManager: FileManagerService;
   private settingsService: SettingsService;
   private db: Database;
 
   constructor(deps: {
     logger: Logger;
-    progressService: JobProgressService;
+    jobProgressService: JobProgressService;
     subscriptionsRepository: SubscriptionsRepository;
     performersRepository: PerformersRepository;
     studiosRepository: StudiosRepository;
     scenesRepository: ScenesRepository;
     tpdbProvider: IMetadataProvider | undefined;
-    fileManagerService: FileManagerService;
+    fileManager: FileManagerService;
     settingsService: SettingsService;
     db: Database;
   }) {
@@ -52,7 +52,7 @@ export class MetadataRefreshJob extends BaseJob {
     this.studiosRepository = deps.studiosRepository;
     this.scenesRepository = deps.scenesRepository;
     this.tpdbProvider = deps.tpdbProvider;
-    this.fileManagerService = deps.fileManagerService;
+    this.fileManager = deps.fileManager;
     this.settingsService = deps.settingsService;
     this.db = deps.db;
   }
@@ -163,7 +163,7 @@ export class MetadataRefreshJob extends BaseJob {
         let folderCount = 0;
         for (const sceneId of sceneIds) {
           try {
-            await this.fileManagerService.setupSceneFiles(sceneId);
+            await this.fileManager.setupSceneFiles(sceneId);
             folderCount++;
 
             if (folderCount % 10 === 0) {
@@ -233,8 +233,7 @@ export class MetadataRefreshJob extends BaseJob {
         if (!metadata) {
           const tpdbId = scene.externalIds?.find(e => e.source === 'tpdb')?.id;
           if (tpdbId && settings.tpdb.enabled && this.tpdbProvider) {
-            const contentType = scene.contentType || "scene";
-            metadata = await this.tpdbProvider.getSceneById(tpdbId, contentType);
+            metadata = await this.tpdbProvider.getSceneById(tpdbId);
             source = "tpdb";
           }
         }
@@ -315,7 +314,10 @@ export class MetadataRefreshJob extends BaseJob {
           continue;
         }
 
-        const performerScenes = await this.tpdbProvider.getScenesByPerformer(tpdbId);
+        const result = this.tpdbProvider.getPerformerScenes
+          ? await this.tpdbProvider.getPerformerScenes(tpdbId, "scene", 1)
+          : undefined;
+        const performerScenes = result?.scenes || [];
 
         if (!performerScenes || performerScenes.length === 0) {
           this.logger.debug(`No scenes found for performer ${performer.name} in TPDB`);
@@ -343,7 +345,7 @@ export class MetadataRefreshJob extends BaseJob {
             images: tpdbScene.images || [],
             hasMetadata: true,
             externalIds: [{ source: 'tpdb', id: tpdbScene.id }],
-            contentType: tpdbScene.type || "scene",
+            contentType: tpdbScene.contentType || "scene",
             inferredFromIndexers: false,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -410,7 +412,10 @@ export class MetadataRefreshJob extends BaseJob {
           continue;
         }
 
-        const studioScenes = await this.tpdbProvider.getScenesByStudio(tpdbId);
+        const result = this.tpdbProvider.getStudioScenes
+          ? await this.tpdbProvider.getStudioScenes(tpdbId, "scene", 1)
+          : undefined;
+        const studioScenes = result?.scenes || [];
 
         if (!studioScenes || studioScenes.length === 0) {
           this.logger.debug(`No scenes found for studio ${studio.name} in TPDB`);
@@ -438,7 +443,7 @@ export class MetadataRefreshJob extends BaseJob {
             images: tpdbScene.images || [],
             hasMetadata: true,
             externalIds: [{ source: 'tpdb', id: tpdbScene.id }],
-            contentType: tpdbScene.type || "scene",
+            contentType: tpdbScene.contentType || "scene",
             inferredFromIndexers: false,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),

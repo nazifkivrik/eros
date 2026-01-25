@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import type { Logger } from "pino";
 import type { QualityItem } from "@repo/shared-types";
-import { QualityProfilesRepository } from "../../infrastructure/repositories/quality-profiles.repository.js";
+import { QualityProfilesRepository } from "@/infrastructure/repositories/quality-profiles.repository.js";
 
 /**
  * DTOs for Quality Profiles Service
@@ -22,6 +22,9 @@ export interface UpdateQualityProfileDTO {
  * Handles quality/source sorting logic
  */
 export class QualityProfilesService {
+  private qualityProfilesRepository: QualityProfilesRepository;
+  private logger: Logger;
+
   // Define quality order (best to worst)
   private readonly qualityOrder = ["2160p", "1080p", "720p", "480p", "any"];
   private readonly sourceOrder = ["bluray", "webdl", "webrip", "hdtv", "dvd", "any"];

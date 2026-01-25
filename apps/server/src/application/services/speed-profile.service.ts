@@ -26,8 +26,8 @@ export type SpeedProfileSettings = {
 export class SpeedProfileService {
   private settings: SpeedProfileSettings;
 
-  constructor() {
-    this.settings = this.getDefaultSettings();
+  constructor(speedProfileSettings?: SpeedProfileSettings) {
+    this.settings = speedProfileSettings || this.getDefaultSettings();
   }
 
   /**

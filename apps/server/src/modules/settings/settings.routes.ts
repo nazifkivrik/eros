@@ -141,7 +141,7 @@ const settingsRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async () => {
-      return await settingsController.getAIModelStatus(app);
+      return await settingsController.getAIModelStatus();
     }
   );
 
@@ -164,7 +164,7 @@ const settingsRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async () => {
       try {
-        return await settingsController.loadAIModel(app);
+        return await settingsController.loadAIModel();
       } catch (error) {
         throw error;
       }

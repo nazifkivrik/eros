@@ -5,7 +5,7 @@
  */
 
 import type { Logger } from "pino";
-import type { JobProgressService } from "../../infrastructure/job-progress.service.js";
+import type { JobProgressService } from "@/infrastructure/job-progress.service.js";
 import type { IJob } from "./job.interface.js";
 import type { JobName } from "@repo/shared-types";
 
@@ -14,11 +14,11 @@ export abstract class BaseJob implements IJob {
   abstract readonly description: string;
 
   protected logger: Logger;
-  protected progressService: JobProgressService;
+  protected jobProgressService: JobProgressService;
 
-  constructor(deps: { logger: Logger; progressService: JobProgressService }) {
+  constructor(deps: { logger: Logger; jobProgressService: JobProgressService }) {
     this.logger = deps.logger;
-    this.progressService = deps.progressService;
+    this.jobProgressService = deps.jobProgressService;
   }
 
   abstract execute(): Promise<void>;
@@ -27,7 +27,7 @@ export abstract class BaseJob implements IJob {
    * Emit job started event
    */
   protected emitStarted(message: string): void {
-    this.progressService.emitStarted(this.name, message);
+    this.jobProgressService.emitStarted(this.name, message);
   }
 
   /**
@@ -39,20 +39,20 @@ export abstract class BaseJob implements IJob {
     total: number,
     metadata?: Record<string, unknown>
   ): void {
-    this.progressService.emitProgress(this.name, message, current, total, metadata);
+    this.jobProgressService.emitProgress(this.name, message, current, total, metadata);
   }
 
   /**
    * Emit job completed event
    */
   protected emitCompleted(message: string, metadata?: Record<string, unknown>): void {
-    this.progressService.emitCompleted(this.name, message, metadata);
+    this.jobProgressService.emitCompleted(this.name, message, metadata);
   }
 
   /**
    * Emit job failed event
    */
   protected emitFailed(message: string, metadata?: Record<string, unknown>): void {
-    this.progressService.emitFailed(this.name, message, metadata);
+    this.jobProgressService.emitFailed(this.name, message, metadata);
   }
 }

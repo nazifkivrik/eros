@@ -1,5 +1,5 @@
 import type { Logger } from "pino";
-import type { ITorrentClient } from "../../infrastructure/adapters/interfaces/torrent-client.interface.js";
+import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
 
 /**
  * DTOs for Torrents Service

@@ -3,7 +3,7 @@ import { z } from "zod";
 import {
   ErrorResponseSchema,
   SuccessResponseSchema,
-} from "../../schemas/common.schema.js";
+} from "@/schemas/common.schema.js";
 import {
   DownloadQueueWithSceneSchema,
   AddToQueueSchema,

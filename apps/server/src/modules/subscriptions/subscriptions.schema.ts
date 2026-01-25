@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IdParamsSchema } from "../../schemas/common.schema.js";
+import { IdParamsSchema } from "@/schemas/common.schema.js";
 import { QualityItemSchema } from "../quality-profiles/quality-profiles.schema.js";
 import { PerformerSchema, StudioSchema, SceneSchema } from "../search/search.schema.js";
 

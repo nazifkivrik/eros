@@ -26,12 +26,12 @@ export class TorrentCompletionHandlerService {
 
   constructor(deps: {
     torrentsRepository: TorrentsRepository;
-    fileManagerService: FileManagerService;
+    fileManager: FileManagerService;
     logsService: LogsService;
     torrentClient?: ITorrentClient;
   }) {
     this.repository = deps.torrentsRepository;
-    this.fileManager = deps.fileManagerService;
+    this.fileManager = deps.fileManager;
     this.logsService = deps.logsService;
     this.torrentClient = deps.torrentClient;
   }
@@ -77,7 +77,7 @@ export class TorrentCompletionHandlerService {
       }
 
       // 3. Get torrent save path (where torrent client downloaded files)
-      const sourcePath = torrentInfo.save_path || torrentInfo.content_path;
+      const sourcePath = torrentInfo.savePath || torrentInfo.contentPath;
 
       if (!sourcePath) {
         await this.logsService.error(

@@ -6,12 +6,12 @@
 
 import { BaseJob } from "./base.job.js";
 import type { Logger } from "pino";
-import type { JobProgressService } from "../../infrastructure/job-progress.service.js";
-import type { SubscriptionsRepository } from "../../infrastructure/repositories/subscriptions.repository.js";
-import type { DownloadQueueRepository } from "../../infrastructure/repositories/download-queue.repository.js";
+import type { JobProgressService } from "@/infrastructure/job-progress.service.js";
+import type { SubscriptionsRepository } from "@/infrastructure/repositories/subscriptions.repository.js";
+import type { DownloadQueueRepository } from "@/infrastructure/repositories/download-queue.repository.js";
 import type { LogsService } from "../../application/services/logs.service.js";
 import type { TorrentSearchService } from "../../application/services/torrent-search/index.js";
-import type { ITorrentClient } from "../../infrastructure/adapters/interfaces/torrent-client.interface.js";
+import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
 import type { FileManagerService } from "../../application/services/file-management/file-manager.service.js";
 import type { SettingsService } from "../../application/services/settings.service.js";
 import type { Database } from "@repo/database";
@@ -30,19 +30,19 @@ export class SubscriptionSearchJob extends BaseJob {
   private logsService: LogsService;
   private torrentSearchService: TorrentSearchService;
   private torrentClient: ITorrentClient | undefined;
-  private fileManagerService: FileManagerService;
+  private fileManager: FileManagerService;
   private settingsService: SettingsService;
   private db: Database;
 
   constructor(deps: {
     logger: Logger;
-    progressService: JobProgressService;
+    jobProgressService: JobProgressService;
     subscriptionsRepository: SubscriptionsRepository;
     downloadQueueRepository: DownloadQueueRepository;
     logsService: LogsService;
     torrentSearchService: TorrentSearchService;
     torrentClient: ITorrentClient | undefined;
-    fileManagerService: FileManagerService;
+    fileManager: FileManagerService;
     settingsService: SettingsService;
     db: Database;
   }) {
@@ -52,7 +52,7 @@ export class SubscriptionSearchJob extends BaseJob {
     this.logsService = deps.logsService;
     this.torrentSearchService = deps.torrentSearchService;
     this.torrentClient = deps.torrentClient;
-    this.fileManagerService = deps.fileManagerService;
+    this.fileManager = deps.fileManager;
     this.settingsService = deps.settingsService;
     this.db = deps.db;
   }
@@ -423,7 +423,7 @@ export class SubscriptionSearchJob extends BaseJob {
 
     // Create scene folder
     try {
-      await this.fileManagerService.setupSceneFilesSimplified(sceneId);
+      await this.fileManager.setupSceneFilesSimplified(sceneId);
       this.logger.info(`Created scene folder for ${torrent.title}`);
     } catch (error) {
       this.logger.error(

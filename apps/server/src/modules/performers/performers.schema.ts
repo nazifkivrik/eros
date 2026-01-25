@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IdParamsSchema } from "../../schemas/common.schema.js";
+import { IdParamsSchema } from "@/schemas/common.schema.js";
 
 export const ImageSchema = z.object({
   url: z.string(),
@@ -9,7 +9,8 @@ export const ImageSchema = z.object({
 
 export const PerformerResponseSchema = z.object({
   id: z.string(),
-  tpdbId: z.string().nullable(),
+  externalIds: z.array(z.object({ source: z.string(), id: z.string() })).optional(),
+  tpdbId: z.string().nullable().optional(), // Deprecated: use externalIds instead
   slug: z.string(),
   name: z.string(),
   fullName: z.string(),
@@ -48,6 +49,7 @@ export const CreatePerformerSchema = z.object({
 });
 
 export const UpdatePerformerSchema = z.object({
+  tpdbId: z.string().optional(),
   name: z.string().optional(),
   aliases: z.array(z.string()).optional(),
   disambiguation: z.string().optional(),

@@ -83,7 +83,7 @@ export class TPDBAdapter implements IMetadataProvider {
     }
   }
 
-  async searchStudios(query: string, limit: number = 20): Promise<MetadataStudio[]> {
+  async searchStudios(query: string, _limit: number = 20): Promise<MetadataStudio[]> {
     const endpoint = `/sites?q=${encodeURIComponent(query)}`;
     const response = await this.request<TPDBPaginatedResponse<TPDBSite>>(endpoint);
 
@@ -177,7 +177,7 @@ export class TPDBAdapter implements IMetadataProvider {
   }> {
     const perPage = 25;
     const endpoint = `/sites?search=${encodeURIComponent(query)}&page=${page}&per_page=${perPage}`;
-    const response = await this.request<TPDBPaginatedResponse<TPDBStudio>>(endpoint);
+    const response = await this.request<TPDBPaginatedResponse<TPDBSite>>(endpoint);
 
     const sites = (response.data || []).map((studio) =>
       this.mapStudioToInterface(studio)
@@ -185,11 +185,11 @@ export class TPDBAdapter implements IMetadataProvider {
 
     return {
       sites,
-      pagination: response.pagination
+      pagination: response.meta
         ? {
-            total: response.pagination.total,
-            page: response.pagination.page,
-            pageSize: response.pagination.per_page,
+            total: response.meta.total,
+            page: response.meta.current_page,
+            pageSize: response.meta.per_page,
           }
         : undefined,
     };
@@ -260,34 +260,36 @@ export class TPDBAdapter implements IMetadataProvider {
     return {
       id: tpdb.id,
       name: tpdb.name,
-      disambiguation: tpdb.disambiguation,
+      disambiguation: tpdb.disambiguation ?? undefined,
       aliases: tpdb.aliases || [],
-      gender: tpdb.extras?.gender,
-      birthDate: tpdb.extras?.birthday,
-      deathDate: tpdb.extras?.deathday,
-      careerStartYear: tpdb.extras?.career_start_year,
-      careerEndYear: tpdb.extras?.career_end_year,
+      gender: tpdb.extras?.gender ?? undefined,
+      birthDate: tpdb.extras?.birthday ?? undefined,
+      deathDate: tpdb.extras?.deathday ?? undefined,
+      careerStartYear: tpdb.extras?.career_start_year ?? undefined,
+      careerEndYear: tpdb.extras?.career_end_year ?? undefined,
       images,
       // Additional fields from TPDB extras
-      birthplace: tpdb.extras?.birthplace,
-      birthplaceCode: tpdb.extras?.birthplace_code,
-      astrology: tpdb.extras?.astrology,
-      ethnicity: tpdb.extras?.ethnicity,
-      nationality: tpdb.extras?.nationality,
-      hairColour: tpdb.extras?.hair_colour,
-      eyeColour: tpdb.extras?.eye_colour,
-      height: tpdb.extras?.height,
-      weight: tpdb.extras?.weight,
-      measurements: tpdb.extras?.measurements,
-      cupsize: tpdb.extras?.cupsize,
-      waist: tpdb.extras?.waist,
-      hips: tpdb.extras?.hips,
-      tattoos: tpdb.extras?.tattoos,
-      piercings: tpdb.extras?.piercings,
-      fakeBoobs: tpdb.extras?.fake_boobs,
-      sameSexOnly: tpdb.extras?.same_sex_only,
-      bio: tpdb.bio,
-      links: tpdb.extras?.links as Record<string, string | null> | undefined,
+      birthplace: tpdb.extras?.birthplace ?? undefined,
+      birthplaceCode: tpdb.extras?.birthplace_code ?? undefined,
+      astrology: tpdb.extras?.astrology ?? undefined,
+      ethnicity: tpdb.extras?.ethnicity ?? undefined,
+      nationality: tpdb.extras?.nationality ?? undefined,
+      hairColour: tpdb.extras?.hair_colour ?? undefined,
+      eyeColour: tpdb.extras?.eye_colour ?? undefined,
+      height: tpdb.extras?.height ?? undefined,
+      weight: tpdb.extras?.weight ?? undefined,
+      measurements: tpdb.extras?.measurements ?? undefined,
+      cupsize: tpdb.extras?.cupsize ?? undefined,
+      waist: tpdb.extras?.waist ?? undefined,
+      hips: tpdb.extras?.hips ?? undefined,
+      tattoos: tpdb.extras?.tattoos ?? undefined,
+      piercings: tpdb.extras?.piercings ?? undefined,
+      fakeBoobs: tpdb.extras?.fake_boobs ?? undefined,
+      sameSexOnly: tpdb.extras?.same_sex_only ?? undefined,
+      bio: tpdb.bio ?? undefined,
+      links: tpdb.extras?.links && Array.isArray(tpdb.extras.links) ? Object.fromEntries(
+        tpdb.extras.links.map((l: any) => [l.url || l.platform, l.url])
+      ) : undefined,
     };
   }
 

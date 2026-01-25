@@ -1,12 +1,12 @@
 import { nanoid } from "nanoid";
 import type { Logger } from "pino";
-import { SubscriptionsRepository } from "../../infrastructure/repositories/subscriptions.repository.js";
-import { ScenesRepository } from "../../infrastructure/repositories/scenes.repository.js";
+import { SubscriptionsRepository } from "@/infrastructure/repositories/subscriptions.repository.js";
+import { ScenesRepository } from "@/infrastructure/repositories/scenes.repository.js";
 import { SubscriptionsCoreService } from "./subscriptions/subscriptions.core.service.js";
 import { SubscriptionsScenesService } from "./subscriptions/subscriptions.scenes.service.js";
 import { SubscriptionsDiscoveryService } from "./subscriptions/subscriptions.discovery.service.js";
-import { EntityResolverService } from "../entity-resolver/entity-resolver.service.js";
-import { FileManagerService } from "../file-management/file-manager.service.js";
+import { EntityResolverService } from "@/application/services/entity-resolver/entity-resolver.service.js";
+import { FileManagerService } from "@/application/services/file-management/file-manager.service.js";
 
 /**
  * DTOs for Subscriptions Service
@@ -131,7 +131,7 @@ export class SubscriptionsService {
    */
   async getByType(entityType: string) {
     this.logger.info({ entityType }, "Fetching subscriptions by type");
-    return await this.subscriptionsRepository.findByType(entityType);
+    return await this.subscriptionsRepository.findByType(entityType as "performer" | "studio" | "scene");
   }
 
   /**
@@ -186,7 +186,7 @@ export class SubscriptionsService {
   async checkSubscriptionByEntity(entityType: string, entityId: string) {
     this.logger.info({ entityType, entityId }, "Checking subscription by entity");
     const subscription = await this.subscriptionsRepository.findByEntity(
-      entityType,
+      entityType as "performer" | "studio" | "scene",
       entityId
     );
 

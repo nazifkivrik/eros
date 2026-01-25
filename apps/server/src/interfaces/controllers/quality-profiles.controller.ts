@@ -1,10 +1,14 @@
 import type { Logger } from "pino";
-import { QualityProfilesService } from "../../application/services/quality-profiles.service.js";
+import { z } from "zod";
+import { QualityProfilesService } from "@/application/services/quality-profiles.service.js";
+import type { QualityProfile } from "@repo/shared-types";
 import {
   QualityProfileParamsSchema,
   CreateQualityProfileSchema,
   UpdateQualityProfileSchema,
-} from "../../modules/quality-profiles/quality-profiles.schema.js";
+  QualityProfileListResponseSchema,
+  QualityProfileResponseSchema,
+} from "@/modules/quality-profiles/quality-profiles.schema.js";
 
 /**
  * Quality Profiles Controller
@@ -33,24 +37,24 @@ export class QualityProfilesController {
   /**
    * List all quality profiles
    */
-  async list() {
+  async list(): Promise<z.infer<typeof QualityProfileListResponseSchema>> {
     const profiles = await this.qualityProfilesService.getAll();
-    return { data: profiles };
+    return { data: profiles } as z.infer<typeof QualityProfileListResponseSchema>;
   }
 
   /**
    * Get quality profile by ID
    */
-  async getById(params: unknown) {
+  async getById(params: unknown): Promise<z.infer<typeof QualityProfileResponseSchema>> {
     const validated = QualityProfileParamsSchema.parse(params);
     const profile = await this.qualityProfilesService.getById(validated.id);
-    return profile;
+    return profile as z.infer<typeof QualityProfileResponseSchema>;
   }
 
   /**
    * Create quality profile
    */
-  async create(body: unknown) {
+  async create(body: unknown): Promise<z.infer<typeof QualityProfileResponseSchema>> {
     const validated = CreateQualityProfileSchema.parse(body);
 
     const profile = await this.qualityProfilesService.create({
@@ -58,13 +62,13 @@ export class QualityProfilesController {
       items: validated.items,
     });
 
-    return profile;
+    return profile as z.infer<typeof QualityProfileResponseSchema>;
   }
 
   /**
    * Update quality profile
    */
-  async update(params: unknown, body: unknown) {
+  async update(params: unknown, body: unknown): Promise<z.infer<typeof QualityProfileResponseSchema>> {
     const validatedParams = QualityProfileParamsSchema.parse(params);
     const validatedBody = UpdateQualityProfileSchema.parse(body);
 
@@ -73,13 +77,13 @@ export class QualityProfilesController {
       items: validatedBody.items,
     });
 
-    return updated;
+    return updated as z.infer<typeof QualityProfileResponseSchema>;
   }
 
   /**
    * Delete quality profile
    */
-  async delete(params: unknown) {
+  async delete(params: unknown): Promise<{ success: boolean }> {
     const validated = QualityProfileParamsSchema.parse(params);
     await this.qualityProfilesService.delete(validated.id);
     return { success: true };

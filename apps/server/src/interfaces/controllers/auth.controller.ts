@@ -1,7 +1,7 @@
 import type { Logger } from "pino";
 import type { FastifyRequest } from "fastify";
-import { AuthService } from "../../application/services/auth.service.js";
-import { LoginSchema } from "../../modules/auth/auth.schema.js";
+import { AuthService } from "@/application/services/auth.service.js";
+import { LoginSchema } from "@/modules/auth/auth.schema.js";
 
 /**
  * Auth Controller

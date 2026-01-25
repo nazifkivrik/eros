@@ -3,7 +3,7 @@ import argon2 from "argon2";
 import type { Logger } from "pino";
 import type { AppSettings } from "@repo/shared-types";
 import { DEFAULT_SETTINGS } from "@repo/shared-types";
-import { SetupRepository } from "../../infrastructure/repositories/setup.repository.js";
+import { SetupRepository } from "@/infrastructure/repositories/setup.repository.js";
 
 /**
  * DTOs for Setup Service

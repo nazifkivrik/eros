@@ -1,7 +1,7 @@
 import type { Logger } from "pino";
 import type { FastifyRequest, FastifyReply } from "fastify";
 import type { JobProgressEvent } from "@repo/shared-types";
-import { JobsService } from "../../application/services/jobs.service.js";
+import { JobsService } from "@/application/services/jobs.service.js";
 
 /**
  * Jobs Controller

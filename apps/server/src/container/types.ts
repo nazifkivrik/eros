@@ -29,6 +29,8 @@ import type { DownloadQueueRepository } from "../infrastructure/repositories/dow
 import type { SearchRepository } from "../infrastructure/repositories/search.repository.js";
 import type { AIMatchScoresRepository } from "../infrastructure/repositories/ai-match-scores.repository.js";
 import type { TorrentsRepository } from "../infrastructure/repositories/torrents.repository.js";
+import type { JobsLogRepository } from "../infrastructure/repositories/jobs.repository.js";
+import type { StudiosRepository } from "../infrastructure/repositories/studios.repository.js";
 
 // Clean Architecture - Application Services
 import type { PerformersService } from "../application/services/performers.service.js";
@@ -84,10 +86,9 @@ export interface ServiceContainer {
   // SSE for job progress (infrastructure)
   jobProgressService: JobProgressService;
 
-  // Legacy services (will be migrated)
+  // Core business logic services
   settingsService: NewSettingsService;
-  torrentSearchService: TorrentSearchService; // New Clean Architecture version
-  fileManagerService: FileManagerService;
+  torrentSearchService: TorrentSearchService;
   fileManager: FileManagerService;
   downloadService: DownloadService;
   parserService: TorrentParserService;
@@ -98,12 +99,10 @@ export interface ServiceContainer {
   speedProfileService: SpeedProfileService;
 
   // External service adapters (optional)
-  // Note: Adapters are registered with legacy names for backward compatibility
   indexer?: IIndexer;
   torrentClient?: ITorrentClient;
   tpdbProvider?: IMetadataProvider;
   stashdbProvider?: IMetadataProvider;
-  scheduler?: SchedulerService; // Alias for schedulerService
 
   // Generic metadata provider (picks first available)
   metadataProvider?: IMetadataProvider | undefined;
@@ -123,6 +122,8 @@ export interface ServiceContainer {
   searchRepository: SearchRepository;
   aiMatchScoresRepository: AIMatchScoresRepository;
   torrentsRepository: TorrentsRepository;
+  jobsRepository: JobsLogRepository;
+  studiosRepository: StudiosRepository;
 
   // Application Services (Business Logic Layer)
   performersService: PerformersService;
@@ -143,11 +144,11 @@ export interface ServiceContainer {
   schedulerService: SchedulerService;
   torrentCompletionService: TorrentCompletionHandlerService;
 
-  // Jobs (Background Tasks)
-  cleanupJob: CleanupJob;
-  subscriptionSearchJob: SubscriptionSearchJob;
-  torrentMonitorJob: TorrentMonitorJob;
-  metadataRefreshJob: MetadataRefreshJob;
+  // Jobs (Background Tasks) - optional because they may not be registered
+  cleanupJob?: CleanupJob;
+  subscriptionSearchJob?: SubscriptionSearchJob;
+  torrentMonitorJob?: TorrentMonitorJob;
+  metadataRefreshJob?: MetadataRefreshJob;
 
   // Controllers (Interface Layer)
   performersController: PerformersController;

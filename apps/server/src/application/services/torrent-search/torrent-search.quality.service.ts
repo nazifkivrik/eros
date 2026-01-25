@@ -88,19 +88,22 @@ export class TorrentSearchQualityService {
       );
     }
 
-    // Apply size filters
-    if (qualityProfile.minSize) {
-      candidates = candidates.filter((t) => t.size >= qualityProfile.minSize!);
-    }
+    // Apply filters from quality profile items
+    // Get the max size and min seeders from all items
+    const maxSizes = qualityProfile.items.map(item => item.maxSize).filter(v => v > 0);
+    const overallMaxSize = maxSizes.length > 0 ? Math.max(...maxSizes) : 0;
+    const minSeedersList = qualityProfile.items.map(item => item.minSeeders).filter(v => typeof v === 'number');
+    const overallMinSeeders = minSeedersList.length > 0 ? Math.max(...minSeedersList) : 0;
 
-    if (qualityProfile.maxSize) {
-      candidates = candidates.filter((t) => t.size <= qualityProfile.maxSize!);
+    // Apply size filters
+    if (overallMaxSize > 0) {
+      candidates = candidates.filter((t) => t.size <= overallMaxSize * 1024 * 1024 * 1024); // Convert GB to bytes
     }
 
     // Apply seeder filter
-    if (qualityProfile.minSeeders) {
+    if (overallMinSeeders > 0) {
       candidates = candidates.filter(
-        (t) => t.seeders >= qualityProfile.minSeeders!
+        (t) => t.seeders >= overallMinSeeders
       );
     }
 

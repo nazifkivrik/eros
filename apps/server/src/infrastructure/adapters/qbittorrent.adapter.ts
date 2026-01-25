@@ -492,6 +492,23 @@ export class QBittorrentAdapter implements ITorrentClient {
   }
 
   /**
+   * Get torrent info (alias for getting a single torrent's info)
+   */
+  async getTorrentInfo(hash: string): Promise<TorrentInfo | null> {
+    const torrents = await this.getTorrents();
+    return torrents.find((t) => t.hash === hash) || null;
+  }
+
+  /**
+   * Add a magnet link directly
+   */
+  async addMagnet(magnetLink: string): Promise<string | null> {
+    return this.addTorrentAndGetHash({
+      magnetLinks: [magnetLink],
+    });
+  }
+
+  /**
    * Get files in a torrent
    */
   async getTorrentFiles(hash: string): Promise<QBTorrentFile[]> {

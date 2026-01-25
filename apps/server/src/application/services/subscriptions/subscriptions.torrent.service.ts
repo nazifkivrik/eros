@@ -5,7 +5,7 @@ import type { QualityProfilesRepository } from "@/infrastructure/repositories/qu
 import type { TorrentSearchService } from "@/application/services/torrent-search/index.js";
 import type { DownloadService } from "@/application/services/torrent-selection/download.service.js";
 import { eq } from "drizzle-orm";
-import { subscriptions, scenes } from "@repo/database";
+import { subscriptions, scenes, downloadQueue } from "@repo/database";
 import type { Database } from "@repo/database";
 
 /**
@@ -119,19 +119,6 @@ export class SubscriptionsTorrentService {
         };
       }
 
-      // Get quality profile for save path
-      const qualityProfile = await this.qualityProfilesRepository.findById(
-        subscription.qualityProfileId
-      );
-
-      if (!qualityProfile) {
-        return {
-          success: false,
-          hash: null,
-          error: "Quality profile not found",
-        };
-      }
-
       // Get scene for folder naming
       const scene = await this.db.query.scenes.findFirst({
         where: eq(scenes.id, subscription.entityId),
@@ -145,27 +132,24 @@ export class SubscriptionsTorrentService {
         };
       }
 
-      // Use the DownloadService to add torrent
-      const downloadResult = await this.downloadService.addMagnet(magnetLink, {
-        sceneId: scene.id,
-        savePath: qualityProfile.savePath,
-      });
+      // Use torrent client to add magnet
+      const hash = await this.torrentClient?.addMagnet(magnetLink);
 
-      if (downloadResult.success) {
-        this.logger.info({ subscriptionId, hash: downloadResult.hash }, "Torrent added successfully");
-
-        return {
-          success: true,
-          hash: downloadResult.hash || null,
-          error: null,
-        };
-      } else {
+      if (!hash) {
         return {
           success: false,
           hash: null,
-          error: downloadResult.error || "Failed to add torrent",
+          error: "Failed to add torrent to client",
         };
       }
+
+      this.logger.info({ subscriptionId, hash }, "Torrent added successfully");
+
+      return {
+        success: true,
+        hash,
+        error: null,
+      };
     } catch (error) {
       this.logger.error({ error, subscriptionId }, "Failed to add torrent");
 
@@ -215,7 +199,19 @@ export class SubscriptionsTorrentService {
         where: eq(scenes.id, subscription.entityId),
       });
 
-      if (!scene || !scene.torrentHash) {
+      if (!scene) {
+        return {
+          success: false,
+          error: "Scene not found",
+        };
+      }
+
+      // Get download queue entry for this scene
+      const queueEntry = await this.db.query.downloadQueue.findFirst({
+        where: eq(downloadQueue.sceneId, scene.id),
+      });
+
+      if (!queueEntry || !queueEntry.torrentHash) {
         return {
           success: false,
           error: "Scene has no associated torrent",
@@ -223,9 +219,9 @@ export class SubscriptionsTorrentService {
       }
 
       // Pause torrent using adapter
-      await this.torrentClient.pauseTorrent(scene.torrentHash);
+      await this.torrentClient.pauseTorrent(queueEntry.torrentHash);
 
-      this.logger.info({ subscriptionId, hash: scene.torrentHash }, "Torrent paused");
+      this.logger.info({ subscriptionId, hash: queueEntry.torrentHash }, "Torrent paused");
 
       return {
         success: true,
@@ -279,7 +275,19 @@ export class SubscriptionsTorrentService {
         where: eq(scenes.id, subscription.entityId),
       });
 
-      if (!scene || !scene.torrentHash) {
+      if (!scene) {
+        return {
+          success: false,
+          error: "Scene not found",
+        };
+      }
+
+      // Get download queue entry for this scene
+      const queueEntry = await this.db.query.downloadQueue.findFirst({
+        where: eq(downloadQueue.sceneId, scene.id),
+      });
+
+      if (!queueEntry || !queueEntry.torrentHash) {
         return {
           success: false,
           error: "Scene has no associated torrent",
@@ -287,9 +295,9 @@ export class SubscriptionsTorrentService {
       }
 
       // Resume torrent using adapter
-      await this.torrentClient.resumeTorrent(scene.torrentHash);
+      await this.torrentClient.resumeTorrent(queueEntry.torrentHash);
 
-      this.logger.info({ subscriptionId, hash: scene.torrentHash }, "Torrent resumed");
+      this.logger.info({ subscriptionId, hash: queueEntry.torrentHash }, "Torrent resumed");
 
       return {
         success: true,
@@ -346,7 +354,19 @@ export class SubscriptionsTorrentService {
         where: eq(scenes.id, subscription.entityId),
       });
 
-      if (!scene || !scene.torrentHash) {
+      if (!scene) {
+        return {
+          success: false,
+          error: "Scene not found",
+        };
+      }
+
+      // Get download queue entry for this scene
+      const queueEntry = await this.db.query.downloadQueue.findFirst({
+        where: eq(downloadQueue.sceneId, scene.id),
+      });
+
+      if (!queueEntry || !queueEntry.torrentHash) {
         return {
           success: false,
           error: "Scene has no associated torrent",
@@ -354,15 +374,14 @@ export class SubscriptionsTorrentService {
       }
 
       // Remove torrent using adapter
-      await this.torrentClient.removeTorrent(scene.torrentHash, deleteFiles);
+      await this.torrentClient.removeTorrent(queueEntry.torrentHash, deleteFiles);
 
-      // Clear torrent hash from scene
+      // Delete download queue entry
       await this.db
-        .update(scenes)
-        .set({ torrentHash: null })
-        .where(eq(scenes.id, scene.id));
+        .delete(downloadQueue)
+        .where(eq(downloadQueue.sceneId, scene.id));
 
-      this.logger.info({ subscriptionId, hash: scene.torrentHash, deleteFiles }, "Torrent removed");
+      this.logger.info({ subscriptionId, hash: queueEntry.torrentHash, deleteFiles }, "Torrent removed");
 
       return {
         success: true,
@@ -416,7 +435,19 @@ export class SubscriptionsTorrentService {
         where: eq(scenes.id, subscription.entityId),
       });
 
-      if (!scene || !scene.torrentHash) {
+      if (!scene) {
+        return {
+          status: null,
+          error: "Scene not found",
+        };
+      }
+
+      // Get download queue entry for this scene
+      const queueEntry = await this.db.query.downloadQueue.findFirst({
+        where: eq(downloadQueue.sceneId, scene.id),
+      });
+
+      if (!queueEntry || !queueEntry.torrentHash) {
         return {
           status: null,
           error: "Scene has no associated torrent",
@@ -424,7 +455,7 @@ export class SubscriptionsTorrentService {
       }
 
       // Get torrent info from client
-      const torrentInfo = await this.torrentClient.getTorrentInfo(scene.torrentHash);
+      const torrentInfo = await this.torrentClient.getTorrentInfo(queueEntry.torrentHash);
 
       if (!torrentInfo) {
         return {
@@ -438,8 +469,8 @@ export class SubscriptionsTorrentService {
         name: torrentInfo.name,
         size: torrentInfo.size,
         progress: torrentInfo.progress,
-        downloadSpeed: torrentInfo.dlspeed,
-        uploadSpeed: torrentInfo.upspeed,
+        downloadSpeed: torrentInfo.downloadSpeed,
+        uploadSpeed: torrentInfo.uploadSpeed,
         eta: torrentInfo.eta,
         state: torrentInfo.state,
         paused: torrentInfo.state === "paused" || torrentInfo.state === "stalledUP",
@@ -490,11 +521,15 @@ export class SubscriptionsTorrentService {
         };
       }
 
-      // Check if scene already has a torrent
-      if (scene.torrentHash) {
+      // Check if scene already has a torrent in download queue
+      const existingEntry = await this.db.query.downloadQueue.findFirst({
+        where: eq(downloadQueue.sceneId, sceneId),
+      });
+
+      if (existingEntry && existingEntry.torrentHash) {
         return {
           success: true,
-          hash: scene.torrentHash,
+          hash: existingEntry.torrentHash,
           matched: true,
           reason: "Already downloading",
         };

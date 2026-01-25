@@ -1,6 +1,6 @@
 import argon2 from "argon2";
 import type { Logger } from "pino";
-import { AuthRepository } from "../../infrastructure/repositories/auth.repository.js";
+import { AuthRepository } from "@/infrastructure/repositories/auth.repository.js";
 
 /**
  * DTOs for Auth Service

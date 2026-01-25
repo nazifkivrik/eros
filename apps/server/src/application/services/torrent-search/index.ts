@@ -131,7 +131,7 @@ export class TorrentSearchService {
    * This is the main workflow orchestrator
    */
   async searchForSubscription(
-    entityType: "performer" | "studio",
+    entityType: "performer" | "studio" | "scene",
     entityId: string,
     qualityProfileId: string,
     includeMetadataMissing: boolean,
@@ -151,11 +151,40 @@ export class TorrentSearchService {
       },
       entityType === "performer"
         ? { performerId: entityId }
-        : { studioId: entityId }
+        : entityType === "studio"
+          ? { studioId: entityId }
+          : { sceneId: entityId }
     );
 
     try {
-      // Get entity details
+      // For scene subscriptions, use a simpler search by title
+      if (entityType === "scene") {
+        const scene = await this.repository.findSceneById(entityId);
+        if (!scene) {
+          await this.logsService.warning("torrent", `Scene not found for search`, {
+            sceneId: entityId,
+          });
+          return [];
+        }
+
+        // Search using scene title - treat it as a studio search with scene title as name
+        const rawResults = await this.indexerService.searchIndexers(
+          "studio",
+          { name: scene.title, aliases: [] },
+          false,
+          indexerIds
+        );
+
+        // For scenes, skip complex filtering and just return quality-filtered results
+        const matchedTorrents = await this.qualityService.processMatchedResults(
+          rawResults.map(r => ({ scene: scene as unknown as SceneMetadata, torrents: [r] })),
+          qualityProfileId
+        );
+
+        return matchedTorrents;
+      }
+
+      // Get entity details (performer/studio)
       const entity =
         entityType === "performer"
           ? await this.repository.findPerformerById(entityId)
@@ -241,7 +270,8 @@ export class TorrentSearchService {
         await this.matchService.handleDiscovery(
           unmatched,
           entity,
-          entityType
+          entityType,
+          entityType // Use entityType as searchPhase
         );
       }
 

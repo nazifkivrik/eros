@@ -139,6 +139,7 @@ export class TorrentSearchMatchService {
           scene: {
             ...matchResult.scene,
             performerIds,
+            studioId: matchResult.scene.studioId ?? undefined,
           },
           torrents: group.torrents,
         });
@@ -294,7 +295,7 @@ export class TorrentSearchMatchService {
   private cleanEntityNameFromTitle(
     title: string,
     entityName: string,
-    entityType: "performer" | "studio"
+    _entityType: "performer" | "studio"
   ): string {
     let cleaned = title;
     const escapeRegex = (str: string) =>

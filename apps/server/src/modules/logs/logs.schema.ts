@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IdParamsSchema } from "../../schemas/common.schema.js";
+import { IdParamsSchema } from "@/schemas/common.schema.js";
 
 export const LogLevelSchema = z.enum(["error", "warning", "info", "debug"]);
 
@@ -36,7 +36,7 @@ export const LogsQuerySchema = z
   })
   .transform((data) => {
     // Remove undefined/empty string values from optional fields
-    const cleaned: any = {};
+    const cleaned: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(data)) {
       if (value !== undefined && value !== "" && value !== "undefined") {
         cleaned[key] = value;

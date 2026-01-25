@@ -1,8 +1,8 @@
 import type { Logger } from "pino";
 import { DEFAULT_SETTINGS, type AppSettings } from "@repo/shared-types";
-import { SettingsRepository } from "../../infrastructure/repositories/settings.repository.js";
-import type { IMetadataProvider } from "../../infrastructure/adapters/interfaces/metadata-provider.interface.js";
-import type { IIndexer } from "../../infrastructure/adapters/interfaces/indexer.interface.js";
+import { SettingsRepository } from "@/infrastructure/repositories/settings.repository.js";
+import type { IMetadataProvider } from "@/infrastructure/adapters/interfaces/metadata-provider.interface.js";
+import type { IIndexer } from "@/infrastructure/adapters/interfaces/indexer.interface.js";
 
 /**
  * DTOs for Settings Service
@@ -203,8 +203,8 @@ export class SettingsService {
 
     try {
       // Create adapter instance for testing
-      const { createTPDBAdapter } = await import("../../infrastructure/adapters/tpdb.adapter.js");
-      const adapter = createTPDBAdapter({ apiUrl, apiKey });
+      const { createTPDBAdapter } = await import("@/infrastructure/adapters/tpdb.adapter.js");
+      const adapter = createTPDBAdapter({ apiUrl, apiKey }, this.logger);
       const result = await adapter.testConnection();
 
       this.logger.info({ success: result }, "TPDB connection test result");
@@ -224,8 +224,8 @@ export class SettingsService {
 
     try {
       // Create adapter instance for testing
-      const { createStashDBAdapter } = await import("../../infrastructure/adapters/stashdb.adapter.js");
-      const adapter = createStashDBAdapter({ apiUrl, apiKey });
+      const { createStashDBAdapter } = await import("@/infrastructure/adapters/stashdb.adapter.js");
+      const adapter = createStashDBAdapter({ apiUrl, apiKey }, this.logger);
       const result = await adapter.testConnection();
 
       this.logger.info({ success: result }, "StashDB connection test result");
@@ -245,8 +245,8 @@ export class SettingsService {
 
     try {
       // Create adapter instance for testing
-      const { createQBittorrentAdapter } = await import("../../infrastructure/adapters/qbittorrent.adapter.js");
-      const adapter = createQBittorrentAdapter({ url, username, password });
+      const { createQBittorrentAdapter } = await import("@/infrastructure/adapters/qbittorrent.adapter.js");
+      const adapter = createQBittorrentAdapter({ url, username, password }, this.logger);
       const result = await adapter.testConnection();
 
       this.logger.info({ success: result }, "qBittorrent connection test result");
@@ -266,10 +266,8 @@ export class SettingsService {
 
     try {
       // Create adapter instance for testing
-      const { ProwlarrAdapter } = await import("../../infrastructure/adapters/prowlarr.adapter.js");
-      const { ProwlarrService } = await import("../../services/prowlarr.service.js");
-      const prowlarrService = new ProwlarrService({ baseUrl: apiUrl, apiKey });
-      const adapter = new ProwlarrAdapter(prowlarrService);
+      const { createProwlarrAdapter } = await import("@/infrastructure/adapters/prowlarr.adapter.js");
+      const adapter = createProwlarrAdapter({ baseUrl: apiUrl, apiKey }, this.logger);
       const result = await adapter.testConnection();
 
       this.logger.info({ success: result }, "Prowlarr connection test result");

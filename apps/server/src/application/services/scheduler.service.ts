@@ -99,30 +99,42 @@ export class SchedulerService {
     // Register jobs based on settings
     this.registerJob({
       name: "subscription-search",
-      schedule: settings.jobs.subscriptionSearch.schedule,
-      handler: () => this.container.subscriptionSearchJob.execute(),
-      enabled: settings.jobs.subscriptionSearch.enabled,
+      schedule: settings.jobs.subscriptionSearch?.schedule || "0 * * * *",
+      handler: async () => {
+        const { subscriptionSearchJob: job } = this.container!;
+        if (job) await job.execute();
+      },
+      enabled: settings.jobs.subscriptionSearch?.enabled ?? true,
     });
 
     this.registerJob({
       name: "metadata-refresh",
-      schedule: settings.jobs.metadataRefresh.schedule,
-      handler: () => this.container.metadataRefreshJob.execute(),
-      enabled: settings.jobs.metadataRefresh.enabled,
+      schedule: settings.jobs.metadataRefresh?.schedule || "0 */6 * * *",
+      handler: async () => {
+        const { metadataRefreshJob: job } = this.container!;
+        if (job) await job.execute();
+      },
+      enabled: settings.jobs.metadataRefresh?.enabled ?? true,
     });
 
     this.registerJob({
       name: "torrent-monitor",
-      schedule: settings.jobs.torrentMonitor.schedule,
-      handler: () => this.container.torrentMonitorJob.execute(),
-      enabled: settings.jobs.torrentMonitor.enabled,
+      schedule: settings.jobs.torrentMonitor?.schedule || "*/5 * * * *",
+      handler: async () => {
+        const { torrentMonitorJob: job } = this.container!;
+        if (job) await job.execute();
+      },
+      enabled: settings.jobs.torrentMonitor?.enabled ?? true,
     });
 
     this.registerJob({
       name: "cleanup",
-      schedule: settings.jobs.cleanup.schedule,
-      handler: () => this.container.cleanupJob.execute(),
-      enabled: settings.jobs.cleanup.enabled,
+      schedule: settings.jobs.cleanup?.schedule || "0 3 * * 0",
+      handler: async () => {
+        const { cleanupJob: job } = this.container!;
+        if (job) await job.execute();
+      },
+      enabled: settings.jobs.cleanup?.enabled ?? true,
     });
 
     this.initialized = true;
@@ -218,10 +230,22 @@ export class SchedulerService {
     }
 
     const jobHandlers: Record<string, () => Promise<void>> = {
-      "subscription-search": () => this.container.subscriptionSearchJob.execute(),
-      "metadata-refresh": () => this.container.metadataRefreshJob.execute(),
-      "torrent-monitor": () => this.container.torrentMonitorJob.execute(),
-      "cleanup": () => this.container.cleanupJob.execute(),
+      "subscription-search": async () => {
+        const { subscriptionSearchJob: job } = this.container!;
+        if (job) await job.execute();
+      },
+      "metadata-refresh": async () => {
+        const { metadataRefreshJob: job } = this.container!;
+        if (job) await job.execute();
+      },
+      "torrent-monitor": async () => {
+        const { torrentMonitorJob: job } = this.container!;
+        if (job) await job.execute();
+      },
+      "cleanup": async () => {
+        const { cleanupJob: job } = this.container!;
+        if (job) await job.execute();
+      },
     };
 
     const handler = jobHandlers[jobName];

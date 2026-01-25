@@ -120,7 +120,7 @@ export class TorrentQualitySortService {
    */
   private calculateScore(
     torrent: ParsedTorrent,
-    weights: { qualityPriority?: number }
+    _weights: { qualityPriority?: number }
   ): number {
     // This would need access to profileItems to calculate priority
     // For now, return a placeholder value

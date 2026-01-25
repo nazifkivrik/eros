@@ -27,7 +27,7 @@ export class SubscriptionsRepository {
   /**
    * Find subscription by entity
    */
-  async findByEntity(entityType: string, entityId: string) {
+  async findByEntity(entityType: "performer" | "studio" | "scene", entityId: string) {
     return await this._db.query.subscriptions.findFirst({
       where: and(
         eq(subscriptions.entityType, entityType),
@@ -166,7 +166,7 @@ export class SubscriptionsRepository {
   /**
    * Find subscriptions by type
    */
-  async findByType(entityType: string) {
+  async findByType(entityType: "performer" | "studio" | "scene") {
     return await this._db.query.subscriptions.findMany({
       where: eq(subscriptions.entityType, entityType),
       orderBy: (subscriptions, { desc }) => [desc(subscriptions.createdAt)],

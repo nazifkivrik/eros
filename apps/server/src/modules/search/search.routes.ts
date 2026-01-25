@@ -1,6 +1,6 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { ErrorResponseSchema } from "../../schemas/common.schema.js";
+import { ErrorResponseSchema } from "@/schemas/common.schema.js";
 import {
   PerformerSchema,
   StudioSchema,
@@ -36,7 +36,7 @@ const searchRoutes: FastifyPluginAsyncZod = async (app) => {
         },
       },
     },
-    async (request, reply) => {
+    async (request, _reply) => {
       try {
         return await searchController.searchAll(request.body);
       } catch (error) {

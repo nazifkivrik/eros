@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { Database } from "@repo/database";
 import { users, appSettings } from "@repo/database";
+import type { AppSettings } from "@repo/shared-types";
 
 /**
  * Setup Repository
@@ -45,7 +46,7 @@ export class SetupRepository {
   /**
    * Create app settings
    */
-  async createAppSettings(value: any) {
+  async createAppSettings(value: AppSettings): Promise<void> {
     await this.db.insert(appSettings).values({
       key: "app-settings",
       value,
@@ -55,7 +56,7 @@ export class SetupRepository {
   /**
    * Update app settings
    */
-  async updateAppSettings(value: any) {
+  async updateAppSettings(value: AppSettings): Promise<void> {
     await this.db
       .update(appSettings)
       .set({ value })

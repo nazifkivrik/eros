@@ -302,7 +302,7 @@ export class TorrentsRepository {
     return {
       id: item.id,
       sceneId: item.sceneId,
-      qbitHash: item.qbitHash,
+      qbitHash: item.qbitHash ?? "",
       status: item.status,
       size: item.size,
       quality: item.quality,
@@ -342,7 +342,7 @@ export class TorrentsRepository {
     id: string,
     status: string
   ): Promise<void> {
-    const updateData: any = { status };
+    const updateData: { status: string; completedAt?: string } = { status };
     if (status === "completed") {
       updateData.completedAt = new Date().toISOString();
     }

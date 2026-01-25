@@ -1,15 +1,20 @@
 import { nanoid } from "nanoid";
 import type { Logger } from "pino";
-import { PerformersRepository } from "../../infrastructure/repositories/performers.repository.js";
-import type { SubscriptionService } from "./subscriptions.service.js";
+import { PerformersRepository } from "@/infrastructure/repositories/performers.repository.js";
+import type { SubscriptionsService } from "./subscriptions.service.js";
 
 /**
  * DTOs for Performers Service
  * These should eventually move to @repo/shared-types
  */
+export interface ExternalId {
+  source: string;
+  id: string;
+}
+
 export interface CreatePerformerDTO {
   name: string;
-  tpdbId?: string | null;
+  externalIds?: ExternalId[];
   aliases?: string[];
   disambiguation?: string;
   gender?: string | null;
@@ -20,7 +25,7 @@ export interface CreatePerformerDTO {
 
 export interface UpdatePerformerDTO {
   name?: string;
-  tpdbId?: string | null;
+  externalIds?: ExternalId[];
   aliases?: string[];
   disambiguation?: string;
   gender?: string | null;
@@ -91,9 +96,12 @@ export class PerformersService {
     const id = nanoid();
     const now = new Date().toISOString();
 
+    // Extract tpdbId from externalIds for backwards compatibility
+    const tpdbId = dto.externalIds?.find(e => e.source === "tpdb")?.id || null;
+
     const performerData = {
       id,
-      tpdbId: dto.tpdbId || null,
+      tpdbId,
       slug: dto.name.toLowerCase().replace(/\s+/g, "-"),
       name: dto.name,
       fullName: dto.name,
@@ -131,10 +139,34 @@ export class PerformersService {
 
     const now = new Date().toISOString();
 
-    const updated = await this.performersRepository.update(id, {
-      ...dto,
+    // Extract tpdbId from externalIds for backwards compatibility
+    const tpdbId = dto.externalIds?.find(e => e.source === "tpdb")?.id;
+
+    // Build update data with only database fields
+    const updateData: {
+      name?: string;
+      tpdbId?: string;
+      aliases?: string[];
+      disambiguation?: string | null;
+      gender?: string | null;
+      birthdate?: string | null;
+      deathDate?: string | null;
+      images?: Array<{ url: string; type: string }>;
+      updatedAt: string;
+    } = {
       updatedAt: now,
-    });
+    };
+
+    if (dto.name !== undefined) updateData.name = dto.name;
+    if (tpdbId !== undefined) updateData.tpdbId = tpdbId;
+    if (dto.aliases !== undefined) updateData.aliases = dto.aliases;
+    if (dto.disambiguation !== undefined) updateData.disambiguation = dto.disambiguation || null;
+    if (dto.gender !== undefined) updateData.gender = dto.gender;
+    if (dto.birthdate !== undefined) updateData.birthdate = dto.birthdate;
+    if (dto.deathDate !== undefined) updateData.deathDate = dto.deathDate;
+    if (dto.images !== undefined) updateData.images = dto.images;
+
+    const updated = await this.performersRepository.update(id, updateData);
 
     this.logger.info({ performerId: id }, "Performer updated");
 
@@ -145,7 +177,7 @@ export class PerformersService {
    * Delete performer
    * Note: Subscription deletion is handled by SubscriptionService
    */
-  async delete(id: string, dto: DeletePerformerDTO, subscriptionService?: SubscriptionService) {
+  async delete(id: string, dto: DeletePerformerDTO, subscriptionService?: SubscriptionsService) {
     this.logger.info({ performerId: id, ...dto }, "Deleting performer");
 
     // Check if exists

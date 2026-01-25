@@ -6,11 +6,11 @@
 
 import { BaseJob } from "./base.job.js";
 import type { Logger } from "pino";
-import type { JobProgressService } from "../../infrastructure/job-progress.service.js";
-import type { JobsLogRepository } from "../../infrastructure/repositories/jobs.repository.js";
-import type { SearchRepository } from "../../infrastructure/repositories/search.repository.js";
-import type { DownloadQueueRepository } from "../../infrastructure/repositories/download-queue.repository.js";
-import type { LogsRepository } from "../../infrastructure/repositories/logs.repository.js";
+import type { JobProgressService } from "@/infrastructure/job-progress.service.js";
+import type { JobsLogRepository } from "@/infrastructure/repositories/jobs.repository.js";
+import type { SearchRepository } from "@/infrastructure/repositories/search.repository.js";
+import type { DownloadQueueRepository } from "@/infrastructure/repositories/download-queue.repository.js";
+import type { LogsRepository } from "@/infrastructure/repositories/logs.repository.js";
 import type { Database } from "@repo/database";
 import { lt, and, eq } from "drizzle-orm";
 import { downloadQueue, logs } from "@repo/database";
@@ -27,7 +27,7 @@ export class CleanupJob extends BaseJob {
 
   constructor(deps: {
     logger: Logger;
-    progressService: JobProgressService;
+    jobProgressService: JobProgressService;
     jobsRepository: JobsLogRepository;
     searchRepository: SearchRepository;
     downloadQueueRepository: DownloadQueueRepository;

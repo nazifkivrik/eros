@@ -5,7 +5,7 @@ import type { Database } from "@repo/database";
 import {
   ErrorResponseSchema,
   SuccessResponseSchema,
-} from "../../schemas/common.schema.js";
+} from "@/schemas/common.schema.js";
 import {
   SubscriptionSchema,
   SubscriptionDetailResponseSchema,
@@ -88,7 +88,7 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       try {
         const subscription = await subscriptionsController.getById(request.params);
-        return subscription;
+        return subscription as z.infer<typeof SubscriptionDetailResponseSchema>;
       } catch (error) {
         if (error instanceof Error && error.message === "Subscription not found") {
           return reply.code(404).send({ error: "Subscription not found" });

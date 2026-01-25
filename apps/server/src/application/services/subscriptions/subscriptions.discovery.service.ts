@@ -101,6 +101,7 @@ export class SubscriptionsDiscoveryService {
       const allScenes: any[] = [];
 
       for (const contentType of contentTypes) {
+        let scenesResponse: { scenes: unknown[]; pagination?: { total: number } } | null = null;
         try {
           this.logger.info({ contentType, tpdbId }, `Fetching ${contentType} scenes`);
 
@@ -108,29 +109,31 @@ export class SubscriptionsDiscoveryService {
           let hasMore = true;
 
           while (hasMore) {
-            const response = await this.metadataProvider.getPerformerScenes(tpdbId, contentType, page);
+            scenesResponse = this.metadataProvider.getPerformerScenes
+              ? await this.metadataProvider.getPerformerScenes(tpdbId, contentType, page)
+              : null;
 
-            if (!response.scenes || response.scenes.length === 0) {
+            if (!scenesResponse || !scenesResponse.scenes || scenesResponse.scenes.length === 0) {
               hasMore = false;
             } else {
-              allScenes.push(...response.scenes);
-              result.totalFound += response.scenes.length;
+              allScenes.push(...scenesResponse.scenes);
+              result.totalFound += scenesResponse.scenes.length;
 
               // Check pagination
-              if (response.pagination && response.pagination.total !== undefined) {
+              if (scenesResponse.pagination && scenesResponse.pagination.total !== undefined) {
                 const pageSize = 25;
-                const expectedPages = Math.ceil(response.pagination.total / pageSize);
+                const expectedPages = Math.ceil(scenesResponse.pagination.total / pageSize);
                 hasMore = page < expectedPages;
               } else {
                 // Fallback: stop if page wasn't full
-                hasMore = response.scenes.length >= 25;
+                hasMore = scenesResponse.scenes.length >= 25;
               }
 
               page++;
             }
           }
 
-          this.logger.info({ contentType, count: response.scenes?.length || 0 }, "Fetched scenes");
+          this.logger.info({ contentType, count: scenesResponse?.scenes?.length || 0 }, "Fetched scenes");
         } catch (error) {
           const errorMsg = `Failed to fetch ${contentType} scenes`;
           this.logger.error({ error }, errorMsg);
@@ -268,7 +271,7 @@ export class SubscriptionsDiscoveryService {
   /**
    * Search for scenes by query
    */
-  async searchScenes(query: string, options: DiscoveryOptions = {}): Promise<any[]> {
+  async searchScenes(query: string, _options: DiscoveryOptions = {}): Promise<any[]> {
     this.logger.info({ query }, "Searching for scenes");
 
     if (!this.metadataProvider) {
@@ -308,6 +311,7 @@ export class SubscriptionsDiscoveryService {
         totalFound: 0,
         totalSaved: 0,
         totalSkipped: 0,
+        allSceneIds: [],
         errors: ["Scene subscriptions don't have scenes to sync"],
       };
     }
@@ -324,14 +328,14 @@ export class SubscriptionsDiscoveryService {
       const performer = await this.db.query.performers.findFirst({
         where: eq(performers.id, entityId),
       });
-      // First check tpdbId column, fallback to externalIds array
-      return performer?.tpdbId || performer?.externalIds?.find((e) => e.source === "tpdb")?.id || null;
+      // Use externalIds array to find TPDB ID
+      return performer?.externalIds?.find((e) => e.source === "tpdb")?.id || null;
     } else {
       const studio = await this.db.query.studios.findFirst({
         where: eq(studios.id, entityId),
       });
-      // First check tpdbId column, fallback to externalIds array
-      return studio?.tpdbId || studio?.externalIds?.find((e) => e.source === "tpdb")?.id || null;
+      // Use externalIds array to find TPDB ID
+      return studio?.externalIds?.find((e) => e.source === "tpdb")?.id || null;
     }
   }
 
@@ -340,8 +344,8 @@ export class SubscriptionsDiscoveryService {
    */
   private async saveSceneFromMetadata(
     tpdbScene: any,
-    entityType: "performer" | "studio",
-    entityId: string
+    _entityType: "performer" | "studio",
+    _entityId: string
   ): Promise<string | null> {
     return await this.subscriptionsScenesService.saveSceneFromMetadata({
       externalId: tpdbScene.id,

@@ -1,5 +1,5 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { ErrorResponseSchema } from "../../schemas/common.schema.js";
+import { ErrorResponseSchema } from "@/schemas/common.schema.js";
 import {
   LogSchema,
   LogsQuerySchema,

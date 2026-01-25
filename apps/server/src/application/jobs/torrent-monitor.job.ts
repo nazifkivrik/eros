@@ -6,10 +6,10 @@
 
 import { BaseJob } from "./base.job.js";
 import type { Logger } from "pino";
-import type { JobProgressService } from "../../infrastructure/job-progress.service.js";
-import type { DownloadQueueRepository } from "../../infrastructure/repositories/download-queue.repository.js";
+import type { JobProgressService } from "@/infrastructure/job-progress.service.js";
+import type { DownloadQueueRepository } from "@/infrastructure/repositories/download-queue.repository.js";
 import type { TorrentCompletionHandlerService } from "../../application/services/torrent-completion/torrent-completion.handler.service.js";
-import type { ITorrentClient } from "../../infrastructure/adapters/interfaces/torrent-client.interface.js";
+import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
 import type { SettingsService } from "../../application/services/settings.service.js";
 import type { SpeedProfileService } from "../../application/services/speed-profile.service.js";
 import type { DownloadQueueService } from "../../application/services/download-queue.service.js";
@@ -31,7 +31,7 @@ export class TorrentMonitorJob extends BaseJob {
 
   constructor(deps: {
     logger: Logger;
-    progressService: JobProgressService;
+    jobProgressService: JobProgressService;
     downloadQueueRepository: DownloadQueueRepository;
     torrentCompletionService: TorrentCompletionHandlerService;
     torrentClient: ITorrentClient | undefined;

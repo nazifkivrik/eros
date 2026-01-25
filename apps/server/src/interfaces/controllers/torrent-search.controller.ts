@@ -10,14 +10,13 @@
  */
 
 import type { FastifyReply } from "fastify";
-import type { FastifySchema } from "fastify-type-provider-zod";
-import type { TorrentSearchService } from "../../application/services/torrent-search/index.js";
-import type { LogsService } from "../../application/services/logs.service.js";
+import type { TorrentSearchService } from "@/application/services/torrent-search/index.js";
+import type { LogsService } from "@/application/services/logs.service.js";
 import type {
   SearchByEntityRequest,
   ManualSearchRequest,
   TorrentResult,
-} from "./torrent-search.schema.js";
+} from "@/modules/torrent-search/torrent-search.schema.js";
 
 /**
  * Torrent Search Controller
@@ -48,15 +47,15 @@ export class TorrentSearchController {
         indexerIds: string[];
       };
     },
-    reply: FastifyReply
+    _reply: FastifyReply
   ): Promise<TorrentResult[]> {
-    const { entityType, entityId } = request.params;
+    const { entityType, entityId } = request.Params;
     const {
       qualityProfileId,
       includeMetadataMissing,
       includeAliases,
       indexerIds,
-    } = request.body;
+    } = request.Body;
 
     await this.logsService.info(
       "torrent-search",
@@ -121,9 +120,9 @@ export class TorrentSearchController {
         limit?: number;
       };
     },
-    reply: FastifyReply
+    _reply: FastifyReply
   ): Promise<TorrentResult[]> {
-    const { query, qualityProfileId, limit = 50 } = request.body;
+    const { query, qualityProfileId, limit = 50 } = request.Body;
 
     await this.logsService.info(
       "torrent-search",

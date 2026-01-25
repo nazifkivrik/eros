@@ -460,7 +460,7 @@ export const appSettings = sqliteTable("app_settings", {
 export const logs = sqliteTable("logs", {
   id: text("id").primaryKey(),
   level: text("level").$type<"error" | "warning" | "info" | "debug">().notNull(),
-  eventType: text("event_type").$type<"torrent" | "subscription" | "download" | "metadata" | "system">().notNull(),
+  eventType: text("event_type").$type<"torrent" | "subscription" | "download" | "metadata" | "system" | "torrent-search">().notNull(),
   message: text("message").notNull(),
   details: text("details", { mode: "json" }).$type<Record<string, unknown>>(),
   sceneId: text("scene_id").references(() => scenes.id, { onDelete: "set null" }),

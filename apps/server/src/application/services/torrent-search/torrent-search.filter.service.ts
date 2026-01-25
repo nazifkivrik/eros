@@ -9,7 +9,7 @@
  * - Grouping by scene
  */
 
-import type { LogsService } from "../../logs.service.js";
+import type { LogsService } from "@/application/services/logs.service.js";
 import type { TorrentResult, SceneGroup } from "../torrent-search/index.js";
 
 /**
@@ -80,7 +80,7 @@ export class TorrentSearchFilterService {
    */
   async applyHardFilters(
     results: TorrentResult[],
-    entityType: "performer" | "studio",
+    _entityType: "performer" | "studio",
     entity: { name: string; aliases?: string[] }
   ): Promise<TorrentResult[]> {
     // Build allowed names list

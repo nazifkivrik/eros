@@ -1,8 +1,8 @@
 import type { Logger } from "pino";
 import { nanoid } from "nanoid";
 import type { DownloadStatus } from "@repo/shared-types";
-import { DownloadQueueRepository } from "../../infrastructure/repositories/download-queue.repository.js";
-import type { ITorrentClient } from "../../infrastructure/adapters/interfaces/torrent-client.interface.js";
+import { DownloadQueueRepository } from "@/infrastructure/repositories/download-queue.repository.js";
+import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
 
 /**
  * DTOs for Download Queue Service

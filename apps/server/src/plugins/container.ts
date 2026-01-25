@@ -53,8 +53,7 @@ export default fp(async (app: FastifyInstance) => {
   });
 
   container.register({
-    fileManagerService: { resolve: () => fileManagerService },
-    fileManager: { resolve: () => fileManagerService }, // Alias for legacy services
+    fileManager: { resolve: () => fileManagerService },
   });
 
   // Decorate Fastify instance with container cradle wrapped in a plain object
@@ -65,11 +64,10 @@ export default fp(async (app: FastifyInstance) => {
     logger: container.cradle.logger,
     externalServicesManager, // For config reload capability
 
-    // Old services (will be migrated)
+    // Core business logic services
     jobProgressService: container.cradle.jobProgressService,
     torrentSearchService: container.cradle.torrentSearchService,
-    fileManagerService: container.cradle.fileManagerService, // Runtime-configured service
-    fileManager: container.cradle.fileManager, // Alias for legacy services
+    fileManager: container.cradle.fileManager,
     downloadService: container.cradle.downloadService,
     parserService: container.cradle.parserService,
     entityResolverService: container.cradle.entityResolverService,
@@ -136,7 +134,6 @@ export default fp(async (app: FastifyInstance) => {
   };
 
   // Add optional services
-  containerCradle.scheduler = containerCradle.schedulerService; // Alias for backwards compatibility
   // Always include adapters (will be undefined if none available)
   containerCradle.metadataProvider = container.cradle.metadataProvider;
   containerCradle.tpdbProvider = container.cradle.tpdbProvider;

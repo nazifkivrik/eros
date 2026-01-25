@@ -72,6 +72,28 @@ export interface ITorrentClient {
   getTorrentProperties(hash: string): Promise<TorrentProperties>;
 
   /**
+   * Get torrent info (alias for getTorrentProperties with full info)
+   * @param hash - Torrent hash identifier
+   * @returns Torrent info
+   */
+  getTorrentInfo(hash: string): Promise<TorrentInfo | null>;
+
+  /**
+   * Add a magnet link directly
+   * @param magnetLink - The magnet link to add
+   * @returns The torrent hash, or null if failed
+   */
+  addMagnet(magnetLink: string): Promise<string | null>;
+
+  /**
+   * Set download location for a torrent
+   * @param hash - Torrent hash identifier
+   * @param location - New save path
+   * @returns true if successful
+   */
+  setLocation(hash: string, location: string): Promise<boolean>;
+
+  /**
    * Add a torrent to the client
    * @param options - Torrent addition options
    * @returns true if successful

@@ -68,7 +68,7 @@ export class SubscriptionsCoreService {
    */
   async getByType(entityType: string) {
     this.logger.info({ entityType }, "Fetching subscriptions by type");
-    return await this.subscriptionsRepository.findByType(entityType);
+    return await this.subscriptionsRepository.findByType(entityType as "performer" | "studio" | "scene");
   }
 
   /**
@@ -123,7 +123,7 @@ export class SubscriptionsCoreService {
   async checkSubscriptionByEntity(entityType: string, entityId: string) {
     this.logger.info({ entityType, entityId }, "Checking subscription by entity");
     const subscription = await this.subscriptionsRepository.findByEntity(
-      entityType,
+      entityType as "performer" | "studio" | "scene",
       entityId
     );
 
@@ -236,14 +236,15 @@ export class SubscriptionsCoreService {
     this.logger.info({ subscriptionId: id }, "Toggling subscription status");
 
     const subscription = await this.getById(id);
+    const newStatus = !subscription.isSubscribed;
     const updated = await this.subscriptionsRepository.update(id, {
-      isSubscribed: !subscription.isSubscribed,
+      isSubscribed: newStatus,
       updatedAt: new Date().toISOString(),
     });
 
     this.logger.info({
       subscriptionId: id,
-      newStatus: updated.isSubscribed,
+      newStatus,
     }, "Subscription status toggled");
 
     return updated;

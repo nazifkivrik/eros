@@ -397,7 +397,7 @@ export class StashDBAdapter implements IMetadataProvider {
    */
   async searchSites(
     query: string,
-    page: number = 1
+    _page: number = 1
   ): Promise<{
     sites: MetadataStudio[];
   }> {
@@ -414,13 +414,13 @@ export class StashDBAdapter implements IMetadataProvider {
     return {
       id: performer.id,
       name: performer.name,
-      disambiguation: performer.disambiguation,
+      disambiguation: performer.disambiguation ?? undefined,
       aliases: performer.aliases,
-      gender: this.mapGender(performer.gender),
-      birthDate: performer.birth_date,
-      deathDate: performer.death_date,
-      careerStartYear: performer.career_start_year,
-      careerEndYear: performer.career_end_year,
+      gender: this.mapGender(performer.gender) ?? undefined,
+      birthDate: performer.birth_date ?? undefined,
+      deathDate: performer.death_date ?? undefined,
+      careerStartYear: performer.career_start_year ?? undefined,
+      careerEndYear: performer.career_end_year ?? undefined,
       images: performer.images.map((img) => this.mapImageToInterface(img)),
     };
   }
@@ -439,7 +439,10 @@ export class StashDBAdapter implements IMetadataProvider {
             name: studio.parent.name,
           }
         : undefined,
-      urls: studio.urls?.map((u) => u.url) || [],
+      urls: studio.urls?.map((u) => ({
+        url: u.url,
+        site: { name: typeof u.site === 'string' ? u.site : (u.site?.name || studio.name) }
+      })) || [],
       images: studio.images.map((img) => this.mapImageToInterface(img)),
     };
   }
@@ -456,20 +459,23 @@ export class StashDBAdapter implements IMetadataProvider {
       duration: scene.duration,
       director: scene.director,
       code: scene.code,
-      urls: scene.urls?.map((u) => u.url) || [],
+      urls: scene.urls?.map((u) => ({
+        url: u.url,
+        site: { name: typeof u.site === 'string' ? u.site : (u.site?.name || scene.studio?.name || "Unknown") }
+      })) || [],
       images: scene.images?.map((img) => this.mapImageToInterface(img)) || [],
       performers:
         scene.performers?.map((p) => ({
           performer: {
             id: p.performer.id,
             name: p.performer.name,
-            disambiguation: p.performer.disambiguation,
+            disambiguation: p.performer.disambiguation ?? undefined,
             aliases: [],
-            gender: this.mapGender(p.performer.gender),
-            birthDate: p.performer.birth_date,
-            deathDate: p.performer.death_date,
-            careerStartYear: p.performer.career_start_year,
-            careerEndYear: p.performer.career_end_year,
+            gender: this.mapGender(p.performer.gender) ?? undefined,
+            birthDate: p.performer.birth_date ?? undefined,
+            deathDate: p.performer.death_date ?? undefined,
+            careerStartYear: p.performer.career_start_year ?? undefined,
+            careerEndYear: p.performer.career_end_year ?? undefined,
             images: [],
           },
         })) || [],

@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import type { Logger } from "pino";
 import type { LogLevel, EventType } from "@repo/shared-types";
-import { LogsRepository } from "../../infrastructure/repositories/logs.repository.js";
+import { LogsRepository } from "@/infrastructure/repositories/logs.repository.js";
 
 /**
  * DTOs for Logs Service

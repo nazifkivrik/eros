@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IdParamsSchema } from "../../schemas/common.schema.js";
+import { IdParamsSchema } from "@/schemas/common.schema.js";
 
 export const QualityItemSchema = z.object({
   quality: z.enum([

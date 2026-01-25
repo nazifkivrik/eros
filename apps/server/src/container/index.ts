@@ -1,4 +1,4 @@
-import { createContainer, asClass, asValue, InjectionMode } from "awilix";
+import { createContainer, asClass, asValue, asFunction, InjectionMode } from "awilix";
 import type { Database } from "@repo/database";
 import type { Logger } from "pino";
 import type { ServiceContainer } from "./types.js";
@@ -13,7 +13,7 @@ import { EntityResolverService } from "../application/services/entity-resolver/e
 import { SceneMatcher } from "../application/services/matching/scene-matcher.service.js";
 import { AIMatchingService } from "../application/services/ai-matching/ai-matching.service.js";
 import { CrossEncoderService } from "../application/services/ai-matching/cross-encoder.service.js";
-import { SpeedProfileService } from "../application/services/speed-profile.service.js";
+import { SpeedProfileService, createSpeedProfileService } from "../application/services/speed-profile.service.js";
 
 // Adapters (now self-contained, no longer wrap old services)
 import { createProwlarrAdapter } from "../infrastructure/adapters/prowlarr.adapter.js";
@@ -134,11 +134,9 @@ export function buildContainer(config: ContainerConfig) {
   // Register core services
   container.register({
     jobProgressService: asValue(getJobProgressService()),
-    // Alias for BaseJob
-    progressService: asValue(getJobProgressService()),
   });
 
-  // Register business logic services (old structure - will be migrated)
+  // Register core business logic services
   container.register({
     downloadService: asClass(DownloadService).scoped(),
     parserService: asClass(TorrentParserService).scoped(),
@@ -146,7 +144,7 @@ export function buildContainer(config: ContainerConfig) {
     sceneMatcherService: asClass(SceneMatcher).scoped(),
     aiMatchingService: asClass(AIMatchingService).scoped(),
     crossEncoderService: asClass(CrossEncoderService).scoped(),
-    speedProfileService: asClass(SpeedProfileService).scoped(),
+    speedProfileService: asValue(createSpeedProfileService()),
   });
 
   // === Clean Architecture Layers ===

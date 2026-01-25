@@ -1,5 +1,5 @@
 import type { Logger } from "pino";
-import type { JobProgressService } from "../../infrastructure/job-progress.service.js";
+import type { JobProgressService } from "@/infrastructure/job-progress.service.js";
 
 /**
  * Jobs Service Interface

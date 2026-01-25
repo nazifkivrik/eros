@@ -4,7 +4,7 @@
  */
 
 import type { AIMatchingService } from "../ai-matching/ai-matching.service.js";
-import type { LogsService } from "../../logs.service.js";
+import type { LogsService } from "../logs.service.js";
 import {
   type MatchResult,
   type MatchSettings,

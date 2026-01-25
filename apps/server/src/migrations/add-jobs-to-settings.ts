@@ -3,6 +3,7 @@
  * This ensures backward compatibility with existing databases
  */
 
+// @ts-ignore - better-sqlite3 types not available for migration script
 import Database from "better-sqlite3";
 import { DEFAULT_SETTINGS } from "@repo/shared-types";
 

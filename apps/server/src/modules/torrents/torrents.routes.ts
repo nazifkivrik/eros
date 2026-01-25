@@ -1,5 +1,5 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { SuccessResponseSchema, ErrorResponseSchema } from "../../schemas/common.schema.js";
+import { SuccessResponseSchema, ErrorResponseSchema } from "@/schemas/common.schema.js";
 import {
   TorrentHashParamsSchema,
   TorrentPrioritySchema,

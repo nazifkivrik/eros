@@ -1,7 +1,7 @@
 import type { Logger } from "pino";
-import type { IMetadataProvider } from "../../infrastructure/adapters/interfaces/metadata-provider.interface.js";
-import { SearchRepository } from "../../infrastructure/repositories/search.repository.js";
-import { SettingsRepository } from "../../infrastructure/repositories/settings.repository.js";
+import type { IMetadataProvider } from "@/infrastructure/adapters/interfaces/metadata-provider.interface.js";
+import { SearchRepository } from "@/infrastructure/repositories/search.repository.js";
+import { SettingsRepository } from "@/infrastructure/repositories/settings.repository.js";
 import type { AppSettings } from "@repo/shared-types";
 
 type MetadataSource = "tpdb" | "stashdb";
@@ -93,7 +93,7 @@ export class SearchService {
     const { service, source } = await this.getMetadataService();
 
     const [performers, studiosResult, scenes] = await Promise.all([
-      service.searchPerformers(query, limit, page).catch((err) => {
+      service.searchPerformers(query, limit).catch((err) => {
         this.logger.error({ err, query, source }, "Failed to search performers");
         return [];
       }),
@@ -101,7 +101,7 @@ export class SearchService {
         this.logger.error({ err, query, source }, "Failed to search studios");
         return { sites: [] };
       }),
-      service.searchScenes(query, limit, page).catch((err) => {
+      service.searchScenes(query, limit).catch((err) => {
         this.logger.error({ err, query, source }, "Failed to search scenes");
         return [];
       }),
@@ -120,9 +120,9 @@ export class SearchService {
   /**
    * Search performers only
    */
-  async searchPerformers(query: string, limit?: number, page?: number) {
+  async searchPerformers(query: string, limit?: number, _page?: number) {
     const { service } = await this.getMetadataService();
-    return await service.searchPerformers(query, limit, page);
+    return await service.searchPerformers(query, limit);
   }
 
   /**

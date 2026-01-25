@@ -1,10 +1,12 @@
 import type { Logger } from "pino";
-import { TorrentsService } from "../../application/services/torrents.service.js";
+import { z } from "zod";
+import { TorrentsService } from "@/application/services/torrents.service.js";
 import {
   TorrentHashParamsSchema,
   TorrentPrioritySchema,
   RemoveTorrentQuerySchema,
-} from "../../modules/torrents/torrents.schema.js";
+  TorrentListResponseSchema,
+} from "@/modules/torrents/torrents.schema.js";
 
 /**
  * Torrents Controller
@@ -33,14 +35,17 @@ export class TorrentsController {
   /**
    * List all torrents
    */
-  async list() {
-    return await this.torrentsService.getAllTorrents();
+  async list(): Promise<z.infer<typeof TorrentListResponseSchema>> {
+    return await this.torrentsService.getAllTorrents() as z.infer<typeof TorrentListResponseSchema>;
   }
 
   /**
    * Pause torrent by hash
    */
-  async pause(params: unknown) {
+  async pause(params: unknown): Promise<{
+    success: boolean;
+    message: string;
+  }> {
     const { hash } = TorrentHashParamsSchema.parse(params);
 
     const success = await this.torrentsService.pauseTorrent(hash);
@@ -58,7 +63,10 @@ export class TorrentsController {
   /**
    * Resume torrent by hash
    */
-  async resume(params: unknown) {
+  async resume(params: unknown): Promise<{
+    success: boolean;
+    message: string;
+  }> {
     const { hash } = TorrentHashParamsSchema.parse(params);
 
     const success = await this.torrentsService.resumeTorrent(hash);
@@ -76,7 +84,10 @@ export class TorrentsController {
   /**
    * Remove torrent by hash
    */
-  async remove(params: unknown, query: unknown) {
+  async remove(params: unknown, query: unknown): Promise<{
+    success: boolean;
+    message: string;
+  }> {
     const { hash } = TorrentHashParamsSchema.parse(params);
     const { deleteFiles } = RemoveTorrentQuerySchema.parse(query);
 
@@ -98,7 +109,10 @@ export class TorrentsController {
   /**
    * Change torrent priority
    */
-  async setPriority(params: unknown, body: unknown) {
+  async setPriority(params: unknown, body: unknown): Promise<{
+    success: boolean;
+    message: string;
+  }> {
     const { hash } = TorrentHashParamsSchema.parse(params);
     const { priority } = TorrentPrioritySchema.parse(body);
 
