@@ -1,7 +1,7 @@
 /**
  * Subscriptions View
  * Main orchestration component for the subscriptions feature
- * Follows Clean Architecture: View composes components and hooks
+ * Clean, minimal design
  */
 
 "use client";
@@ -130,18 +130,18 @@ function SubscriptionsContent() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header - clean and simple */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-4xl font-bold mb-2">Subscriptions</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-3xl font-bold">Subscriptions</h1>
+          <p className="text-muted-foreground mt-1">
             Manage your performer, studio, and scene subscriptions
           </p>
         </div>
         <ViewToggle view={filters.view} onViewChange={setView} />
       </div>
 
-      {/* Stats */}
+      {/* Stats - clean cards */}
       <SubscriptionStats subscriptions={subscriptions?.data || []} />
 
       {/* Filters */}
@@ -200,7 +200,14 @@ function SubscriptionsContent() {
  */
 export function SubscriptionsView() {
   return (
-    <Suspense fallback={<div className="p-8">Loading...</div>}>
+    <Suspense fallback={
+      <div className="flex items-center justify-center py-20">
+        <div className="text-center space-y-4">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <p className="text-sm text-muted-foreground">Loading subscriptions...</p>
+        </div>
+      </div>
+    }>
       <SubscriptionsContent />
     </Suspense>
   );

@@ -169,23 +169,29 @@ export class SettingsController {
     _settings: AppSettings,
     app: FastifyInstance
   ): Promise<void> {
+    this.logger.info("[Settings Reload] Starting external services reload...");
+
     // Reload external services configuration from database
     if (this.externalServicesManager) {
       await this.externalServicesManager.reload();
-      this.logger.info("External services configuration reloaded");
+      this.logger.info("[Settings Reload] External services configuration reloaded from database");
     }
 
     // Get updated config
     const config = this.externalServicesManager?.getConfig() || {};
+
+    const reloadResults: { service: string; status: string; details?: string }[] = [];
 
     // Update StashDB adapter in container
     if (config.stashdb) {
       const stashdb = createStashDBAdapter(config.stashdb, this.logger);
       (app.container as ServiceContainer).stashdbProvider = stashdb;
       (app.container as ServiceContainer).metadataProvider = stashdb; // Update generic provider
-      this.logger.info("StashDB adapter reloaded with new configuration");
+      reloadResults.push({ service: "StashDB", status: "reloaded", details: `API URL: ${config.stashdb.apiUrl}` });
+      this.logger.info({ apiUrl: config.stashdb.apiUrl }, "[Settings Reload] StashDB adapter reloaded");
     } else {
       (app.container as ServiceContainer).stashdbProvider = undefined;
+      reloadResults.push({ service: "StashDB", status: "disabled" });
       // Update generic provider to TPDB if available
       if (config.tpdb) {
         const tpdb = createTPDBAdapter(config.tpdb, this.logger);
@@ -200,9 +206,11 @@ export class SettingsController {
       const tpdb = createTPDBAdapter(config.tpdb, this.logger);
       (app.container as ServiceContainer).tpdbProvider = tpdb;
       (app.container as ServiceContainer).metadataProvider = tpdb; // TPDB has priority
-      this.logger.info("TPDB adapter reloaded with new configuration");
+      reloadResults.push({ service: "TPDB", status: "reloaded", details: `API URL: ${config.tpdb.apiUrl}` });
+      this.logger.info({ apiUrl: config.tpdb.apiUrl }, "[Settings Reload] TPDB adapter reloaded");
     } else {
       (app.container as ServiceContainer).tpdbProvider = undefined;
+      reloadResults.push({ service: "TPDB", status: "disabled" });
       // Update generic provider to StashDB if available
       if (config.stashdb) {
         const stashdb = createStashDBAdapter(config.stashdb, this.logger);
@@ -218,22 +226,33 @@ export class SettingsController {
       const connected = await qbittorrent.testConnection();
       if (connected) {
         (app.container as ServiceContainer).torrentClient = qbittorrent;
-        this.logger.info("qBittorrent adapter reloaded and connected");
+        reloadResults.push({ service: "qBittorrent", status: "connected", details: `URL: ${config.qbittorrent.url}` });
+        this.logger.info({ url: config.qbittorrent.url }, "[Settings Reload] qBittorrent adapter reloaded and connected");
       } else {
         (app.container as ServiceContainer).torrentClient = undefined;
-        this.logger.warn("qBittorrent adapter reloaded but connection failed");
+        reloadResults.push({ service: "qBittorrent", status: "failed", details: "Connection test failed" });
+        this.logger.warn("[Settings Reload] qBittorrent adapter reloaded but connection failed");
       }
     } else {
       (app.container as ServiceContainer).torrentClient = undefined;
+      reloadResults.push({ service: "qBittorrent", status: "disabled" });
     }
 
     // Update Prowlarr adapter in container
     if (config.prowlarr) {
       const prowlarr = createProwlarrAdapter(config.prowlarr, this.logger);
       (app.container as ServiceContainer).indexer = prowlarr;
-      this.logger.info("Prowlarr adapter reloaded with new configuration");
+      reloadResults.push({ service: "Prowlarr", status: "reloaded", details: `Base URL: ${config.prowlarr.baseUrl}` });
+      this.logger.info({ baseUrl: config.prowlarr.baseUrl }, "[Settings Reload] Prowlarr adapter reloaded");
     } else {
       (app.container as ServiceContainer).indexer = undefined;
+      reloadResults.push({ service: "Prowlarr", status: "disabled" });
     }
+
+    // Log summary of reload results
+    this.logger.info(
+      { results: reloadResults },
+      "[Settings Reload] Summary: All external services reloaded"
+    );
   }
 }

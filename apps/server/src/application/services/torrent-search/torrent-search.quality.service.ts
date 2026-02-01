@@ -53,18 +53,22 @@ export class TorrentSearchQualityService {
       await this.repository.findQualityProfileById(qualityProfileId);
 
     if (!qualityProfile) {
-      await this.logsService.warning(
+      await this.logsService.error(
         "torrent",
-        `Quality profile not found: ${qualityProfileId}, using first torrent`,
+        `Quality profile not found: ${qualityProfileId}, no torrents will be selected (STRICT MODE)`,
         { qualityProfileId }
       );
-      return torrents[0];
+      return null; // STRICT: Don't fallback to first torrent
     }
 
     // Ensure items array exists and has valid structure
     const profileItems = qualityProfile.items || [];
 
-    // Extract preferred qualities and sources from items
+    // Check if user wants "any" quality or source
+    const hasAnyQuality = profileItems.some((item) => item.quality === "any");
+    const hasAnySource = profileItems.some((item) => item.source === "any");
+
+    // Extract preferred qualities and sources from items (excluding "any")
     const preferredQualities = profileItems
       .map((item) => item.quality)
       .filter((q) => q && q !== "any") || [];
@@ -76,13 +80,15 @@ export class TorrentSearchQualityService {
     // Filter by quality preferences
     let candidates = torrents;
 
-    if (preferredQualities.length > 0) {
+    // Only filter by quality if NOT using "any"
+    if (!hasAnyQuality && preferredQualities.length > 0) {
       candidates = candidates.filter((t) =>
         preferredQualities.includes(t.quality)
       );
     }
 
-    if (preferredSources.length > 0) {
+    // Only filter by source if NOT using "any"
+    if (!hasAnySource && preferredSources.length > 0) {
       candidates = candidates.filter((t) =>
         preferredSources.includes(t.source)
       );
@@ -107,18 +113,20 @@ export class TorrentSearchQualityService {
       );
     }
 
-    // If no candidates match preferences, use all torrents
+    // If no candidates match preferences, return null (STRICT MODE)
     if (candidates.length === 0) {
       await this.logsService.info(
         "torrent",
-        `No torrents match quality profile preferences, using first available`,
+        `No torrents match quality profile preferences, returning no results (STRICT MODE)`,
         {
           qualityProfileId,
           profileName: qualityProfile.name,
           totalTorrents: torrents.length,
+          preferredQualities,
+          preferredSources,
         }
       );
-      return torrents[0];
+      return null; // STRICT: Don't fallback to first torrent
     }
 
     // Sort candidates by priority:

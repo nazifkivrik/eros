@@ -24,6 +24,7 @@ import torrentsRoutes from "./modules/torrents/torrents.routes.js";
 import torrentSearchRoutes from "./modules/torrent-search/torrent-search.routes.js";
 import logsRoutes from "./modules/logs/logs.routes.js";
 import settingsRoutes from "./modules/settings/settings.routes.js";
+import dashboardRoutes from "./modules/dashboard/dashboard.routes.js";
 
 export async function buildApp() {
   const app = Fastify({
@@ -73,6 +74,7 @@ export async function buildApp() {
   await app.register(torrentSearchRoutes, { prefix: "/api/torrent-search" });
   await app.register(logsRoutes, { prefix: "/api/logs" });
   await app.register(settingsRoutes, { prefix: "/api/settings" });
+  await app.register(dashboardRoutes, { prefix: "/api/dashboard" });
 
   app.get("/health", async () => ({ status: "ok" }));
 

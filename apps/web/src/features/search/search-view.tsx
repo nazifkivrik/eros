@@ -3,7 +3,16 @@
 import Image from "next/image";
 import { useState, useRef, useEffect } from "react";
 import { useSearch } from "./hooks/use-search";
-import { Search, Heart } from "lucide-react";
+import {
+  Search,
+  Heart,
+  Sparkles,
+  Film,
+  Users,
+  Building2,
+  X,
+  Loader2,
+} from "lucide-react";
 import { PerformerDetailDialog } from "@/components/dialogs/PerformerDetailDialog";
 import { StudioDetailDialog } from "@/components/dialogs/StudioDetailDialog";
 import { SceneDetailDialog } from "@/components/dialogs/SceneDetailDialog";
@@ -14,24 +23,185 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 import type { SubscriptionSettings } from "@repo/shared-types";
+
+/**
+ * Result card skeleton component
+ */
+function ResultCardSkeleton() {
+  return (
+    <Card className="overflow-hidden">
+      <Skeleton className="aspect-[2/3] w-full" />
+      <CardContent className="p-3 space-y-2">
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-3 w-1/2" />
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Search result card component
+ */
+function SearchResultCard({
+  result,
+  onDetailsClick,
+  onSubscribeClick,
+}: {
+  result: any;
+  onDetailsClick: (result: any) => void;
+  onSubscribeClick: (result: any) => void;
+}) {
+  const getImageUrl = (item: any): string | null => {
+    if (item.poster) return item.poster;
+    if (item.thumbnail) return item.thumbnail;
+    if (item.images && item.images.length > 0) {
+      return item.images[0].url;
+    }
+    return null;
+  };
+
+  const getTypeIcon = () => {
+    switch (result.type) {
+      case "performer":
+        return <Users className="h-3 w-3" />;
+      case "studio":
+        return <Building2 className="h-3 w-3" />;
+      case "scene":
+        return <Film className="h-3 w-3" />;
+      default:
+        return null;
+    }
+  };
+
+  const getTypeColor = () => {
+    switch (result.type) {
+      case "performer":
+        return "bg-purple-500/20 text-purple-700 dark:text-purple-300 border-purple-500/30";
+      case "studio":
+        return "bg-blue-500/20 text-blue-700 dark:text-blue-300 border-blue-500/30";
+      case "scene":
+        return "bg-orange-500/20 text-orange-700 dark:text-orange-300 border-orange-500/30";
+      default:
+        return "";
+    }
+  };
+
+  return (
+    <div className="group relative">
+      <Card
+        className="cursor-pointer overflow-hidden transition-all duration-300 hover:shadow-2xl hover:scale-[1.02] border-2 hover:border-primary/50"
+        onClick={() => onDetailsClick(result)}
+      >
+        {/* Image */}
+        <div className="aspect-[2/3] bg-gradient-to-br from-muted to-muted/50 relative overflow-hidden">
+          {getImageUrl(result) ? (
+            <Image
+              src={getImageUrl(result)!}
+              alt={result.name || result.title}
+              fill
+              sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, 20vw"
+              className="object-cover transition-transform duration-500 group-hover:scale-110"
+              unoptimized
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-muted/50 to-muted">
+              <Search className="h-12 w-12 text-muted-foreground/30" />
+            </div>
+          )}
+
+          {/* Type badge */}
+          <Badge
+            className={cn(
+              "absolute top-2 left-2 capitalize border backdrop-blur-sm",
+              getTypeColor()
+            )}
+          >
+            {getTypeIcon()}
+            <span className="ml-1">{result.type}</span>
+          </Badge>
+
+          {/* Hover overlay */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+        </div>
+
+        {/* Info */}
+        <CardContent className="p-4 space-y-2">
+          <h3 className="font-semibold line-clamp-2 text-base group-hover:text-primary transition-colors">
+            {result.name || result.title}
+          </h3>
+          {result.disambiguation && (
+            <p className="text-xs text-muted-foreground line-clamp-1">
+              {result.disambiguation}
+            </p>
+          )}
+          {result.date && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1">
+              <Film className="h-3 w-3" />
+              {new Date(result.date).toLocaleDateString()}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Subscribe button - shows on hover */}
+      <Button
+        size="icon"
+        onClick={(e) => {
+          e.stopPropagation();
+          onSubscribeClick(result);
+        }}
+        className="absolute top-4 right-4 rounded-full opacity-0 group-hover:opacity-100 transition-all duration-300 shadow-lg hover:scale-110 hover:bg-pink-500 hover:text-white bg-white"
+        title="Subscribe"
+      >
+        <Heart className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Empty state component
+ */
+function EmptyState({
+  icon,
+  title,
+  description,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center py-20 px-4">
+      <div className="relative">
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-pink-500/20 rounded-full blur-3xl" />
+        <div className="relative p-6 rounded-full bg-gradient-to-br from-muted/50 to-muted">
+          {icon}
+        </div>
+      </div>
+      <h3 className="text-xl font-semibold mt-6 mb-2">{title}</h3>
+      <p className="text-muted-foreground text-center max-w-md">{description}</p>
+    </div>
+  );
+}
 
 export function SearchView() {
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"all" | "performers" | "studios" | "scenes">("all");
   const [page, setPage] = useState(1);
-  const limit = 20; // Fixed limit per page
+  const limit = 20;
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
-  // Accumulated results for infinite scroll
   const [accumulatedResults, setAccumulatedResults] = useState<{
     performers: any[];
     studios: any[];
     scenes: any[];
   }>({ performers: [], studios: [], scenes: [] });
 
-  // Dialog state
   const [detailDialogState, setDetailDialogState] = useState<{
     type: "performer" | "studio" | "scene" | null;
     id: string | null;
@@ -46,22 +216,18 @@ export function SearchView() {
 
   const { data, isLoading, isFetching, error } = useSearch(query, limit, page);
 
-  // Reset page and accumulated results when query changes
   useEffect(() => {
     setPage(1);
     setAccumulatedResults({ performers: [], studios: [], scenes: [] });
   }, [query]);
 
-  // Append new results to accumulated results
   useEffect(() => {
     if (data && !isLoading) {
       setAccumulatedResults((prev) => {
-        // If page is 1, replace results (new search)
         if (page === 1) {
           return data;
         }
 
-        // Deduplicate by ID to prevent duplicates
         const newPerformers = data.performers.filter(
           (p: any) => !prev.performers.some((existing: any) => existing.id === p.id)
         );
@@ -72,19 +238,10 @@ export function SearchView() {
           (s: any) => !prev.scenes.some((existing: any) => existing.id === s.id)
         );
 
-        // Only append if we have new results
         if (newPerformers.length === 0 && newStudios.length === 0 && newScenes.length === 0) {
-          console.log('[Infinite Scroll] No new unique results to append');
           return prev;
         }
 
-        console.log('[Infinite Scroll] Appending new results:', {
-          newPerformers: newPerformers.length,
-          newStudios: newStudios.length,
-          newScenes: newScenes.length
-        });
-
-        // Otherwise append new unique results
         return {
           performers: [...prev.performers, ...newPerformers],
           studios: [...prev.studios, ...newStudios],
@@ -94,42 +251,17 @@ export function SearchView() {
     }
   }, [data, page, isLoading]);
 
-  // Infinite scroll logic
   useEffect(() => {
     const element = loadMoreRef.current;
-    if (!element || !query) {
-      console.log('[Infinite Scroll] Observer not set up:', { hasElement: !!element, query });
-      return;
-    }
-
-    console.log('[Infinite Scroll] Setting up observer', { page, isFetching });
+    if (!element || !query) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        console.log('[Infinite Scroll] Intersection detected:', {
-          isIntersecting: entries[0].isIntersecting,
-          isFetching,
-          hasData: !!data,
-          page
-        });
-
-        // Only trigger load more if:
-        // 1. Element is intersecting (visible)
-        // 2. Not currently fetching
-        // 3. There is data from current page
         if (entries[0].isIntersecting && !isFetching && data) {
           const currentPageHasResults =
             data.performers.length > 0 || data.studios.length > 0 || data.scenes.length > 0;
 
-          console.log('[Infinite Scroll] Check results:', {
-            currentPageHasResults,
-            performers: data.performers.length,
-            studios: data.studios.length,
-            scenes: data.scenes.length
-          });
-
           if (currentPageHasResults) {
-            console.log('[Infinite Scroll] Loading next page:', page + 1);
             setPage((prev) => prev + 1);
           }
         }
@@ -138,18 +270,14 @@ export function SearchView() {
     );
 
     observer.observe(element);
-
-    return () => {
-      console.log('[Infinite Scroll] Disconnecting observer');
-      observer.disconnect();
-    };
+    return () => observer.disconnect();
   }, [data, isFetching, query]);
 
   const tabs = [
-    { id: "all" as const, label: "All", count: accumulatedResults.performers.length + accumulatedResults.studios.length + accumulatedResults.scenes.length },
-    { id: "performers" as const, label: "Performers", count: accumulatedResults.performers.length },
-    { id: "studios" as const, label: "Studios", count: accumulatedResults.studios.length },
-    { id: "scenes" as const, label: "Scenes", count: accumulatedResults.scenes.length },
+    { id: "all" as const, label: "All", count: accumulatedResults.performers.length + accumulatedResults.studios.length + accumulatedResults.scenes.length, icon: Sparkles },
+    { id: "performers" as const, label: "Performers", count: accumulatedResults.performers.length, icon: Users },
+    { id: "studios" as const, label: "Studios", count: accumulatedResults.studios.length, icon: Building2 },
+    { id: "scenes" as const, label: "Scenes", count: accumulatedResults.scenes.length, icon: Film },
   ];
 
   const getResultsForTab = () => {
@@ -171,20 +299,6 @@ export function SearchView() {
 
   const results = getResultsForTab();
 
-  // Helper to get the best image URL from TPDB data
-  const getImageUrl = (result: any): string | null => {
-    // For performers and scenes, prefer poster/thumbnail from TPDB
-    if (result.poster) return result.poster;
-    if (result.thumbnail) return result.thumbnail;
-
-    // Fallback to images array
-    if (result.images && result.images.length > 0) {
-      return result.images[0].url;
-    }
-
-    return null;
-  };
-
   const handleDetailsClick = (result: any) => {
     setDetailDialogState({
       type: result.type,
@@ -202,10 +316,7 @@ export function SearchView() {
   };
 
   const handleSubscribeFromDetail = (entity: any) => {
-    // Close detail dialog
     setDetailDialogState({ type: null, id: null });
-
-    // Open subscribe dialog
     setSubscribeEntity({
       id: entity.id,
       name: entity.name,
@@ -218,7 +329,6 @@ export function SearchView() {
     if (!subscribeEntity) return;
 
     try {
-      // Make API call based on entity type
       if (subscribeEntity.type === "performer") {
         await apiClient.subscribeToPerformer(subscribeEntity.id, settings);
       } else if (subscribeEntity.type === "studio") {
@@ -227,10 +337,7 @@ export function SearchView() {
         await apiClient.subscribeToScene(subscribeEntity.id, settings);
       }
 
-      // Close dialog
       setSubscribeEntity(null);
-
-      // Show success message (you can add a toast notification here)
       alert(`Successfully subscribed to ${subscribeEntity.name || subscribeEntity.title}`);
     } catch (error) {
       console.error("Subscription error:", error);
@@ -238,156 +345,148 @@ export function SearchView() {
     }
   };
 
+  const clearSearch = () => {
+    setQuery("");
+  };
+
   return (
     <div className="space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-4xl font-bold mb-2">Search</h1>
-        <p className="text-muted-foreground">
-          Search for performers, studios, and scenes
-        </p>
-      </div>
-
-      {/* Search Bar */}
+      {/* Header with gradient */}
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground pointer-events-none" />
-        <Input
-          type="text"
-          placeholder="Search for performers, studios, and scenes..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="pl-10"
-        />
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-pink-500/10 rounded-3xl blur-3xl" />
+        <div className="relative">
+          <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
+            Search
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Discover performers, studios, and scenes
+          </p>
+        </div>
       </div>
 
-      {/* Tabs */}
+      {/* Search Bar with glow effect */}
+      <div className="relative">
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-pink-500/20 rounded-xl blur-xl opacity-0 peer-focus-within:opacity-100 transition-opacity" />
+        <div className="relative">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground pointer-events-none" />
+          <Input
+            type="text"
+            placeholder="Search for performers, studios, and scenes..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="pl-12 pr-10 h-12 text-base border-2 focus:border-primary/50 focus:ring-0 transition-colors"
+          />
+          {query && (
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={clearSearch}
+              className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 hover:bg-muted"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Tabs with icons and badges */}
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
-        <TabsList className="grid w-full max-w-md grid-cols-4">
-          {tabs.map((tab) => (
-            <TabsTrigger key={tab.id} value={tab.id}>
-              {tab.label}
-              {query && tab.count > 0 && (
-                <Badge variant="secondary" className="ml-2">
-                  {tab.count}
-                </Badge>
-              )}
-            </TabsTrigger>
-          ))}
+        <TabsList className="grid w-full max-w-2xl grid-cols-4 h-12 bg-muted/50 p-1">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <TabsTrigger
+                key={tab.id}
+                value={tab.id}
+                className="relative data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all"
+              >
+                <Icon className="h-4 w-4 mr-2" />
+                <span className="hidden sm:inline">{tab.label}</span>
+                {query && tab.count > 0 && (
+                  <Badge
+                    variant="secondary"
+                    className="ml-auto bg-primary/10 text-primary hover:bg-primary/20"
+                  >
+                    {tab.count}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            );
+          })}
         </TabsList>
       </Tabs>
 
       {/* Results */}
-      <div className="space-y-4">
-          {isLoading && (
-            <div className="text-center py-12">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              <p className="mt-2 text-muted-foreground">Searching...</p>
-            </div>
-          )}
+      <div className="space-y-6">
+        {/* Loading state - initial */}
+        {isLoading && page === 1 && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+            {Array.from({ length: 10 }).map((_, i) => (
+              <ResultCardSkeleton key={i} />
+            ))}
+          </div>
+        )}
 
-          {error && (
-            <div className="text-center py-12">
-              <p className="text-destructive">Error: {(error as Error).message}</p>
-            </div>
-          )}
+        {/* Error state */}
+        {error && (
+          <EmptyState
+            icon={<Search className="h-16 w-16 text-destructive/50" />}
+            title="Search Error"
+            description={`Failed to load results: ${(error as Error).message}`}
+          />
+        )}
 
-          {!isLoading && !error && query && results.length === 0 && (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground">No results found</p>
-            </div>
-          )}
+        {/* Empty state - no query */}
+        {!isLoading && !error && !query && (
+          <EmptyState
+            icon={
+              <div className="relative">
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-500/30 via-purple-500/30 to-pink-500/30 rounded-full blur-2xl animate-pulse" />
+                <Sparkles className="relative h-20 w-20 text-primary" />
+              </div>
+            }
+            title="Start Exploring"
+            description="Search for your favorite performers, studios, or scenes to begin discovering content."
+          />
+        )}
 
-          {!query && (
-            <div className="text-center py-12">
-              <Search className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">
-                Enter a search query to get started
-              </p>
-            </div>
-          )}
+        {/* Empty state - no results */}
+        {!isLoading && !error && query && results.length === 0 && (
+          <EmptyState
+            icon={<Search className="h-16 w-16 text-muted-foreground/30" />}
+            title="No Results Found"
+            description={`We couldn't find any results for "${query}". Try different keywords or check your spelling.`}
+          />
+        )}
 
-          {results.length > 0 && (
+        {/* Results grid */}
+        {results.length > 0 && (
+          <>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
               {results.map((result: any) => (
-                <div
+                <SearchResultCard
                   key={`${result.type}-${result.id}`}
-                  className="group relative"
-                >
-                  <Card
-                    className="cursor-pointer hover:shadow-lg transition-all overflow-hidden"
-                    onClick={() => handleDetailsClick(result)}
-                  >
-                    {/* Image */}
-                    <div className="aspect-[2/3] bg-accent relative overflow-hidden">
-                      {getImageUrl(result) ? (
-                        <Image
-                          src={getImageUrl(result)!}
-                          alt={result.name || result.title}
-                          fill
-                          sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, 20vw"
-                          className="object-cover group-hover:scale-105 transition-transform duration-300"
-                          unoptimized
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                          <Search className="h-12 w-12" />
-                        </div>
-                      )}
-
-                      {/* Type badge */}
-                      <Badge
-                        className="absolute top-2 left-2 capitalize"
-                        variant="secondary"
-                      >
-                        {result.type}
-                      </Badge>
-                    </div>
-
-                    {/* Info */}
-                    <CardContent className="p-3">
-                      <h3 className="font-medium line-clamp-2 mb-1 text-sm">
-                        {result.name || result.title}
-                      </h3>
-                      {result.disambiguation && (
-                        <p className="text-xs text-muted-foreground line-clamp-1">
-                          {result.disambiguation}
-                        </p>
-                      )}
-                      {result.date && (
-                        <p className="text-xs text-muted-foreground">
-                          {new Date(result.date).toLocaleDateString()}
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  {/* Subscribe button - shows on hover */}
-                  <Button
-                    size="icon"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleSubscribeClick(result);
-                    }}
-                    className="absolute top-2 right-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg hover:scale-110"
-                    title="Subscribe"
-                  >
-                    <Heart className="h-4 w-4" />
-                  </Button>
-                </div>
+                  result={result}
+                  onDetailsClick={handleDetailsClick}
+                  onSubscribeClick={handleSubscribeClick}
+                />
               ))}
             </div>
-          )}
 
-          {/* Load more trigger - always rendered for observer */}
-          <div
-            ref={loadMoreRef}
-            className="h-20 flex items-center justify-center"
-            style={{ visibility: results.length > 0 ? 'visible' : 'hidden' }}
-          >
-            {isFetching && page > 1 && (
-              <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-            )}
-          </div>
+            {/* Loading more indicator */}
+            <div
+              ref={loadMoreRef}
+              className="h-20 flex items-center justify-center"
+            >
+              {isFetching && page > 1 && (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span>Loading more results...</span>
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Detail Dialogs */}

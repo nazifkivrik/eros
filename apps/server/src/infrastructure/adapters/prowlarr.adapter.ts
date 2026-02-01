@@ -55,10 +55,22 @@ export class ProwlarrAdapter implements IIndexer {
   /**
    * Extract infoHash from magnet link
    * Magnet links have format: magnet:?xt=urn:btih:<INFOHASH>&dn=...
+   * Handles base32 (32 chars) and hex (40 chars) infoHashes
    */
   private extractInfoHashFromMagnet(magnetUrl: string): string | null {
-    const match = magnetUrl.match(/magnet:\?xt=urn:btih:([a-fA-F0-9]{40})/);
-    return match ? match[1].toUpperCase() : null;
+    // Try 40-char hex first (most common)
+    let match = magnetUrl.match(/magnet:\?xt=urn:btih:([a-fA-F0-9]{40})/i);
+    if (match) {
+      return match[1].toUpperCase();
+    }
+
+    // Try base32 (32 chars, upper case, A-Z2-7)
+    match = magnetUrl.match(/magnet:\?xt=urn:btih:([A-Z2-7]{32})/i);
+    if (match) {
+      return match[1].toUpperCase();
+    }
+
+    return null;
   }
 
   private async request<T>(
@@ -112,35 +124,47 @@ export class ProwlarrAdapter implements IIndexer {
     // Map Prowlarr results to standard interface format
     return results.map((result) => {
       // Prowlarr returns:
-      // - guid: actual magnet link (magnet:?xt=urn:btih:...)
+      // - guid: identifier (could be magnet link, URL, or other identifier)
       // - magnetUrl: Prowlarr download proxy URL (http://localhost:9696/...)
-      // We need to extract infoHash from guid, not magnetUrl!
-      let actualInfoHash = result.guid; // fallback to guid
-      let actualMagnetUrl = result.guid; // actual magnet link for downloading
+      // We need to extract infoHash from wherever the magnet link is
+      let actualInfoHash: string | null = null;
+      let actualMagnetUrl: string | null = null;
 
-      // Try to extract infoHash from guid (where the actual magnet link is)
+      // Try to extract infoHash from guid (if it's a magnet link)
       if (result.guid && result.guid.startsWith("magnet:")) {
         const extracted = this.extractInfoHashFromMagnet(result.guid);
         if (extracted) {
           actualInfoHash = extracted;
+          actualMagnetUrl = result.guid;
           this.logger.debug({
             guid: result.guid.substring(0, 50),
             extractedInfoHash: extracted,
             title: result.title,
           }, "Extracted infoHash from guid (magnet link)");
-        } else {
-          this.logger.warn({
-            guid: result.guid.substring(0, 100),
-            title: result.title,
-          }, "Could not extract infoHash from guid");
         }
-      } else if (result.magnetUrl && result.magnetUrl.startsWith("magnet:")) {
-        // Fallback: try to extract from magnetUrl if it's a magnet link
+      }
+
+      // Fallback: try to extract from magnetUrl if it's a magnet link
+      if (!actualInfoHash && result.magnetUrl && result.magnetUrl.startsWith("magnet:")) {
         const extracted = this.extractInfoHashFromMagnet(result.magnetUrl);
         if (extracted) {
           actualInfoHash = extracted;
           actualMagnetUrl = result.magnetUrl;
+          this.logger.debug({
+            magnetUrl: result.magnetUrl.substring(0, 50),
+            extractedInfoHash: extracted,
+            title: result.title,
+          }, "Extracted infoHash from magnetUrl");
         }
+      }
+
+      // If no magnet link found, log warning
+      if (!actualInfoHash) {
+        this.logger.warn({
+          guid: result.guid?.substring(0, 100),
+          magnetUrl: result.magnetUrl?.substring(0, 100),
+          title: result.title,
+        }, "No valid magnet link or infoHash found in Prowlarr result");
       }
 
       return {
@@ -152,9 +176,9 @@ export class ProwlarrAdapter implements IIndexer {
         indexerId: result.indexerId,
         indexer: result.indexer,
         downloadUrl: result.downloadUrl,
-        magnetUrl: actualMagnetUrl, // Use actual magnet link for downloading
+        magnetUrl: actualMagnetUrl || undefined,
         infoUrl: result.infoUrl,
-        infoHash: actualInfoHash, // Use extracted infoHash
+        infoHash: actualInfoHash || undefined,
         publishDate: result.publishDate,
         protocol: result.protocol,
         categories: result.categories,

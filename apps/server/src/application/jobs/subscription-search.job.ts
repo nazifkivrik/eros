@@ -14,9 +14,11 @@ import type { TorrentSearchService } from "../../application/services/torrent-se
 import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
 import type { FileManagerService } from "../../application/services/file-management/file-manager.service.js";
 import type { SettingsService } from "../../application/services/settings.service.js";
+import type { DownloadQueueService } from "../../application/services/download-queue.service.js";
+import type { CrossEncoderService } from "../../application/services/ai-matching/cross-encoder.service.js";
 import type { Database } from "@repo/database";
 import { eq, and } from "drizzle-orm";
-import { subscriptions, performers, studios, scenes, downloadQueue, performersScenes } from "@repo/database";
+import { subscriptions, performers, studios, scenes, downloadQueue, performersScenes, sceneFiles } from "@repo/database";
 import { nanoid } from "nanoid";
 
 const MAX_TORRENTS_PER_RUN = 50;
@@ -32,6 +34,8 @@ export class SubscriptionSearchJob extends BaseJob {
   private torrentClient: ITorrentClient | undefined;
   private fileManager: FileManagerService;
   private settingsService: SettingsService;
+  private downloadQueueService: DownloadQueueService;
+  private crossEncoderService: CrossEncoderService | undefined;
   private db: Database;
 
   constructor(deps: {
@@ -44,6 +48,8 @@ export class SubscriptionSearchJob extends BaseJob {
     torrentClient: ITorrentClient | undefined;
     fileManager: FileManagerService;
     settingsService: SettingsService;
+    downloadQueueService: DownloadQueueService;
+    crossEncoderService: CrossEncoderService | undefined;
     db: Database;
   }) {
     super(deps);
@@ -54,6 +60,8 @@ export class SubscriptionSearchJob extends BaseJob {
     this.torrentClient = deps.torrentClient;
     this.fileManager = deps.fileManager;
     this.settingsService = deps.settingsService;
+    this.downloadQueueService = deps.downloadQueueService;
+    this.crossEncoderService = deps.crossEncoderService;
     this.db = deps.db;
   }
 
@@ -62,6 +70,13 @@ export class SubscriptionSearchJob extends BaseJob {
     this.logger.info("Starting subscription search job");
 
     try {
+      // Ensure AI model is loaded before starting search if Cross-Encoder is enabled
+      const settings = await this.settingsService.getSettings();
+      if (settings.ai.useCrossEncoder && this.crossEncoderService) {
+        this.emitProgress("Ensuring AI model is ready...", 0, 0);
+        await this.crossEncoderService.initialize();
+        this.logger.info("AI model is ready for matching");
+      }
       // Get all active subscriptions
       const activeSubscriptions = await this.getActiveSubscriptions();
 
@@ -98,7 +113,11 @@ export class SubscriptionSearchJob extends BaseJob {
           foundIds.forEach(id => foundSceneIds.add(id));
         } catch (error) {
           this.logger.error(
-            { error, subscriptionId: subscription.id },
+            {
+              error: error instanceof Error ? { message: error.message, stack: error.stack } : String(error),
+              subscriptionId: subscription.id,
+              performerId: subscription.entityId,
+            },
             "Failed to process performer subscription"
           );
         }
@@ -116,7 +135,11 @@ export class SubscriptionSearchJob extends BaseJob {
           foundIds.forEach(id => foundSceneIds.add(id));
         } catch (error) {
           this.logger.error(
-            { error, subscriptionId: subscription.id },
+            {
+              error: error instanceof Error ? { message: error.message, stack: error.stack } : String(error),
+              subscriptionId: subscription.id,
+              studioId: subscription.entityId,
+            },
             "Failed to process studio subscription"
           );
         }
@@ -140,6 +163,9 @@ export class SubscriptionSearchJob extends BaseJob {
       );
 
       this.logger.info("Subscription search job completed");
+
+      // Retry failed torrents with longer interval (30 min instead of 5)
+      await this.retryFailedTorrents();
     } catch (error) {
       this.emitFailed(
         `Job failed: ${error instanceof Error ? error.message : "Unknown error"}`
@@ -405,13 +431,9 @@ export class SubscriptionSearchJob extends BaseJob {
     subscription: any,
     entityName: string
   ): Promise<void> {
-    // Check if torrent already exists in queue
-    const existing = await this.db.query.downloadQueue.findFirst({
-      where: eq(downloadQueue.torrentHash, torrent.infoHash),
-    });
-
-    if (existing) {
-      this.logger.info(`Torrent already in queue, skipping: ${torrent.title}`);
+    // Check if subscription is still active before adding
+    if (!subscription.isSubscribed) {
+      this.logger.info(`Subscription ${subscription.id} is unsubscribed, skipping queue`);
       return;
     }
 
@@ -419,6 +441,47 @@ export class SubscriptionSearchJob extends BaseJob {
     let sceneId = torrent.sceneId;
     if (!sceneId) {
       sceneId = await this.createPlaceholderScene(torrent, entityName, subscription);
+    }
+
+    // For scene subscriptions, verify the scene subscription is still active
+    if (subscription.entityType === "scene") {
+      const currentSub = await this.subscriptionsRepository.findById(subscription.id);
+      if (!currentSub || !currentSub.isSubscribed) {
+        this.logger.info(`Scene subscription ${subscription.id} is unsubscribed, skipping queue`);
+        return;
+      }
+    }
+
+    // Check if scene already has files (already downloaded)
+    const existingFiles = await this.db.query.sceneFiles.findFirst({
+      where: eq(sceneFiles.sceneId, sceneId),
+    });
+
+    if (existingFiles) {
+      this.logger.info(`Scene already has files, skipping: ${torrent.title}`);
+      return;
+    }
+
+    // Check by scene ID (more comprehensive than hash)
+    const existingByScene = await this.db.query.downloadQueue.findFirst({
+      where: eq(downloadQueue.sceneId, sceneId),
+    });
+
+    if (existingByScene) {
+      this.logger.info(`Scene already in queue, skipping: ${torrent.title}`);
+      return;
+    }
+
+    // Also check by torrent hash for torrents that don't have sceneId yet
+    if (torrent.infoHash) {
+      const existingByHash = await this.db.query.downloadQueue.findFirst({
+        where: eq(downloadQueue.torrentHash, torrent.infoHash),
+      });
+
+      if (existingByHash) {
+        this.logger.info(`Torrent already in queue, skipping: ${torrent.title}`);
+        return;
+      }
     }
 
     // Create scene folder
@@ -445,15 +508,31 @@ export class SubscriptionSearchJob extends BaseJob {
           const downloadPath = settings.general.incompletePath || "/media/incomplete";
 
           let magnetLink: string | undefined;
+          let torrentUrl: string | undefined;
+
+          // Priority 1: Use infoHash to create magnet link (most reliable)
           if (torrent.infoHash) {
             magnetLink = `magnet:?xt=urn:btih:${torrent.infoHash}&dn=${encodeURIComponent(torrent.title)}`;
-          } else if (torrent.downloadUrl?.startsWith("magnet:")) {
+          }
+          // Priority 2: Use downloadUrl if it's already a magnet link
+          else if (torrent.downloadUrl?.startsWith("magnet:")) {
             magnetLink = torrent.downloadUrl;
           }
+          // Priority 3: Use downloadUrl as torrent URL (for .torrent files)
+          else if (torrent.downloadUrl) {
+            torrentUrl = torrent.downloadUrl;
+          }
+
+          this.logger.info({
+            title: torrent.title,
+            hasMagnetLink: !!magnetLink,
+            hasTorrentUrl: !!torrentUrl,
+            hasInfoHash: !!torrent.infoHash,
+          }, "Attempting to add torrent to client");
 
           qbitHash = await this.torrentClient.addTorrentAndGetHash({
             magnetLinks: magnetLink ? [magnetLink] : undefined,
-            urls: magnetLink ? undefined : (torrent.downloadUrl ? [torrent.downloadUrl] : undefined),
+            urls: torrentUrl ? [torrentUrl] : undefined,
             savePath: downloadPath,
             category: "eros",
             paused: false,
@@ -466,12 +545,19 @@ export class SubscriptionSearchJob extends BaseJob {
             this.logger.info(`Added to qBittorrent: ${torrent.title} (qbitHash: ${qbitHash})`);
           } else {
             dbStatus = "add_failed";
-            this.logger.error(`Failed to add to qBittorrent: ${torrent.title}`);
+            this.logger.error(`Failed to add to qBittorrent: ${torrent.title} (addTorrentAndGetHash returned null)`);
           }
         } catch (error) {
           dbStatus = "add_failed";
           this.logger.error({ error }, `Failed to add to qBittorrent: ${torrent.title}`);
         }
+      } else {
+        this.logger.warn({
+          title: torrent.title,
+          qbittorrentEnabled: qbittorrentConfig.enabled,
+          hasDownloadUrl: !!torrent.downloadUrl,
+          hasInfoHash: !!torrent.infoHash,
+        }, "Skipping torrent client addition - qBittorrent disabled or no magnet/infoHash available");
       }
     }
 
@@ -577,5 +663,68 @@ export class SubscriptionSearchJob extends BaseJob {
 
     this.logger.info(`Created placeholder scene: ${finalTitle}`);
     return sceneId;
+  }
+
+  /**
+   * Retry failed torrents with longer interval (30 min)
+   * Called at the end of subscription search job
+   * @private
+   */
+  private async retryFailedTorrents(): Promise<void> {
+    const maxAttempts = 5;
+    const retryAfterMinutes = 30; // Longer interval for subscription job (runs every 6 hours)
+
+    const failedItems = await this.downloadQueueRepository.findAddFailedItems(
+      maxAttempts,
+      retryAfterMinutes
+    );
+
+    this.logger.info({ count: failedItems.length }, "Found failed torrents to retry");
+
+    let successCount = 0;
+    let permanentFailures = 0;
+
+    for (const item of failedItems) {
+      const shouldRetry = (item.addToClientAttempts || 0) < maxAttempts;
+
+      if (!shouldRetry) {
+        this.logger.warn(
+          { id: item.id, attempts: item.addToClientAttempts },
+          "Max retry attempts reached, giving up"
+        );
+        permanentFailures++;
+        continue;
+      }
+
+      // Check isSubscribed before retrying
+      const scene = await this.db.query.scenes.findFirst({
+        where: eq(scenes.id, item.sceneId),
+      });
+
+      if (!scene || !scene.isSubscribed) {
+        this.logger.info({ sceneId: item.sceneId }, "Scene unsubscribed, skipping retry");
+        continue;
+      }
+
+      // Reconstruct magnet link if torrentHash is available
+      const magnetLink = item.torrentHash
+        ? `magnet:?xt=urn:btih:${item.torrentHash}&dn=${encodeURIComponent(item.title)}`
+        : undefined;
+
+      const success = await this.downloadQueueService.retrySingleTorrent(item.id);
+
+      if (success.success) {
+        successCount++;
+      }
+    }
+
+    this.logger.info(
+      {
+        total: failedItems.length,
+        succeeded: successCount,
+        permanentFailures,
+      },
+      "Retry operation completed"
+    );
   }
 }

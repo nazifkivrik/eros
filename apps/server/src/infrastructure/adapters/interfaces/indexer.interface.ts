@@ -23,7 +23,7 @@ export interface TorrentSearchResult {
   downloadUrl: string;
   magnetUrl?: string;
   infoUrl?: string;
-  infoHash: string;
+  infoHash?: string; // Optional because some results may not have magnet links
   publishDate?: string;
   protocol: "torrent" | "usenet";
   categories: number[];

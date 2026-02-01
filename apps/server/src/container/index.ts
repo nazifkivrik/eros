@@ -59,6 +59,7 @@ import { SearchService } from "../application/services/search.service.js";
 import { JobsService } from "../application/services/jobs.service.js";
 import { SchedulerService } from "../application/services/scheduler.service.js";
 import { TorrentCompletionHandlerService } from "../application/services/torrent-completion/torrent-completion.handler.service.js";
+import { DashboardService } from "../application/services/dashboard.service.js";
 
 // Clean Architecture - Jobs
 import { CleanupJob } from "../application/jobs/cleanup.job.js";
@@ -79,6 +80,7 @@ import { DownloadQueueController } from "../interfaces/controllers/download-queu
 import { SearchController } from "../interfaces/controllers/search.controller.js";
 import { JobsController } from "../interfaces/controllers/jobs.controller.js";
 import { TorrentSearchController } from "../interfaces/controllers/torrent-search.controller.js";
+import { DashboardController } from "../interfaces/controllers/dashboard.controller.js";
 
 /**
  * Configuration for external service integrations
@@ -188,6 +190,7 @@ export function buildContainer(config: ContainerConfig) {
     jobsService: asClass(JobsService).scoped(),
     schedulerService: asClass(SchedulerService).scoped(),
     torrentCompletionService: asClass(TorrentCompletionHandlerService).scoped(),
+    dashboardService: asClass(DashboardService).scoped(),
   });
 
   // Register Jobs
@@ -212,6 +215,7 @@ export function buildContainer(config: ContainerConfig) {
     downloadQueueController: asClass(DownloadQueueController).scoped(),
     searchController: asClass(SearchController).scoped(),
     jobsController: asClass(JobsController).scoped(),
+    dashboardController: asClass(DashboardController).scoped(),
   });
 
   // === External Service Adapters ===

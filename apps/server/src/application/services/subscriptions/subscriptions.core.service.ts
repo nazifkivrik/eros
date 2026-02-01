@@ -170,6 +170,7 @@ export class SubscriptionsCoreService {
 
   /**
    * Update subscription
+   * When unsubscribing from performer/studio, also unsubscribe related scene subscriptions
    */
   async update(id: string, dto: UpdateSubscriptionDTO) {
     this.logger.info({ subscriptionId: id }, "Updating subscription");
@@ -179,6 +180,9 @@ export class SubscriptionsCoreService {
     if (!exists) {
       throw new Error("Subscription not found");
     }
+
+    // Get current subscription before update
+    const current = await this.subscriptionsRepository.findById(id);
 
     // Build update data (only include provided fields)
     const updateData: any = {
@@ -206,6 +210,11 @@ export class SubscriptionsCoreService {
 
     const updated = await this.subscriptionsRepository.update(id, updateData);
     this.logger.info({ subscriptionId: id }, "Subscription updated");
+
+    // If unsubscribing from performer/studio, cascade to scene subscriptions
+    if (dto.isSubscribed === false && (current.entityType === "performer" || current.entityType === "studio")) {
+      await this.cascadeUnsubscribeToScenes(current);
+    }
 
     return updated;
   }

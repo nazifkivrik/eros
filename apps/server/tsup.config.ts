@@ -1,7 +1,8 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/**/*.ts"],
+  // Use negative patterns to exclude test files
+  entry: ["src/**/*.ts", "!src/**/*.test.ts", "!src/**/*.spec.ts", "!src/**/vitest.config.ts"],
   format: ["esm"],
   dts: false,
   sourcemap: true,
@@ -15,5 +16,19 @@ export default defineConfig({
   esbuildOptions: (options) => {
     // Preserve tsconfig path aliases - tsup handles this natively with tsconfig
     options.preserveSymlinks = true;
+    // Exclude vitest packages from the bundle
+    options.external = [
+      "vitest",
+      "@vitest/*",
+      "vite",
+      "vite/*",
+      "@vitest/runner",
+      "@vitest/runner/*",
+      "@vitest/utils",
+      "@vitest/utils/*",
+      "@vitest/spy",
+      "pathe",
+      "vite/module-runner",
+    ];
   },
 });

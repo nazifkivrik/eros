@@ -70,6 +70,27 @@ export class DownloadQueueRepository {
   }
 
   /**
+   * Find download queue item by scene ID (any status)
+   * Used for comprehensive duplicate checking
+   */
+  async findBySceneId(sceneId: string) {
+    const item = await this.db.query.downloadQueue.findFirst({
+      where: eq(downloadQueue.sceneId, sceneId),
+    });
+    return item || null;
+  }
+
+  /**
+   * Check if scene has any downloaded files
+   */
+  async sceneHasFiles(sceneId: string): Promise<boolean> {
+    const file = await this.db.query.sceneFiles.findFirst({
+      where: (sceneFiles, { eq }) => eq(sceneFiles.sceneId, sceneId),
+    });
+    return !!file;
+  }
+
+  /**
    * Create a new download queue item
    */
   async create(data: typeof downloadQueue.$inferInsert) {

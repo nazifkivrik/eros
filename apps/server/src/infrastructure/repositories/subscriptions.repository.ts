@@ -28,12 +28,13 @@ export class SubscriptionsRepository {
    * Find subscription by entity
    */
   async findByEntity(entityType: "performer" | "studio" | "scene", entityId: string) {
-    return await this._db.query.subscriptions.findFirst({
+    const result = await this._db.query.subscriptions.findFirst({
       where: and(
         eq(subscriptions.entityType, entityType),
         eq(subscriptions.entityId, entityId)
       ),
     });
+    return result ?? null;
   }
 
   /**
@@ -158,9 +159,10 @@ export class SubscriptionsRepository {
    * Find subscription by ID
    */
   async findById(id: string) {
-    return await this._db.query.subscriptions.findFirst({
+    const result = await this._db.query.subscriptions.findFirst({
       where: eq(subscriptions.id, id),
     });
+    return result ?? null;
   }
 
   /**
@@ -257,17 +259,20 @@ export class SubscriptionsRepository {
     // Fetch related entity based on type
     let entity = null;
     if (subscription.entityType === "performer") {
-      entity = await this._db.query.performers.findFirst({
+      const result = await this._db.query.performers.findFirst({
         where: eq(performers.id, subscription.entityId),
       });
+      entity = result ?? null;
     } else if (subscription.entityType === "studio") {
-      entity = await this._db.query.studios.findFirst({
+      const result = await this._db.query.studios.findFirst({
         where: eq(studios.id, subscription.entityId),
       });
+      entity = result ?? null;
     } else if (subscription.entityType === "scene") {
-      entity = await this._db.query.scenes.findFirst({
+      const result = await this._db.query.scenes.findFirst({
         where: eq(scenes.id, subscription.entityId),
       });
+      entity = result ?? null;
     }
 
     // Fetch quality profile
@@ -399,10 +404,11 @@ export class SubscriptionsRepository {
    * Get download queue entry for scene
    */
   async getSceneDownloadQueue(sceneId: string) {
-    return await this._db.query.downloadQueue.findFirst({
+    const result = await this._db.query.downloadQueue.findFirst({
       where: (dq, { eq }) => eq(dq.sceneId, sceneId),
       orderBy: (dq, { desc }) => [desc(dq.addedAt)],
     });
+    return result ?? null;
   }
 
   /**
@@ -519,5 +525,42 @@ export class SubscriptionsRepository {
    */
   async deleteScene(sceneId: string): Promise<void> {
     await this._db.delete(scenes).where(eq(scenes.id, sceneId));
+  }
+
+  /**
+   * Delete all performer-scene relations for a specific performer
+   * Called when deleting a performer subscription to remove junction table entries
+   */
+  async deletePerformerScenes(performerId: string): Promise<void> {
+    await this._db
+      .delete(performersScenes)
+      .where(eq(performersScenes.performerId, performerId));
+  }
+
+  /**
+   * Get all performer IDs for a specific scene from junction table
+   * Used to check if scene has subscribed performers
+   */
+  async getScenePerformerIds(sceneId: string): Promise<string[]> {
+    const relations = await this._db.query.performersScenes.findMany({
+      where: (performersScenes: any, { eq }: any) => eq(performersScenes.sceneId, sceneId),
+    });
+    return relations.map((r: any) => r.performerId);
+  }
+
+  /**
+   * Delete a performer from database
+   * Called when fully removing a performer and all their data
+   */
+  async deletePerformer(performerId: string): Promise<void> {
+    await this._db.delete(performers).where(eq(performers.id, performerId));
+  }
+
+  /**
+   * Delete a studio from database
+   * Called when fully removing a studio and all their data
+   */
+  async deleteStudio(studioId: string): Promise<void> {
+    await this._db.delete(studios).where(eq(studios.id, studioId));
   }
 }

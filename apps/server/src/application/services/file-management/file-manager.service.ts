@@ -33,8 +33,38 @@ export class FileManagerService {
    * Create folder structure for a scene
    * Format: /scenes/{cleaned_title}/
    * Adds random chars only on collision: /scenes/{cleaned_title} rand/
+   *
+   * IMPORTANT: If scene already has files in database, reuses the existing folder
    */
   async createSceneFolder(sceneId: string): Promise<string> {
+    // First, check if this scene already has files in the database
+    // If so, reuse the existing folder to avoid duplicates
+    const existingSceneFile = await this.db.query.sceneFiles.findFirst({
+      where: (sceneFiles, { eq }) => eq(sceneFiles.sceneId, sceneId),
+    });
+
+    if (existingSceneFile) {
+      // Extract folder path from existing file path
+      const { dirname } = await import("path");
+      const existingFolder = dirname(existingSceneFile.filePath);
+
+      // Verify folder still exists on disk
+      const folderExists = await this.checkFolderExists(existingFolder);
+      if (folderExists) {
+        logger.info({
+          sceneId,
+          existingFolder,
+          existingFilePath: existingSceneFile.filePath,
+        }, "[FileManager] Reusing existing scene folder");
+        return existingFolder;
+      } else {
+        logger.warn({
+          sceneId,
+          existingFolder,
+        }, "[FileManager] Existing scene folder not found on disk, creating new one");
+      }
+    }
+
     // Get scene with performers and studios
     const scene = await this.getSceneWithMetadata(sceneId);
 
@@ -44,6 +74,16 @@ export class FileManagerService {
 
     // Sanitize folder name
     const sanitizedTitle = this.sanitizeFilename(scene.title);
+
+    // NEW: Check filesystem for existing folders with same/similar title
+    const existingFolder = await this.findExistingFolderByTitle(sanitizedTitle);
+    if (existingFolder) {
+      logger.info(
+        { sceneId, existingFolder },
+        "[FileManager] Found existing folder on filesystem, reusing it"
+      );
+      return existingFolder;
+    }
 
     // Try base path first
     let folderPath = join(this.scenesPath, sanitizedTitle);
@@ -93,6 +133,49 @@ export class FileManagerService {
       result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return result;
+  }
+
+  /**
+   * Find existing folder on filesystem by scene title
+   * Checks for exact match or match with random suffix pattern
+   * Returns folder path if found, null otherwise
+   */
+  private async findExistingFolderByTitle(title: string): Promise<string | null> {
+    try {
+      const entries = await readdir(this.scenesPath, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+
+        const folderName = entry.name;
+
+        // Check for exact match
+        if (folderName === title) {
+          const fullPath = join(this.scenesPath, folderName);
+          return fullPath;
+        }
+
+        // Check for match with random suffix pattern (title + space + 4 chars)
+        // Pattern: "Scene Title xyz1"
+        if (folderName.startsWith(title) && folderName.length > title.length + 1) {
+          const suffix = folderName.slice(title.length + 1);
+          // Match 4 character alphanumeric suffix (our random suffix pattern)
+          if (/^[a-z0-9]{4}$/i.test(suffix)) {
+            const fullPath = join(this.scenesPath, folderName);
+            logger.debug(
+              { title, folderName, fullPath },
+              "[FileManager] Found folder with matching title and suffix"
+            );
+            return fullPath;
+          }
+        }
+      }
+
+      return null;
+    } catch (error) {
+      logger.warn({ error, title }, "[FileManager] Error scanning filesystem for existing folders");
+      return null;
+    }
   }
 
   /**
@@ -286,11 +369,33 @@ export class FileManagerService {
     // Use createSceneFolder which handles collision detection automatically
     const destinationFolder = await this.createSceneFolder(sceneId);
 
+    logger.info({
+      sceneId,
+      qbitHash,
+      destinationFolder,
+      scenesPath: this.scenesPath,
+    }, "[FileManager] About to call setLocation");
+
+    // Get current torrent properties for debugging
+    const currentProps = await qbittorrent.getTorrentProperties(qbitHash);
+    logger.info({
+      qbitHash,
+      currentSavePath: currentProps.savePath,
+      currentContentPath: currentProps.contentPath,
+      destinationFolder,
+    }, "[FileManager] Current torrent location");
+
     // Use qBittorrent API to move torrent (preserves seeding)
     const success = await qbittorrent.setLocation(qbitHash, destinationFolder);
 
+    logger.info({
+      qbitHash,
+      destinationFolder,
+      success,
+    }, "[FileManager] setLocation result");
+
     if (!success) {
-      throw new Error(`Failed to move torrent ${qbitHash} via qBittorrent API`);
+      throw new Error(`Failed to move torrent ${qbitHash} via qBittorrent API. Destination: ${destinationFolder}, Current save path: ${currentProps.savePath}`);
     }
 
     // Wait for qBittorrent to complete the move (poll for confirmation)

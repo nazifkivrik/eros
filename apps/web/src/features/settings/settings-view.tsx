@@ -103,17 +103,24 @@ export function SettingsView() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="mb-2 text-4xl font-bold">Settings</h1>
-          <p className="text-muted-foreground">
-            Configure your Eros installation
-          </p>
+      <div className="relative">
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-pink-500/10 rounded-3xl blur-3xl" />
+        <div className="relative">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
+                Settings
+              </h1>
+              <p className="text-muted-foreground mt-1">
+                Configure your Eros installation
+              </p>
+            </div>
+            <Button onClick={handleSave} disabled={updateSettings.isPending}>
+              <Save className="mr-2 h-4 w-4" />
+              {updateSettings.isPending ? "Saving..." : "Save Settings"}
+            </Button>
+          </div>
         </div>
-        <Button onClick={handleSave} disabled={updateSettings.isPending}>
-          <Save className="mr-2 h-4 w-4" />
-          {updateSettings.isPending ? "Saving..." : "Save Settings"}
-        </Button>
       </div>
 
       {/* Settings Tabs */}

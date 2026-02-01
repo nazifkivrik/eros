@@ -120,14 +120,16 @@ export class DownloadQueueService {
       throw new Error("Scene not found");
     }
 
-    // Business rule: Cannot add same scene if already queued
-    const existing = await this.downloadQueueRepository.findBySceneIdAndStatus(
-      dto.sceneId,
-      "queued"
-    );
+    // Business rule: Cannot add same scene if already in queue (any status)
+    const existingInQueue = await this.downloadQueueRepository.findBySceneId(dto.sceneId);
+    if (existingInQueue) {
+      throw new Error(`Scene already in download queue with status: ${existingInQueue.status}`);
+    }
 
-    if (existing) {
-      throw new Error("Scene already in download queue");
+    // Business rule: Cannot add if scene already has downloaded files
+    const hasFiles = await this.downloadQueueRepository.sceneHasFiles(dto.sceneId);
+    if (hasFiles) {
+      throw new Error("Scene already downloaded");
     }
 
     const id = nanoid();
@@ -348,7 +350,7 @@ export class DownloadQueueService {
             : null,
         downloadSpeed: torrent ? (torrent.dlspeed as number | undefined) ?? null : null,
         uploadSpeed: torrent ? (torrent.upspeed as number | undefined) ?? null : null,
-        eta: torrent ? (torrent.eta as number | undefined) ?? null : null,
+        eta: this.calculateEta(torrent, item),
         ratio: torrent ? (torrent.ratio as number | undefined) ?? null : null,
         size: item.size,
         seeders: (torrent?.num_seeds as number | undefined) || item.seeders,
@@ -488,14 +490,16 @@ export class DownloadQueueService {
         continue;
       }
 
-      // Reconstruct magnet link if torrentHash is available
-      const magnetLink = item.torrentHash
+      // Reconstruct magnet link if torrentHash is a valid hash (40 char hex)
+      // Don't create magnet link if torrentHash is a URL
+      const isValidHash = item.torrentHash && /^[a-fA-F0-9]{40}$/.test(item.torrentHash);
+      const magnetLink = isValidHash
         ? `magnet:?xt=urn:btih:${item.torrentHash}&dn=${encodeURIComponent(item.title)}`
         : undefined;
 
       const success = await this.tryAddToQbittorrent(item.id, {
         magnetLink,
-        torrentHash: item.torrentHash || undefined,
+        torrentHash: isValidHash ? item.torrentHash : undefined,
       });
 
       if (success) {
@@ -536,13 +540,16 @@ export class DownloadQueueService {
       throw new Error("Torrent is not in add_failed status");
     }
 
-    const magnetLink = item.torrentHash
+    // Only create magnet link if torrentHash is a valid hash (40 char hex)
+    // Don't create magnet link if torrentHash is a URL
+    const isValidHash = item.torrentHash && /^[a-fA-F0-9]{40}$/.test(item.torrentHash);
+    const magnetLink = isValidHash
       ? `magnet:?xt=urn:btih:${item.torrentHash}&dn=${encodeURIComponent(item.title)}`
       : undefined;
 
     const success = await this.tryAddToQbittorrent(id, {
       magnetLink,
-      torrentHash: item.torrentHash || undefined,
+      torrentHash: isValidHash ? item.torrentHash : undefined,
     });
 
     return {
@@ -550,5 +557,48 @@ export class DownloadQueueService {
       success,
       status: success ? ("downloading" as const) : ("add_failed" as const),
     };
+  }
+
+  /**
+   * Calculate ETA from torrent data
+   * Falls back to manual calculation if qBittorrent ETA is invalid
+   * @private
+   */
+  private calculateEta(
+    torrent: Record<string, unknown> | undefined,
+    queueItem: { size: number; status: string }
+  ): number | null {
+    // If completed, no ETA needed
+    if (queueItem.status === "completed") {
+      return 0;
+    }
+
+    // If no torrent data, can't calculate
+    if (!torrent) {
+      return null;
+    }
+
+    const eta = torrent.eta as number | undefined;
+    const downloadSpeed = torrent.dlspeed as number | undefined;
+    const progress = torrent.progress as number | undefined;
+
+    // Use qBittorrent's ETA if valid
+    if (eta !== undefined && eta > 0 && eta < 8640000) {
+      return eta;
+    }
+
+    // Calculate ETA manually if we have speed and progress
+    if (downloadSpeed && downloadSpeed > 0 && progress !== undefined) {
+      const remainingBytes = queueItem.size * (1 - progress);
+      const calculatedEta = remainingBytes / downloadSpeed;
+
+      // Cap at 7 days to avoid ridiculous values
+      if (calculatedEta < 604800) {
+        return calculatedEta;
+      }
+    }
+
+    // Cannot determine ETA
+    return null;
   }
 }

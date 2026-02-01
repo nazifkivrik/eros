@@ -51,6 +51,7 @@ import type { SearchService } from "../application/services/search.service.js";
 import type { JobsService } from "../application/services/jobs.service.js";
 import type { SchedulerService } from "../application/services/scheduler.service.js";
 import type { TorrentCompletionHandlerService } from "../application/services/torrent-completion/torrent-completion.handler.service.js";
+import type { DashboardService } from "../application/services/dashboard.service.js";
 
 // Clean Architecture - Controllers
 import type { PerformersController } from "../interfaces/controllers/performers.controller.js";
@@ -65,6 +66,7 @@ import type { DownloadQueueController } from "../interfaces/controllers/download
 import type { SearchController } from "../interfaces/controllers/search.controller.js";
 import type { JobsController } from "../interfaces/controllers/jobs.controller.js";
 import type { TorrentSearchController } from "../interfaces/controllers/torrent-search.controller.js";
+import type { DashboardController } from "../interfaces/controllers/dashboard.controller.js";
 import type { TorrentSearchService } from "../application/services/torrent-search/index.js";
 
 // Clean Architecture - Jobs
@@ -143,6 +145,7 @@ export interface ServiceContainer {
   jobsService: JobsService;
   schedulerService: SchedulerService;
   torrentCompletionService: TorrentCompletionHandlerService;
+  dashboardService: DashboardService;
 
   // Jobs (Background Tasks) - optional because they may not be registered
   cleanupJob?: CleanupJob;
@@ -163,4 +166,5 @@ export interface ServiceContainer {
   searchController: SearchController;
   jobsController: JobsController;
   torrentSearchController: TorrentSearchController;
+  dashboardController: DashboardController;
 }

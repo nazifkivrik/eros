@@ -26,7 +26,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-
+.playwright-mcp
 # Local env files
 .env
 .env*.local
@@ -65,4 +65,5 @@ qbittorrent/
 prowlarr/
 media/
 data/
+
 docker-compose.override.yml

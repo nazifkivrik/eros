@@ -78,7 +78,7 @@ export class CrossEncoderService {
   private isInitialized = false;
   private initializationPromise: Promise<void> | null = null;
   private readonly modelName = "Xenova/ms-marco-MiniLM-L-6-v2";
-  private readonly modelLoadTimeout = 300000; // 5 minutes for model download
+  private readonly modelLoadTimeout = parseInt(process.env.AI_MODEL_TIMEOUT || "600000"); // 10 minutes default
   private loadError: Error | null = null;
 
   /**
@@ -248,6 +248,185 @@ export class CrossEncoderService {
   }
 
   /**
+   * Calculate performer name matching penalty
+   * Returns a penalty value [0-1] where:
+   * - 0 = performer names match (no penalty)
+   * - 0.5 = partial match (e.g., "Jade Hutchison" vs "Jade Hub")
+   * - 0.9+ = no significant match (e.g., "John Doe" vs "Jane Smith")
+   *
+   * INCREASED PENALTY: With strict first-name matching, penalties are higher for mismatches
+   */
+  private calculatePerformerPenalty(queryPerformer: string, candidatePerformers: string[]): number {
+    // Extract the main performer name (first word) from query
+    // Query may be like "Jade Harper Jade Hutchison Jadehub" - we want just "Jade Harper"
+    const normalizedQuery = this.normalizePerformerName(queryPerformer);
+    const queryWords = normalizedQuery.split(' ').filter(w => w.length > 2);
+
+    // Use first 2 words as main performer name (typically "First Last")
+    let mainQueryName = queryWords.slice(0, 2).join(' ');
+    if (mainQueryName.length < 3) {
+      mainQueryName = queryWords[0] || normalizedQuery;
+    }
+
+    // Check each candidate performer for match
+    let bestMatchScore = 0;
+
+    for (const candidatePerformer of candidatePerformers) {
+      const normalizedCandidate = this.normalizePerformerName(candidatePerformer);
+      const matchScore = this.calculatePerformerSimilarity(mainQueryName, normalizedCandidate);
+      bestMatchScore = Math.max(bestMatchScore, matchScore);
+    }
+
+    // Convert match score to penalty (high match = low penalty)
+    // With strict first-name matching, the scores are now more meaningful:
+    // - >= 0.7 = first names match, good overall match -> no penalty
+    // - 0.3-0.7 = partial match (maybe first name typo or missing last name) -> moderate penalty
+    // - < 0.3 = first names don't match -> HEAVY penalty
+    if (bestMatchScore >= 0.7) {
+      return 0; // No penalty - performers match
+    } else if (bestMatchScore >= 0.3) {
+      // Partial match - significant penalty
+      return 0.6 * (1 - bestMatchScore);
+    } else {
+      // First names don't match - VERY heavy penalty
+      // This should cause the match to fail threshold
+      return 0.95;
+    }
+  }
+
+  /**
+   * Normalize performer name for comparison
+   * Removes common suffixes/prefixes and normalizes spacing
+   */
+  private normalizePerformerName(name: string): string {
+    return name
+      .toLowerCase()
+      .trim()
+      // Remove common suffixes
+      .replace(/\s+(aka|aka\.|also known as)\s.*$/i, "")
+      // Remove special characters but keep spaces
+      .replace(/[^\w\s]/g, "")
+      // Normalize multiple spaces
+      .replace(/\s+/g, " ");
+  }
+
+  /**
+   * Calculate similarity between two performer names
+   * Returns a score [0-1] where 1 = exact match, 0 = no match
+   *
+   * STRICT MATCHING: First name MUST match for high similarity scores
+   * This prevents false matches like "Jade Harper" vs "Jada Harper"
+   */
+  private calculatePerformerSimilarity(name1: string, name2: string): number {
+    // Exact match
+    if (name1 === name2) {
+      return 1.0;
+    }
+
+    // Split into words for analysis
+    const words1 = name1.split(" ").filter((w) => w.length > 0);
+    const words2 = name2.split(" ").filter((w) => w.length > 0);
+
+    if (words1.length === 0 || words2.length === 0) {
+      return this.levenshteinSimilarity(name1, name2);
+    }
+
+    // STRICT CHECK: First names (first word) must match EXACTLY (case-insensitive)
+    // This prevents "Jade Harper" from matching "Jada Harper"
+    const firstName1 = words1[0].toLowerCase();
+    const firstName2 = words2[0].toLowerCase();
+
+    if (firstName1 !== firstName2) {
+      // First names don't match - return LOW similarity
+      // Still allow some similarity for edge cases (typos, slight variations)
+      const stringSim = this.levenshteinSimilarity(name1, name2);
+
+      // If first names are very similar (e.g., "Jade" vs "Jade" with special chars), allow moderate score
+      if (firstName1.length > 3 && this.levenshteinSimilarity(firstName1, firstName2) > 0.9) {
+        return stringSim * 0.5; // Max 0.5 similarity if first names are close but not exact
+      }
+
+      // First names are different - heavily penalize
+      return stringSim * 0.2; // Max 0.2 similarity for different first names
+    }
+
+    // First names match exactly - now check remaining words
+    // Check if one is contained in the other (e.g., "Jade" vs "Jade Hutchison")
+    if (name1.includes(name2) || name2.includes(name1)) {
+      const longer = name1.length > name2.length ? name1 : name2;
+      if (longer.length <= 15) {
+        return 0.9;
+      }
+    }
+
+    // Count matching words (excluding first name which we already confirmed matches)
+    let matchingWords = 1; // Start with 1 for the matching first name
+    for (let i = 1; i < words1.length; i++) {
+      for (let j = 1; j < words2.length; j++) {
+        if (words1[i].toLowerCase() === words2[j].toLowerCase()) {
+          matchingWords++;
+          break;
+        }
+      }
+    }
+
+    const wordOverlap = matchingWords / Math.max(words1.length, words2.length);
+
+    // If we have significant word overlap, check if the FULL names match well
+    if (wordOverlap > 0) {
+      const stringSim = this.levenshteinSimilarity(name1, name2);
+      // Both word overlap AND string similarity must be high for a good match
+      return (wordOverlap * 0.6) + (stringSim * 0.4);
+    }
+
+    return this.levenshteinSimilarity(name1, name2);
+  }
+
+  /**
+   * Calculate Levenshtein-based string similarity
+   */
+  private levenshteinSimilarity(str1: string, str2: string): number {
+    const longer = str1.length > str2.length ? str1 : str2;
+    const shorter = str1.length > str2.length ? str2 : str1;
+
+    if (longer.length === 0) return 1.0;
+
+    const editDistance = this.levenshteinDistance(longer, shorter);
+    return (longer.length - editDistance) / longer.length;
+  }
+
+  /**
+   * Calculate Levenshtein distance between two strings
+   */
+  private levenshteinDistance(str1: string, str2: string): number {
+    const matrix: number[][] = [];
+
+    for (let i = 0; i <= str2.length; i++) {
+      matrix[i] = [i];
+    }
+
+    for (let j = 0; j <= str1.length; j++) {
+      matrix[0][j] = j;
+    }
+
+    for (let i = 1; i <= str2.length; i++) {
+      for (let j = 1; j <= str1.length; j++) {
+        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+          matrix[i][j] = matrix[i - 1][j - 1];
+        } else {
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j - 1] + 1,
+            matrix[i][j - 1] + 1,
+            matrix[i - 1][j] + 1
+          );
+        }
+      }
+    }
+
+    return matrix[str2.length][str1.length];
+  }
+
+  /**
    * Score a single (query, candidate) pair
    * Returns normalized score [0-1] where:
    * - > 0.7 = strong match
@@ -281,7 +460,23 @@ export class CrossEncoderService {
       const logitValue = logits.data[0] as number;
 
       // Normalize to [0, 1] using sigmoid
-      const score = this.sigmoid(logitValue);
+      let score = this.sigmoid(logitValue);
+
+      // Apply performer name validation penalty
+      // If query has a performer but candidate performers don't contain it, heavily penalize
+      if (query.performer && candidate.performers && candidate.performers.length > 0) {
+        const performerPenalty = this.calculatePerformerPenalty(query.performer, candidate.performers);
+        if (performerPenalty > 0) {
+          score = score * (1 - performerPenalty);
+          logger.info({
+            queryPerformer: query.performer,
+            candidatePerformers: candidate.performers,
+            originalScore: this.sigmoid(logitValue),
+            penalty: performerPenalty,
+            finalScore: score,
+          }, "🎯 Performer penalty applied - names don't match well");
+        }
+      }
 
       return score;
     } catch (error) {
@@ -330,15 +525,70 @@ export class CrossEncoderService {
       const outputs = await this.model(inputs);
       const logits = outputs.logits as Tensor;
 
-      // Reshape scores into matrix [queries x candidates]
+      // Reshape scores into matrix [queries x candidates] and apply penalties
       const scores: number[][] = [];
       let idx = 0;
 
+      // Debug: log first query/candidate to see structure
+      if (queries.length > 0 && candidates.length > 0) {
+        logger.info({
+          sampleQuery: queries[0],
+          sampleCandidate: candidates[0],
+          totalQueries: queries.length,
+          totalCandidates: candidates.length,
+        }, "🔍 Batch scoring input structure");
+      }
+
       for (let i = 0; i < queries.length; i++) {
+        const query = queries[i];
         const row: number[] = [];
         for (let j = 0; j < candidates.length; j++) {
+          const candidate = candidates[j];
           const logitValue = logits.data[idx] as number;
-          row.push(this.sigmoid(logitValue));
+          let score = this.sigmoid(logitValue);
+
+          // Apply performer name validation penalty (same logic as scorePair)
+          if (query.performer && candidate.performers && candidate.performers.length > 0) {
+            const performerPenalty = this.calculatePerformerPenalty(query.performer, candidate.performers);
+
+            // Also apply title similarity penalty - if titles are very different, reduce score
+            // Use Levenshtein similarity for titles (NOT calculatePerformerSimilarity which is for names)
+            let titlePenalty = 0;
+            if (query.title && candidate.title) {
+              // Use levenshteinSimilarity for general string comparison
+              const titleSim = this.levenshteinSimilarity(query.title, candidate.title);
+              // If title similarity is very low (<0.3), apply penalty
+              if (titleSim < 0.3) {
+                titlePenalty = 0.5 * (1 - titleSim);
+                logger.info({
+                  queryTitle: query.title,
+                  candidateTitle: candidate.title,
+                  titleSimilarity: titleSim,
+                  titlePenalty,
+                }, "🔍 Title penalty applied - titles don't match");
+              }
+            }
+
+            const totalPenalty = Math.max(performerPenalty, titlePenalty);
+
+            if (totalPenalty > 0) {
+              const originalScore = score;
+              score = score * (1 - totalPenalty);
+              logger.info({
+                queryPerformer: query.performer,
+                candidatePerformers: candidate.performers,
+                queryTitle: query.title,
+                candidateTitle: candidate.title,
+                originalScore,
+                performerPenalty,
+                titlePenalty,
+                totalPenalty,
+                finalScore: score,
+              }, "🎯 Penalty applied - performers or titles don't match");
+            }
+          }
+
+          row.push(score);
           idx++;
         }
         scores.push(row);
@@ -374,7 +624,7 @@ export class CrossEncoderService {
         return null;
       }
 
-      // Find best score
+      // Find best score and also track top 3 for debugging
       let bestIdx = 0;
       let bestScore = scores[0];
 
@@ -385,15 +635,28 @@ export class CrossEncoderService {
         }
       }
 
+      // Sort candidates by score to get top 3
+      const sortedCandidates = candidates.map((c, i) => ({ candidate: c, score: scores[i], index: i }))
+        .sort((a, b) => b.score - a.score);
+
       // Check threshold
       if (bestScore < threshold) {
-        logger.debug({
+        logger.info({
           query: query.title,
           bestScore,
           threshold,
-        }, "No match above threshold");
+          top3: sortedCandidates.slice(0, 3).map(({ candidate, score }) => ({ title: candidate.title, score })),
+        }, "✗ No match above threshold");
         return null;
       }
+
+      logger.info({
+        query: query.title,
+        matchedTitle: candidates[bestIdx].title,
+        score: bestScore,
+        threshold,
+        top3: sortedCandidates.slice(0, 3).map(({ candidate, score }) => ({ title: candidate.title, score })),
+      }, "✓ Best match found");
 
       return {
         candidate: candidates[bestIdx],

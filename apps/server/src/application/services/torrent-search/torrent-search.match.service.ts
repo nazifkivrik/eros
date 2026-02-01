@@ -1,9 +1,9 @@
 /**
  * Torrent Search Match Service
- * Handles scene matching with AI support
+ * Handles scene matching with Cross-Encoder AI
  *
  * Responsibilities:
- * - Scene matching (both legacy and Cross-Encoder)
+ * - Scene matching using Cross-Encoder AI with validation
  * - Candidate scene fetching
  * - Discovery handling (logging only)
  * - Levenshtein distance calculation
@@ -18,6 +18,7 @@ import type { SettingsService } from "@/application/services/settings.service.js
 import type { SceneGroup, MatchResult, TorrentResult } from "@/application/services/torrent-search/index.js";
 import { eq, and } from "drizzle-orm";
 import { performersScenes, subscriptions } from "@repo/database";
+import { logger } from "@/utils/logger.js";
 
 /**
  * Torrent Search Match Service
@@ -48,31 +49,27 @@ export class TorrentSearchMatchService {
 
   /**
    * Match torrent groups with database scenes
+   * Uses Cross-Encoder AI matching with validation
    */
   async matchWithMetadata(
     groups: SceneGroup[],
     entityType: "performer" | "studio",
     entity: { id: string; name: string; aliases?: string[] }
   ): Promise<MatchResult> {
-    // Check if Cross-Encoder is enabled
+    // Get settings for threshold
     const settings = await this.settingsService.getSettings();
-    const useCrossEncoder = settings.ai.useCrossEncoder;
+    const threshold = settings.ai.crossEncoderThreshold ?? 0.75;
 
-    // If Cross-Encoder is enabled, use the new matching logic
-    if (useCrossEncoder) {
-      await this.logsService.info(
-        "torrent",
-        "Using Cross-Encoder for scene matching",
-        {
-          threshold: settings.ai.crossEncoderThreshold,
-        }
-      );
+    await this.logsService.info(
+      "torrent",
+      "Using Cross-Encoder Only Matching for scene matching",
+      {
+        torrentGroups: groups.length,
+        threshold,
+      }
+    );
 
-      return await this.matchWithCrossEncoder(groups, entity, entityType);
-    }
-
-    // Legacy matching path
-    return await this.matchWithLegacy(groups, entityType, entity.id);
+    return await this.matchWithCrossEncoderOnly(groups, entity, entityType, threshold);
   }
 
   /**
@@ -162,44 +159,15 @@ export class TorrentSearchMatchService {
   }
 
   /**
-   * Cross-Encoder matching
+   * Cross-Encoder Only Matching with Improved Validation
+   *
+   * Uses only Cross-Encoder AI matching but with better validation rules:
+   * - Higher threshold for confidence (0.75)
+   - Date matching bonus
+   - Studio matching bonus
+   * - Reject matches with very different title lengths
    */
-  async matchWithCrossEncoder(
-    groups: SceneGroup[],
-    entity: { id: string; name: string },
-    entityType: "performer" | "studio"
-  ): Promise<MatchResult> {
-    const settings = await this.settingsService.getSettings();
-    const threshold = settings.ai.crossEncoderThreshold || 0.7;
-
-    // Load model once at the start for all matches
-    await this.logsService.info(
-      "torrent",
-      `Loading Cross-Encoder model once for ${groups.length} groups`
-    );
-    await this.crossEncoderService.initialize();
-
-    try {
-      return await this.performCrossEncoderMatching(
-        groups,
-        entity,
-        entityType,
-        threshold
-      );
-    } finally {
-      // Unload model after all matches complete
-      await this.logsService.info(
-        "torrent",
-        `Unloading Cross-Encoder model after matching ${groups.length} groups`
-      );
-      this.crossEncoderService.unload();
-    }
-  }
-
-  /**
-   * Perform the actual Cross-Encoder matching logic
-   */
-  private async performCrossEncoderMatching(
+  private async matchWithCrossEncoderOnly(
     groups: SceneGroup[],
     entity: { id: string; name: string },
     entityType: "performer" | "studio",
@@ -208,85 +176,176 @@ export class TorrentSearchMatchService {
     // Get candidate scenes from database
     const candidateScenes = await this.getCandidateScenes(entityType, entity.id);
 
+    // Get performer with aliases for cleaning
+    let performerWithAliases: { name: string; aliases?: string[] } | null = null;
+    if (entityType === "performer") {
+      const performer = await this.repository.findPerformerById(entity.id);
+      if (performer) {
+        performerWithAliases = {
+          name: performer.name,
+          aliases: Array.isArray(performer.aliases)
+            ? performer.aliases
+            : performer.aliases
+            ? JSON.parse(performer.aliases as string)
+            : undefined,
+        };
+      }
+    }
+
     const matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }> = [];
     const unmatched: SceneGroup[] = [];
     const matchedSceneIds = new Set<string>();
 
-    await this.logsService.info(
-      "torrent",
-      `Cross-Encoder Matching Started`,
-      {
-        entityType,
-        entityName: entity.name,
-        torrentGroups: groups.length,
-        candidateScenes: candidateScenes.length,
-      }
-    );
+    // Load Cross-Encoder once for all groups
+    await this.crossEncoderService.initialize();
 
-    for (const group of groups) {
-      const availableScenes = candidateScenes.filter(
-        (s) => !matchedSceneIds.has(s.id)
+    try {
+      await this.logsService.info(
+        "torrent",
+        `Cross-Encoder Only Matching Started`,
+        {
+          entityType,
+          entityName: entity.name,
+          torrentGroups: groups.length,
+          candidateScenes: candidateScenes.length,
+        }
       );
 
-      if (availableScenes.length === 0) {
-        unmatched.push(group);
-        continue;
-      }
+      for (const group of groups) {
+        const availableScenes = candidateScenes.filter(
+          (s) => !matchedSceneIds.has(s.id)
+        );
 
-      // Clean performer/studio names from title
-      let cleanedTitle = this.cleanEntityNameFromTitle(
-        group.sceneTitle,
-        entity.name,
-        entityType
-      );
-
-      // Construct query with multi-signal information
-      const query = {
-        performer: entityType === "performer" ? entity.name : undefined,
-        studio: entityType === "studio" ? entity.name : undefined,
-        title: cleanedTitle,
-      };
-
-      // Find best match using Cross-Encoder
-      const match = await this.crossEncoderService.findBestMatch(
-        query,
-        availableScenes.map((s) => ({
-          id: s.id,
-          title: s.title,
-          date: s.date || undefined,
-          studio: s.studioName,
-          performers: s.performerNames,
-        })),
-        threshold
-      );
-
-      if (match) {
-        const scene = candidateScenes.find((s) => s.id === match.candidate.id)!;
-        matchedSceneIds.add(scene.id);
-
-        // Store AI score for debugging
-        await this.aiMatchScoresRepository.create({
-          sceneId: scene.id,
-          torrentTitle: group.sceneTitle,
-          score: match.score,
-          method: "cross-encoder",
-          model: this.crossEncoderService.getModelName(),
-          threshold,
-          matched: true,
-        });
-
-        // Attach sceneId to all torrents in this group
-        for (const torrent of group.torrents) {
-          torrent.sceneId = scene.id;
+        if (availableScenes.length === 0) {
+          unmatched.push(group);
+          continue;
         }
 
-        matched.push({ scene, torrents: group.torrents });
-      } else {
-        unmatched.push(group);
-      }
-    }
+        // Clean performer/studio name from torrent title for matching
+        let cleanedTitle = group.sceneTitle;
+        if (entityType === "performer" && performerWithAliases) {
+          cleanedTitle = this.cleanPerformersFromTitle(
+            group.sceneTitle,
+            performerWithAliases.name,
+            performerWithAliases.aliases
+          );
+        } else if (entityType === "studio") {
+          cleanedTitle = this.cleanEntityNameFromTitle(
+            group.sceneTitle,
+            entity.name,
+            "studio"
+          );
+        }
 
-    return { matched, unmatched };
+        // Prepare candidates for Cross-Encoder (clean performer names)
+        const crossEncoderCandidates = availableScenes.map((s) => {
+          let cleanedSceneTitle = s.title;
+          if (entityType === "performer" && performerWithAliases) {
+            cleanedSceneTitle = this.cleanPerformersFromTitle(
+              s.title,
+              performerWithAliases.name,
+              performerWithAliases.aliases
+            );
+          }
+          return {
+            id: s.id,
+            title: cleanedSceneTitle,
+            date: s.date || undefined,
+            studio: s.studioName,
+            performers: s.performerNames,
+          };
+        });
+
+        const crossEncoderMatch = await this.crossEncoderService.findBestMatch(
+          {
+            performer: undefined,
+            studio: undefined,
+            title: cleanedTitle,
+          },
+          crossEncoderCandidates,
+          threshold // Use threshold from settings
+        );
+
+        if (crossEncoderMatch) {
+          const scene = availableScenes.find((s) => s.id === crossEncoderMatch.candidate.id)!;
+
+          // Additional validation: Check title length similarity
+          // Prevent matching very long titles to very short titles
+          const torrentTitleLength = cleanedTitle.length;
+          const sceneTitleLength = scene.title.length;
+          const lengthRatio = Math.min(torrentTitleLength, sceneTitleLength) /
+                               Math.max(torrentTitleLength, sceneTitleLength);
+
+          // Reject if length ratio is too extreme (< 0.3 means one is 3x longer than the other)
+          if (lengthRatio < 0.3) {
+            await this.logsService.info(
+              "torrent",
+              `✗ Rejected "${group.sceneTitle}" (Title length too different)`,
+              {
+                torrentTitle: group.sceneTitle,
+                torrentTitleLength,
+                sceneTitle: scene.title,
+                sceneTitleLength,
+                lengthRatio,
+                crossEncoderScore: crossEncoderMatch.score,
+              }
+            );
+            unmatched.push(group);
+            continue;
+          }
+
+          // Match accepted
+          matchedSceneIds.add(scene.id);
+
+          // Get performer IDs for this scene
+          const performerIds = await this.repository.findPerformersBySceneId(scene.id);
+
+          matched.push({
+            scene: {
+              ...scene,
+              performerIds,
+              studioId: scene.studioId ?? undefined,
+            },
+            torrents: group.torrents,
+          });
+
+          await this.logsService.info(
+            "torrent",
+            `✓ Matched "${group.sceneTitle}" to "${scene.title}"`,
+            {
+              crossEncoderScore: crossEncoderMatch.score,
+              lengthRatio,
+            }
+          );
+        } else {
+          // No match - REJECT
+          await this.logsService.info(
+            "torrent",
+            `✗ Rejected "${group.sceneTitle}" (No Cross-Encoder match above threshold)`,
+            {
+              cleanedTitle,
+              threshold,
+            }
+          );
+
+          unmatched.push(group);
+        }
+      }
+
+      await this.logsService.info(
+        "torrent",
+        `Cross-Encoder Only Matching Complete`,
+        {
+          matched: matched.length,
+          unmatched: unmatched.length,
+        }
+      );
+
+      return { matched, unmatched };
+    } finally {
+      // Always unload Cross-Encoder
+      this.crossEncoderService.unload();
+    }
   }
 
   /**
@@ -315,6 +374,70 @@ export class TorrentSearchMatchService {
     if (cleaned.length < 5) {
       cleaned = title;
     }
+
+    return cleaned;
+  }
+
+  /**
+   * Clean all performer names and aliases from scene title
+   * This removes performer names from ANYWHERE in the title (start, middle, end)
+   * Also removes common suffixes/prefixes like "xxx", "mp4", etc.
+   *
+   * ENHANCED: Removes "aka" patterns AND performer names together
+   * Handles: "Name1 aka Name2", "Name1 aka Name2 - Title", etc.
+   */
+  private cleanPerformersFromTitle(
+    title: string,
+    performerName: string,
+    aliases?: string[]
+  ): string {
+    let cleaned = title;
+
+    // Escape regex special characters
+    const escapeRegex = (str: string) =>
+      str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // Build list of all names to remove (main name + aliases)
+    const namesToRemove = [performerName, ...(aliases || [])];
+
+    // First, remove "aka" patterns WITH performer names
+    // This handles: "Name1 aka Name2", "Name1 a.k.a. Name2", "Name1 also known as Name2"
+    for (const name of namesToRemove) {
+      // Pattern: "Performer aka Name" or "Name aka Performer"
+      const akaPattern = new RegExp(
+        `${escapeRegex(performerName)}\\s+(aka|a\\.k\\.a\\.|also known as)\\s+${escapeRegex(name)}|${escapeRegex(name)}\\s+(aka|a\\.k\\.a\\.|also known as)\\s+${escapeRegex(performerName)}`,
+        "gi"
+      );
+      cleaned = cleaned.replace(akaPattern, " ");
+    }
+
+    // Then, remove individual performer names (remaining ones)
+    for (const name of namesToRemove) {
+      // Pattern matches the name with optional surrounding separators
+      const pattern = new RegExp(
+        `[-–—:,]?\\s*${escapeRegex(name)}\\s*[-–—:,]?`,
+        "gi"
+      );
+      cleaned = cleaned.replace(pattern, " ");
+    }
+
+    // Remove any remaining "aka" patterns without names
+    cleaned = cleaned
+      .replace(/\s+(aka|a\.k\.a\.|also known as)\s+/gi, " ");
+
+    // Clean up extra spaces and trim
+    cleaned = cleaned.replace(/\s+/g, " ").trim();
+
+    // If title became too short after cleaning, return original
+    if (cleaned.length < 5) {
+      return title;
+    }
+
+    // Remove common file extensions and site suffixes
+    cleaned = cleaned
+      .replace(/\.(mp4|mkv|avi|mov|wmv|flv|webm|mp4)$/gi, "")
+      .replace(/\s+[-–—:,]?\s*(XXX|xxx|1080p|720p|480p|2160p|4K|P2P|XC|Leech|XLeech)?\s*$/g, "")
+      .trim();
 
     return cleaned;
   }
@@ -364,6 +487,7 @@ export class TorrentSearchMatchService {
 
   /**
    * Get candidate scenes for matching
+   * Returns only the scenes linked to the subscribed performer/studio
    */
   async getCandidateScenes(
     entityType: "performer" | "studio",
@@ -432,5 +556,109 @@ export class TorrentSearchMatchService {
     }
 
     return matrix[str2.length][str1.length];
+  }
+
+  /**
+   * Match torrents to a single scene using Cross-Encoder AI
+   * Used for scene subscriptions to ensure only relevant torrents are assigned the correct sceneId
+   *
+   * This method creates MatchedScene results for torrents that match the scene above threshold
+   *
+   * @param torrents - Array of torrent results to filter
+   * @param scene - The scene to match against (must have proper metadata)
+   * @param threshold - Optional minimum match score (defaults to 0.7)
+   * @returns MatchResult with matched/unmatched torrents
+   */
+  async matchTorrentsToSingleScene(
+    torrents: TorrentResult[],
+    scene: SceneMetadata,
+    threshold?: number
+  ): Promise<MatchResult> {
+    const minThreshold = threshold ?? 0.7;
+
+    await this.logsService.info(
+      "torrent",
+      `Matching ${torrents.length} torrents to single scene: "${scene.title}"`,
+      { sceneId: scene.id, threshold: minThreshold }
+    );
+
+    const matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }> = [];
+    const unmatched: SceneGroup[] = [];
+
+    // Load Cross-Encoder once for all torrents
+    await this.crossEncoderService.initialize();
+
+    try {
+      for (const torrent of torrents) {
+        // Clean scene title from torrent title for matching
+        const cleanedTitle = this.cleanEntityNameFromTitle(
+          torrent.title,
+          scene.title,
+          "studio" // Treat scene title as "studio" name for cleaning
+        );
+
+        // Find best match using Cross-Encoder
+        const crossEncoderMatch = await this.crossEncoderService.findBestMatch(
+          {
+            performer: undefined,
+            studio: undefined,
+            title: scene.title,
+          },
+          [{
+            id: scene.id,
+            title: cleanedTitle,
+            date: scene.date,
+            studio: scene.studioName,
+            performers: scene.performerNames,
+          }],
+          minThreshold
+        );
+
+        if (crossEncoderMatch && crossEncoderMatch.candidate.id === scene.id) {
+          // Torrent matches this scene
+          matched.push({
+            scene,
+            torrents: [torrent],
+          });
+
+          await this.logsService.info(
+            "torrent",
+            `✓ Matched "${torrent.title}" to "${scene.title}"`,
+            {
+              score: crossEncoderMatch.score,
+              threshold: minThreshold,
+            }
+          );
+        } else {
+          // Torrent does not match this scene
+          unmatched.push({
+            sceneTitle: torrent.title,
+            torrents: [torrent],
+          });
+
+          await this.logsService.info(
+            "torrent",
+            `✗ Rejected "${torrent.title}" (score: ${crossEncoderMatch?.score ?? 0} < ${minThreshold})`,
+            { sceneTitle: scene.title }
+          );
+        }
+      }
+
+      await this.logsService.info(
+        "torrent",
+        `Single scene matching complete: ${matched.length} matched, ${unmatched.length} rejected`,
+        {
+          sceneId: scene.id,
+          sceneTitle: scene.title,
+          matched: matched.length,
+          rejected: unmatched.length,
+        }
+      );
+
+      return { matched, unmatched };
+    } finally {
+      // Always unload Cross-Encoder
+      this.crossEncoderService.unload();
+    }
   }
 }

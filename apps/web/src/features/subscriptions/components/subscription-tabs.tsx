@@ -1,10 +1,13 @@
 /**
  * Subscription Tabs Component
  * Displays tabs for filtering by entity type with counts
+ * Clean, minimal design
  */
 
 import type { SubscriptionDetail } from "@repo/shared-types";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { Users, Building2, Film } from "lucide-react";
 
 type TabType = "performers" | "studios" | "scenes";
 
@@ -20,30 +23,40 @@ export function SubscriptionTabs({ subscriptions, value, onChange, children }: S
   const studioCount = subscriptions.filter((s) => s.entityType === "studio").length;
   const sceneCount = subscriptions.filter((s) => s.entityType === "scene" && s.isSubscribed).length;
 
+  const tabs = [
+    { id: "performers" as const, label: "Performers", count: performerCount, icon: Users },
+    { id: "studios" as const, label: "Studios", count: studioCount, icon: Building2 },
+    { id: "scenes" as const, label: "Scenes", count: sceneCount, icon: Film },
+  ];
+
   return (
-    <Tabs value={value} onValueChange={(v) => onChange(v as TabType)}>
-      <TabsList>
-        <TabsTrigger value="performers">
-          Performers ({performerCount})
-        </TabsTrigger>
-        <TabsTrigger value="studios">
-          Studios ({studioCount})
-        </TabsTrigger>
-        <TabsTrigger value="scenes">
-          Scenes ({sceneCount})
-        </TabsTrigger>
+    <Tabs value={value} onValueChange={(v) => onChange(v as TabType)} className="space-y-4">
+      <TabsList className="grid w-full grid-cols-3">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <TabsTrigger key={tab.id} value={tab.id} className="gap-2">
+              <Icon className="h-4 w-4" />
+              <span>{tab.label}</span>
+              {tab.count > 0 && (
+                <Badge variant="secondary" className="ml-auto">
+                  {tab.count}
+                </Badge>
+              )}
+            </TabsTrigger>
+          );
+        })}
       </TabsList>
 
-      {/* Render children wrapped in appropriate TabsContent */}
-      <TabsContent value="performers" className="mt-6">
+      <TabsContent value="performers" className="mt-0">
         {children("performers")}
       </TabsContent>
 
-      <TabsContent value="studios" className="mt-6">
+      <TabsContent value="studios" className="mt-0">
         {children("studios")}
       </TabsContent>
 
-      <TabsContent value="scenes" className="mt-6">
+      <TabsContent value="scenes" className="mt-0">
         {children("scenes")}
       </TabsContent>
     </Tabs>

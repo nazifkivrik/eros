@@ -72,7 +72,7 @@ export class TorrentSearchIndexerService {
             indexerId: dbIndexerId,
             indexerName: result.indexer,
             downloadUrl: result.downloadUrl || result.magnetUrl || "",
-            infoHash: result.infoHash,
+            infoHash: result.infoHash, // Can be undefined if no magnet link available
           });
         }
 

@@ -124,7 +124,8 @@ export class TorrentMonitorJob extends BaseJob {
       // Remove old completed torrents
       await this.removeOldCompletedTorrents();
 
-      // Retry failed torrents
+      // Retry failed torrents (add_failed status)
+      // This is for torrents that failed to add to qBittorrent, NOT indexer searches
       await this.retryFailedTorrents();
 
       this.emitCompleted(

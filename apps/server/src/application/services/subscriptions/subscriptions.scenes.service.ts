@@ -214,31 +214,78 @@ export class SubscriptionsScenesService {
 
   /**
    * Link scene to performers and studios
+   * Enhanced: Skips duplicate performers that match the main subscription performer
    */
   async linkScenePerformers(dto: LinkScenePerformersDTO): Promise<void> {
     this.logger.info({ sceneId: dto.sceneId }, "Linking scene performers");
 
-    // Link the subscribed entity (performer) to the scene first
+    // Get the main subscription performer's data to avoid duplicates
+    let mainPerformerTpdbId: string | null = null;
+    let mainPerformerName: string | null = null;
+    let mainPerformerAliases: string[] = [];
+
     if (dto.entityType === "performer") {
-      await this.scenesRepository.linkPerformerToScene(dto.entityId, dto.sceneId);
-      this.logger.info({ performerId: dto.entityId }, "Linked subscription performer to scene");
+      const mainPerformer = await this.db.query.performers.findFirst({
+        where: eq(performers.id, dto.entityId),
+      });
+
+      if (mainPerformer) {
+        mainPerformerTpdbId = mainPerformer.externalIds.find(e => e.source === "tpdb")?.id || null;
+        mainPerformerName = mainPerformer.name;
+        mainPerformerAliases = mainPerformer.aliases || [];
+
+        // Link the main performer to the scene
+        await this.scenesRepository.linkPerformerToScene(dto.entityId, dto.sceneId);
+        this.logger.info({ performerId: dto.entityId, name: mainPerformerName }, "Linked subscription performer to scene");
+      }
     }
 
     // Link other performers from scene metadata
     if (dto.performers && dto.performers.length > 0) {
+      let linkedCount = 0;
+      let skippedCount = 0;
+
       for (const tpdbPerformerWrapper of dto.performers) {
         // TPDB adapter wraps performer in {performer: {...}} format
         const tpdbPerformer = 'performer' in tpdbPerformerWrapper
           ? (tpdbPerformerWrapper as any).performer
           : tpdbPerformerWrapper;
 
+        // Skip if this is the same as the main subscription performer
+        if (mainPerformerTpdbId && tpdbPerformer.id === mainPerformerTpdbId) {
+          this.logger.debug({
+            tpdbId: tpdbPerformer.id,
+            name: tpdbPerformer.name,
+          }, "Skipping performer - same as main subscription performer (by TPDB ID)");
+          skippedCount++;
+          continue;
+        }
+
+        // Skip if name matches (handles cases where TPDB has duplicate entries with different IDs)
+        if (mainPerformerName) {
+          const normalizedName = this.normalizePerformerName(tpdbPerformer.name);
+          const normalizedMainName = this.normalizePerformerName(mainPerformerName);
+          const normalizedAliases = mainPerformerAliases.map(a => this.normalizePerformerName(a));
+
+          if (normalizedName === normalizedMainName || normalizedAliases.includes(normalizedName)) {
+            this.logger.debug({
+              tpdbName: tpdbPerformer.name,
+              mainName: mainPerformerName,
+            }, "Skipping performer - name matches main subscription performer");
+            skippedCount++;
+            continue;
+          }
+        }
+
         const performerId = await this.getOrCreatePerformerFromTpdb(tpdbPerformer);
         if (performerId) {
           await this.scenesRepository.linkPerformerToScene(performerId, dto.sceneId);
+          linkedCount++;
         }
       }
+
       this.logger.info(
-        { count: dto.performers.length },
+        { total: dto.performers.length, linked: linkedCount, skipped: skippedCount },
         "Linked additional performers to scene"
       );
     }
@@ -327,14 +374,108 @@ export class SubscriptionsScenesService {
 
   /**
    * Get or create performer from TPDB data
+   * Enhanced with name-based duplicate detection
    */
   private async getOrCreatePerformerFromTpdb(tpdbPerformer: any): Promise<string | null> {
     const allPerformers = await this.db.query.performers.findMany();
+
+    // First, try to find by TPDB ID (exact match)
     let performerRecord = allPerformers.find((p) =>
       p.externalIds.some((ext) => ext.source === "tpdb" && ext.id === tpdbPerformer.id)
     );
 
+    // If not found by TPDB ID, try name-based matching
+    // This handles cases where TPDB has duplicate entries with different IDs but same/similar names
+    if (!performerRecord) {
+      const normalizedName = this.normalizePerformerName(tpdbPerformer.name);
+      const tpdbAliases = (tpdbPerformer.aliases || []).map((a: string) => this.normalizePerformerName(a));
+
+      performerRecord = allPerformers.find((p) => {
+        const existingName = this.normalizePerformerName(p.name);
+        const existingAliases = (p.aliases || []).map((a: string) => this.normalizePerformerName(a));
+
+        // Match if:
+        // 1. Names match exactly (normalized)
+        // 2. Name matches any existing alias
+        // 3. Any alias matches existing name
+        // 4. Any alias matches any existing alias
+        return (
+          existingName === normalizedName ||
+          existingAliases.includes(normalizedName) ||
+          tpdbAliases.includes(existingName) ||
+          tpdbAliases.some((ta: string) => existingAliases.includes(ta))
+        );
+      });
+
+      if (performerRecord) {
+        this.logger.info({
+          existingPerformerId: performerRecord.id,
+          existingName: performerRecord.name,
+          tpdbId: tpdbPerformer.id,
+          tpdbName: tpdbPerformer.name,
+        }, "Found existing performer by name/alias match - merging TPDB entries");
+      }
+    }
+
     if (performerRecord) {
+      // If we found by name match (not TPDB ID), add the new TPDB ID to external IDs
+      const hasThisTpdbId = performerRecord.externalIds.some(
+        (ext) => ext.source === "tpdb" && ext.id === tpdbPerformer.id
+      );
+
+      if (!hasThisTpdbId) {
+        this.logger.info({
+          performerId: performerRecord.id,
+          existingTpdbIds: performerRecord.externalIds.filter(e => e.source === "tpdb").map(e => e.id),
+          newTpdbId: tpdbPerformer.id,
+        }, "Adding additional TPDB ID to existing performer");
+
+        // Merge the new TPDB ID into external IDs
+        const mergedExternalIds = [
+          ...performerRecord.externalIds,
+          { source: "tpdb" as const, id: tpdbPerformer.id }
+        ];
+
+        await this.db.update(performers)
+          .set({
+            externalIds: mergedExternalIds,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(performers.id, performerRecord.id));
+      }
+
+      // Update aliases if they differ from TPDB
+      const currentAliases = performerRecord.aliases || [];
+      const tpdbAliases = tpdbPerformer.aliases || [];
+
+      // DEBUG: Log TPDB response
+      this.logger.info({
+        performerId: performerRecord.id,
+        performerName: performerRecord.name,
+        tpdbId: tpdbPerformer.id,
+        tpdbAliases: tpdbAliases,
+        currentAliases: currentAliases,
+        tpdbRaw: JSON.stringify(tpdbPerformer),
+      }, "DEBUG: TPDB Performer Data");
+
+      // Check if aliases need updating
+      const aliasesChanged = JSON.stringify(currentAliases.sort()) !== JSON.stringify(tpdbAliases.sort());
+
+      if (aliasesChanged) {
+        await this.db.update(performers)
+          .set({
+            aliases: tpdbAliases,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(performers.id, performerRecord.id));
+
+        this.logger.info({
+          performerId: performerRecord.id,
+          oldAliases: currentAliases,
+          newAliases: tpdbAliases,
+        }, "Updated performer aliases from TPDB");
+      }
+
       return performerRecord.id;
     }
 
@@ -369,6 +510,7 @@ export class SubscriptionsScenesService {
       name: performerName,
       fullName: tpdbPerformer.fullName || performerName,
       slug,
+      aliases: tpdbPerformer.aliases || [], // ✅ FIX: Save aliases!
       gender: tpdbPerformer.gender,
       birthdate: tpdbPerformer.birthdate,
       images: tpdbPerformer.images || [],
@@ -393,5 +535,22 @@ export class SubscriptionsScenesService {
     }
 
     return null;
+  }
+
+  /**
+   * Normalize performer name for comparison
+   * - Lowercase
+   * - Remove spaces and special characters
+   * - Remove common suffixes/prefixes like "xxx", "official"
+   */
+  private normalizePerformerName(name: string): string {
+    if (!name) return "";
+
+    return name
+      .toLowerCase()
+      .replace(/\s+/g, "") // Remove all spaces
+      .replace(/[^a-z0-9]/g, "") // Remove special characters
+      .replace(/xxx|official|verified|account$/gi, "") // Remove common suffixes
+      .trim();
   }
 }

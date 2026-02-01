@@ -41,7 +41,11 @@ export class TorrentCompletionHandlerService {
    * This is called when a torrent reaches 100% completion
    */
   async handleTorrentCompleted(qbitHash: string): Promise<void> {
+    // Debug log at function entry
+    logger.info({ qbitHash }, "[TorrentCompletionHandler] handleTorrentCompleted called");
+
     try {
+      logger.info("[TorrentCompletionHandler] About to check torrent client");
       // Check if torrent client is configured
       if (!this.torrentClient) {
         await this.logsService.error(
@@ -161,12 +165,24 @@ export class TorrentCompletionHandlerService {
         }
       );
     } catch (error) {
+      // Detailed error logging
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      const errorDetails = error instanceof Error ? {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+        cause: (error as any).cause,
+      } : { error };
+
+      logger.error({ qbitHash, ...errorDetails }, "[TorrentCompletionHandler] ERROR processing completed torrent");
+
       await this.logsService.error(
         "torrent",
-        `Error processing completed torrent: ${error instanceof Error ? error.message : String(error)}`,
+        `Error processing completed torrent: ${errorMessage}`,
         {
           qbitHash,
-          error: error instanceof Error ? error.stack : String(error),
+          error: errorStack || errorMessage,
         }
       );
       throw error;

@@ -1,12 +1,13 @@
 /**
  * Subscription List Component
  * Wrapper component that renders the appropriate view (card or table) for subscriptions
+ * Modern UI with enhanced empty states and loading indicators
  */
 
 import type { SubscriptionDetail } from "@repo/shared-types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle } from "lucide-react";
+import { Users, Building2, Film, Search } from "lucide-react";
 
 // Cards
 import { PerformerCard } from "./cards/performer-card";
@@ -33,6 +34,31 @@ interface SubscriptionListProps {
   isDeletePending?: boolean;
 }
 
+/**
+ * Empty state component
+ */
+function EmptyState({
+  icon,
+  title,
+  description,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center justify-center py-16 px-4">
+        <div className="p-4 rounded-full bg-muted mb-4">
+          {icon}
+        </div>
+        <h3 className="text-lg font-semibold mb-2">{title}</h3>
+        <p className="text-sm text-muted-foreground text-center max-w-md">{description}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function SubscriptionList({
   activeTab,
   performers,
@@ -45,35 +71,52 @@ export function SubscriptionList({
   onToggleSubscribe,
   isDeletePending,
 }: SubscriptionListProps) {
-  const renderEmptyState = (entityType: string) => (
-    <Card>
-      <CardContent className="pt-6">
-        <div className="flex items-center gap-3 text-muted-foreground">
-          <AlertCircle className="h-5 w-5" />
-          <p>
-            {hasFilters
-              ? `No ${entityType} subscriptions match your filters.`
-              : entityType === "performers"
-              ? "No performer subscriptions yet. Search and subscribe to performers to start tracking their content."
-              : entityType === "studios"
-              ? "No studio subscriptions yet. Search and subscribe to studios to start tracking their content."
-              : "No scene subscriptions yet. Scene subscriptions are automatically created when you subscribe to performers or studios."}
-          </p>
-        </div>
-      </CardContent>
-    </Card>
-  );
+  const getEmptyState = (entityType: TabType) => {
+    if (hasFilters) {
+      return {
+        icon: <Search className="h-12 w-12 text-muted-foreground/50" />,
+        title: "No Results Found",
+        description: `No ${entityType} match your current filters. Try adjusting your search or filter settings.`,
+      };
+    }
+
+    const messages = {
+      performers: {
+        icon: <Users className="h-12 w-12 text-purple-500/50" />,
+        title: "No Performer Subscriptions",
+        description: "Search and subscribe to performers to start tracking their content. You can find performers in the search page.",
+      },
+      studios: {
+        icon: <Building2 className="h-12 w-12 text-blue-500/50" />,
+        title: "No Studio Subscriptions",
+        description: "Search and subscribe to studios to start tracking their content. You can find studios in the search page.",
+      },
+      scenes: {
+        icon: <Film className="h-12 w-12 text-orange-500/50" />,
+        title: "No Scene Subscriptions",
+        description: "Scene subscriptions are automatically created when you subscribe to performers or studios. Check back after subscribing!",
+      },
+    };
+
+    return messages[entityType];
+  };
 
   const renderLoadingState = () => (
-    <Card>
-      <CardContent className="pt-6">
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-12 w-full" />
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+      {Array.from({ length: 8 }).map((_, i) => (
+        <Card key={i} className="overflow-hidden">
+          <Skeleton className="aspect-[2/3] w-full" />
+          <CardContent className="p-4 space-y-2">
+            <Skeleton className="h-5 w-3/4" />
+            <Skeleton className="h-4 w-1/2" />
+            <div className="flex gap-2">
+              <Skeleton className="h-6 w-16" />
+              <Skeleton className="h-6 w-16" />
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
   );
 
   // Render content based on active tab
@@ -82,12 +125,13 @@ export function SubscriptionList({
       return renderLoadingState();
     }
     if (performers.length === 0) {
-      return renderEmptyState("performers");
+      const { icon, title, description } = getEmptyState("performers");
+      return <EmptyState icon={icon} title={title} description={description} />;
     }
     return viewMode === "table" ? (
       <PerformerTable subscriptions={performers} onDelete={onDelete} isDeletePending={isDeletePending} />
     ) : (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {performers.map((sub) => (
           <PerformerCard key={sub.id} subscription={sub} onDelete={onDelete} isDeletePending={isDeletePending} />
         ))}
@@ -100,12 +144,13 @@ export function SubscriptionList({
       return renderLoadingState();
     }
     if (studios.length === 0) {
-      return renderEmptyState("studios");
+      const { icon, title, description } = getEmptyState("studios");
+      return <EmptyState icon={icon} title={title} description={description} />;
     }
     return viewMode === "table" ? (
       <StudioTable subscriptions={studios} onDelete={onDelete} isDeletePending={isDeletePending} />
     ) : (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {studios.map((sub) => (
           <StudioCard key={sub.id} subscription={sub} onDelete={onDelete} isDeletePending={isDeletePending} />
         ))}
@@ -118,12 +163,13 @@ export function SubscriptionList({
     return renderLoadingState();
   }
   if (scenes.length === 0) {
-    return renderEmptyState("scenes");
+    const { icon, title, description } = getEmptyState("scenes");
+    return <EmptyState icon={icon} title={title} description={description} />;
   }
   return viewMode === "table" ? (
     <SceneTable subscriptions={scenes} onToggleSubscribe={onToggleSubscribe} />
   ) : (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
       {scenes.map((sub) => (
         <SceneCard key={sub.id} subscription={sub} onToggleSubscribe={onToggleSubscribe} />
       ))}

@@ -35,6 +35,7 @@ const JOB_INFO: Record<string, JobInfo> = {
  * Jobs View
  * Composes jobs UI components and manages data fetching
  * Handles state orchestration but no direct UI rendering
+ * Clean, minimal design
  */
 export function JobsView() {
   const { data: jobs, isLoading } = useJobs();

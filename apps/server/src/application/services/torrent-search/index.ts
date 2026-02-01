@@ -37,7 +37,7 @@ export type TorrentResult = {
   indexerId: string;
   indexerName: string;
   downloadUrl: string;
-  infoHash: string;
+  infoHash?: string; // Optional because some results may not have magnet links
   sceneId?: string;
   indexers?: string[];
   indexerCount?: number;
@@ -157,7 +157,8 @@ export class TorrentSearchService {
     );
 
     try {
-      // For scene subscriptions, use a simpler search by title
+      // For scene subscriptions, search by scene title and match with Cross-Encoder
+      // IMPORTANT: Each torrent must be validated against the scene to ensure correct sceneId assignment
       if (entityType === "scene") {
         const scene = await this.repository.findSceneById(entityId);
         if (!scene) {
@@ -167,7 +168,7 @@ export class TorrentSearchService {
           return [];
         }
 
-        // Search using scene title - treat it as a studio search with scene title as name
+        // Search using scene title as if it's a studio search
         const rawResults = await this.indexerService.searchIndexers(
           "studio",
           { name: scene.title, aliases: [] },
@@ -175,10 +176,46 @@ export class TorrentSearchService {
           indexerIds
         );
 
-        // For scenes, skip complex filtering and just return quality-filtered results
+        await this.logsService.info(
+          "torrent",
+          `Scene search found ${rawResults.length} raw results for "${scene.title}"`,
+          { sceneId: entityId, sceneTitle: scene.title }
+        );
+
+        // Use Cross-Encoder to validate each torrent against this specific scene
+        // Only torrents that match this scene will be returned with correct sceneId
+        const { matched, unmatched } = await this.matchService.matchTorrentsToSingleScene(
+          rawResults,
+          scene as SceneMetadata
+        );
+
+        await this.logsService.info(
+          "torrent",
+          `Cross-Encoder validation: ${matched.length} matched, ${unmatched.length} rejected`,
+          {
+            sceneId: entityId,
+            sceneTitle: scene.title,
+            matchedCount: matched.length,
+            rejectedCount: unmatched.length,
+          }
+        );
+
+        // Process matched torrents with quality selection
         const matchedTorrents = await this.qualityService.processMatchedResults(
-          rawResults.map(r => ({ scene: scene as unknown as SceneMetadata, torrents: [r] })),
+          matched,
           qualityProfileId
+        );
+
+        await this.logsService.info(
+          "torrent",
+          `Scene search complete: ${matchedTorrents.length}/${rawResults.length} torrents selected`,
+          {
+            sceneId: entityId,
+            sceneTitle: scene.title,
+            totalResults: rawResults.length,
+            selected: matchedTorrents.length,
+            rejected: unmatched.length,
+          }
         );
 
         return matchedTorrents;

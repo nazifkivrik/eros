@@ -104,6 +104,11 @@ export class QBittorrentAdapter implements ITorrentClient {
     }
 
     if (!response.ok) {
+      this.logger.error({
+        endpoint,
+        status: response.status,
+        statusText: response.statusText,
+      }, "[QBittorrent] API error response");
       throw new Error(
         `qBittorrent API error: ${response.status} ${response.statusText}`
       );
@@ -114,7 +119,19 @@ export class QBittorrentAdapter implements ITorrentClient {
       return response.json() as Promise<T>;
     }
 
-    return response.text() as Promise<T>;
+    const text = await response.text();
+
+    // Log for debugging setLocation endpoint
+    if (endpoint.includes("setLocation")) {
+      this.logger.info({
+        endpoint,
+        result: text,
+        resultLength: text.length,
+        contentType,
+      }, "[QBittorrent] API response text");
+    }
+
+    return text as T;
   }
 
   private async login(): Promise<void> {
@@ -474,21 +491,52 @@ export class QBittorrentAdapter implements ITorrentClient {
 
   /**
    * Set torrent location (move files via qBittorrent)
+   * Note: setLocation returns empty string on success (HTTP 200), not "Ok."
    */
   async setLocation(hash: string, location: string): Promise<boolean> {
+    this.logger.info({
+      hash,
+      location,
+      apiEndpoint: "/api/v2/torrents/setLocation",
+    }, "[QBittorrent] setLocation API call");
+
     const formData = new URLSearchParams();
     formData.append("hashes", hash);
     formData.append("location", location);
 
-    const result = await this.request<string>("/api/v2/torrents/setLocation", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: formData,
-    });
+    this.logger.debug({
+      formDataBody: formData.toString(),
+    }, "[QBittorrent] Request body");
 
-    return result === "Ok.";
+    try {
+      const result = await this.request<string>("/api/v2/torrents/setLocation", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData,
+      });
+
+      // setLocation returns empty string on success (HTTP 200 with no body)
+      // If we get here without throwing, it means HTTP 200 was returned
+      const success = true;
+      this.logger.info({
+        hash,
+        location,
+        result,
+        resultLength: result.length,
+        success,
+      }, "[QBittorrent] setLocation API response");
+
+      return success;
+    } catch (error) {
+      this.logger.error({
+        error,
+        hash,
+        location,
+      }, "[QBittorrent] setLocation API error");
+      throw error;
+    }
   }
 
   /**

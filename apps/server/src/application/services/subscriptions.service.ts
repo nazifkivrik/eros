@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 import type { Logger } from "pino";
+import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
 import { SubscriptionsRepository } from "@/infrastructure/repositories/subscriptions.repository.js";
 import { ScenesRepository } from "@/infrastructure/repositories/scenes.repository.js";
 import { SubscriptionsCoreService } from "./subscriptions/subscriptions.core.service.js";
@@ -54,6 +55,7 @@ export class SubscriptionsService {
   private subscriptionsDiscoveryService: SubscriptionsDiscoveryService;
   private entityResolverService: EntityResolverService;
   private fileManager: FileManagerService;
+  private torrentClient: ITorrentClient | undefined;
   private logger: Logger;
 
   constructor({
@@ -64,6 +66,7 @@ export class SubscriptionsService {
     subscriptionsDiscoveryService,
     entityResolverService,
     fileManager,
+    torrentClient,
     logger,
   }: {
     subscriptionsRepository: SubscriptionsRepository;
@@ -73,6 +76,7 @@ export class SubscriptionsService {
     subscriptionsDiscoveryService: SubscriptionsDiscoveryService;
     entityResolverService: EntityResolverService;
     fileManager: FileManagerService;
+    torrentClient?: ITorrentClient;
     logger: Logger;
   }) {
     this.subscriptionsRepository = subscriptionsRepository;
@@ -82,6 +86,7 @@ export class SubscriptionsService {
     this.subscriptionsDiscoveryService = subscriptionsDiscoveryService;
     this.entityResolverService = entityResolverService;
     this.fileManager = fileManager;
+    this.torrentClient = torrentClient;
     this.logger = logger;
   }
 
@@ -359,9 +364,14 @@ export class SubscriptionsService {
    * Cascade delete for scenes if requested
    *
    * Scene deletion logic:
-   * - If scene has relations (performer/studio), soft delete (isSubscribed=false)
-   * - If scene has NO relations, hard delete from DB
-   * - Scene folders are always deleted when removeFiles=true
+   * - Scene subscriptions: always soft delete (isSubscribed=false), never delete scene from DB
+   * - Performer/studio subscriptions with deleteAssociatedScenes=true:
+   *   - Delete performer/studio from DB
+   *   - Delete performersScenes junction table entries
+   *   - Delete scene subscriptions, torrents, and folders
+   *   - If scene has NO other relations → hard delete from DB
+   * - Performer/studio subscriptions with deleteAssociatedScenes=false:
+   *   - Only delete the subscription, keep all scenes
    */
   async delete(id: string, dto: DeleteSubscriptionDTO) {
     this.logger.info({ subscriptionId: id, ...dto }, "Deleting subscription");
@@ -369,56 +379,71 @@ export class SubscriptionsService {
     // Get subscription first to check type
     const subscription = await this.subscriptionsCoreService.getById(id);
 
-    // If this is a scene subscription and removeFiles is requested, delete folder first
-    if (subscription.entityType === "scene" && dto.removeFiles) {
-      try {
-        await this.fileManager.deleteSceneFolder(subscription.entityId, "user_deleted");
-        this.logger.info({ sceneId: subscription.entityId }, "Scene folder deleted");
-      } catch (error) {
-        this.logger.error({ sceneId: subscription.entityId, error }, "Failed to delete scene folder");
+    // Case 3: Scene subscription deletion
+    if (subscription.entityType === "scene") {
+      // Delete scene folder if requested
+      if (dto.removeFiles) {
+        try {
+          await this.fileManager.deleteSceneFolder(subscription.entityId, "user_deleted");
+          this.logger.info({ sceneId: subscription.entityId }, "Scene folder deleted");
+        } catch (error) {
+          this.logger.error({ sceneId: subscription.entityId, error }, "Failed to delete scene folder");
+        }
       }
+
+      // Soft delete: mark scene as unsubscribed, don't delete from DB
+      await this.subscriptionsRepository.updateSceneIsSubscribed(subscription.entityId, false);
+
+      // Delete the scene subscription
+      await this.subscriptionsCoreService.deleteBasic(id);
+
+      this.logger.info({ subscriptionId: id }, "Scene subscription deleted");
+      return;
     }
 
-    // If deleteAssociatedScenes is true and this is performer/studio
+    // Case 1: Delete performer/studio with all scenes and the entity itself
     if (dto.deleteAssociatedScenes && (subscription.entityType === "performer" || subscription.entityType === "studio")) {
-      // Get scenes for this subscription
-      const scenes = subscription.entityType === "performer"
-        ? await this.subscriptionsRepository.getPerformerScenes(subscription.entityId)
-        : await this.subscriptionsRepository.getStudioScenes(subscription.entityId);
+      const entityType = subscription.entityType;
+      const entityId = subscription.entityId;
 
-      this.logger.info({ sceneCount: scenes.length }, "Processing scene deletions");
+      // Get scenes for this subscription BEFORE deleting relations
+      const scenes = entityType === "performer"
+        ? await this.subscriptionsRepository.getPerformerScenes(entityId)
+        : await this.subscriptionsRepository.getStudioScenes(entityId);
 
-      // Process each scene
+      this.logger.info({ entityType, entityId, sceneCount: scenes.length }, "Processing full deletion with scenes");
+
+      // Step 1: Delete junction table entries (performersScenes)
+      // This must happen BEFORE processing scenes so hasOtherRelations check works correctly
+      if (entityType === "performer") {
+        try {
+          await this.subscriptionsRepository.deletePerformerScenes(entityId);
+          this.logger.info({ performerId: entityId }, "Deleted performer-scene relations");
+        } catch (error) {
+          this.logger.error({ performerId: entityId, error }, "Failed to delete performer-scene relations");
+        }
+      }
+
+      // Step 2: Process each scene
       for (const scene of scenes as any[]) {
-        // Delete scene subscription first
+        // 2a. Delete scene subscription
         const sceneSub = await this.subscriptionsRepository.findByEntity("scene", scene.id);
         if (sceneSub) {
           await this.subscriptionsCoreService.deleteBasic(sceneSub.id);
         }
 
-        // Check if scene has other relations (performers or studio)
-        const relations = await this.subscriptionsRepository.getSceneRelationsCount(scene.id);
-        const hasRelations = relations.performers > 0 || relations.studios > 0;
-
-        if (hasRelations) {
-          // Soft delete: set isSubscribed=false
-          // Scene stays in DB for potential re-subscription
-          this.logger.info({
-            sceneId: scene.id,
-            title: scene.title,
-            relations,
-          }, "Scene has relations - soft deleting (isSubscribed=false)");
-          await this.subscriptionsRepository.updateSceneIsSubscribed(scene.id, false);
-        } else {
-          // Hard delete: remove from DB completely
-          this.logger.info({
-            sceneId: scene.id,
-            title: scene.title,
-          }, "Scene has no relations - hard deleting from DB");
-          await this.subscriptionsRepository.deleteScene(scene.id);
+        // 2b. Delete torrent from qBittorrent
+        const downloadQueue = await this.subscriptionsRepository.getSceneDownloadQueue(scene.id);
+        if (downloadQueue?.qbitHash && this.torrentClient) {
+          try {
+            await this.torrentClient.removeTorrent(downloadQueue.qbitHash, false);
+            this.logger.info({ sceneId: scene.id, torrentHash: downloadQueue.qbitHash }, "Torrent deleted from qBittorrent");
+          } catch (error) {
+            this.logger.error({ sceneId: scene.id, error }, "Failed to delete torrent from qBittorrent");
+          }
         }
 
-        // Delete scene folder if requested
+        // 2c. Delete scene folder if requested
         if (dto.removeFiles) {
           try {
             await this.fileManager.deleteSceneFolder(scene.id, "user_deleted");
@@ -427,10 +452,36 @@ export class SubscriptionsService {
             this.logger.error({ sceneId: scene.id, error }, "Failed to delete scene folder");
           }
         }
+
+        // 2d. Check if scene has other active subscriptions (not just relations)
+        // We only care if there are other SUBSCRIBED performers/studios
+        const hasOtherSubscriptions = await this.checkSceneHasOtherSubscriptions(scene.id, entityType, entityId);
+
+        // 2e. Hard delete only scenes WITHOUT other active subscriptions
+        if (!hasOtherSubscriptions) {
+          // Scene has no other active subscriptions - hard delete from DB
+          this.logger.info({
+            sceneId: scene.id,
+            title: scene.title,
+          }, "Scene has no other active subscriptions - hard deleting from DB");
+          await this.subscriptionsRepository.deleteScene(scene.id);
+        } else {
+          // Scene has other active subscriptions - keep scene untouched
+          this.logger.info({
+            sceneId: scene.id,
+            title: scene.title,
+          }, "Scene has other active subscriptions - keeping scene in DB");
+        }
       }
+
+      // Step 3: Delete the subscription itself (performer/studio stays in DB)
+      await this.subscriptionsCoreService.deleteBasic(id);
+
+      this.logger.info({ subscriptionId: id, entityType, entityId }, "Subscription deleted with scenes, performer/studio kept in DB");
+      return;
     }
 
-    // Delete the subscription
+    // Case 2: Delete the subscription only, keep all scenes
     await this.subscriptionsCoreService.deleteBasic(id);
 
     this.logger.info({ subscriptionId: id }, "Subscription deleted");
@@ -510,6 +561,54 @@ export class SubscriptionsService {
       files,
       downloadQueue: downloadQueue || null,
     };
+  }
+
+  /**
+   * Check if a scene has other active subscriptions (excluding the current one)
+   * This is used when deleting a performer/studio subscription to determine if scenes should be deleted
+   */
+  private async checkSceneHasOtherSubscriptions(
+    sceneId: string,
+    currentEntityType: "performer" | "studio",
+    currentEntityId: string
+  ): Promise<boolean> {
+    // 1. Check if scene has its own active subscription
+    const sceneSub = await this.subscriptionsRepository.findByEntity("scene", sceneId);
+    if (sceneSub && sceneSub.isSubscribed) {
+      this.logger.debug({ sceneId }, "Scene has its own active subscription");
+      return true;
+    }
+
+    // 2. Get all performers for this scene from junction table
+    const performerIds = await this.subscriptionsRepository.getScenePerformerIds(sceneId);
+
+    // 3. Check if any of the scene's performers have active subscriptions
+    for (const performerId of performerIds) {
+      // Skip the current performer being deleted
+      if (currentEntityType === "performer" && performerId === currentEntityId) {
+        continue;
+      }
+      const perfSub = await this.subscriptionsRepository.findByEntity("performer", performerId);
+      if (perfSub && perfSub.isSubscribed) {
+        this.logger.debug({ sceneId, performerId }, "Scene has performer with active subscription");
+        return true;
+      }
+    }
+
+    // 4. Check if scene's studio has active subscription
+    const scene = await this.scenesRepository.findById(sceneId);
+    if (scene?.siteId) {
+      // Skip the current studio being deleted
+      if (currentEntityType !== "studio" || scene.siteId !== currentEntityId) {
+        const studioSub = await this.subscriptionsRepository.findByEntity("studio", scene.siteId);
+        if (studioSub && studioSub.isSubscribed) {
+          this.logger.debug({ sceneId, studioId: scene.siteId }, "Scene has studio with active subscription");
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   /**

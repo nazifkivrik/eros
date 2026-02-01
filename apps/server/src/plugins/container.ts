@@ -111,6 +111,7 @@ export default fp(async (app: FastifyInstance) => {
     jobsService: container.cradle.jobsService,
     schedulerService: container.cradle.schedulerService,
     torrentCompletionService: container.cradle.torrentCompletionService,
+    dashboardService: container.cradle.dashboardService,
 
     // Clean Architecture - Jobs
     cleanupJob: container.cradle.cleanupJob,
@@ -131,6 +132,7 @@ export default fp(async (app: FastifyInstance) => {
     searchController: container.cradle.searchController,
     jobsController: container.cradle.jobsController,
     torrentSearchController: container.cradle.torrentSearchController,
+    dashboardController: container.cradle.dashboardController,
   };
 
   // Add optional services
