@@ -89,49 +89,64 @@ export class QBittorrentAdapter implements ITorrentClient {
     }
 
     const url = `${this.baseUrl}${endpoint}`;
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        Cookie: this.cookie!,
-        ...options.headers,
-      },
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-    if (response.status === 403) {
-      // Session expired, re-login
-      await this.login();
-      return this.request(endpoint, options);
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          Cookie: this.cookie!,
+          ...options.headers,
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.status === 403) {
+        // Session expired, re-login
+        await this.login();
+        return this.request(endpoint, options);
+      }
+
+      if (!response.ok) {
+        this.logger.error({
+          endpoint,
+          status: response.status,
+          statusText: response.statusText,
+        }, "[QBittorrent] API error response");
+        throw new Error(
+          `qBittorrent API error: ${response.status} ${response.statusText}`
+        );
+      }
+
+      const contentType = response.headers.get("content-type");
+      if (contentType?.includes("application/json")) {
+        return response.json() as Promise<T>;
+      }
+
+      const text = await response.text();
+
+      // Log for debugging setLocation endpoint
+      if (endpoint.includes("setLocation")) {
+        this.logger.info({
+          endpoint,
+          result: text,
+          resultLength: text.length,
+          contentType,
+        }, "[QBittorrent] API response text");
+      }
+
+      return text as T;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof Error && error.name === 'AbortError') {
+        this.logger.error({ endpoint }, "[QBittorrent] Request timeout");
+        throw new Error(`qBittorrent API timeout: ${endpoint}`);
+      }
+      throw error;
     }
-
-    if (!response.ok) {
-      this.logger.error({
-        endpoint,
-        status: response.status,
-        statusText: response.statusText,
-      }, "[QBittorrent] API error response");
-      throw new Error(
-        `qBittorrent API error: ${response.status} ${response.statusText}`
-      );
-    }
-
-    const contentType = response.headers.get("content-type");
-    if (contentType?.includes("application/json")) {
-      return response.json() as Promise<T>;
-    }
-
-    const text = await response.text();
-
-    // Log for debugging setLocation endpoint
-    if (endpoint.includes("setLocation")) {
-      this.logger.info({
-        endpoint,
-        result: text,
-        resultLength: text.length,
-        contentType,
-      }, "[QBittorrent] API response text");
-    }
-
-    return text as T;
   }
 
   private async login(): Promise<void> {
@@ -139,25 +154,39 @@ export class QBittorrentAdapter implements ITorrentClient {
     formData.append("username", this.username);
     formData.append("password", this.password);
 
-    const response = await fetch(`${this.baseUrl}/api/v2/auth/login`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: formData,
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout for login
 
-    if (!response.ok || (await response.text()) !== "Ok.") {
-      throw new Error("qBittorrent login failed");
+    try {
+      const response = await fetch(`${this.baseUrl}/api/v2/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok || (await response.text()) !== "Ok.") {
+        throw new Error("qBittorrent login failed");
+      }
+
+      const cookie = response.headers.get("set-cookie");
+      if (!cookie) {
+        throw new Error("No cookie received from qBittorrent");
+      }
+
+      this.cookie = cookie.split(";")[0];
+      this.logger.debug("qBittorrent login successful");
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error("qBittorrent login timeout");
+      }
+      throw error;
     }
-
-    const cookie = response.headers.get("set-cookie");
-    if (!cookie) {
-      throw new Error("No cookie received from qBittorrent");
-    }
-
-    this.cookie = cookie.split(";")[0];
-    this.logger.debug("qBittorrent login successful");
   }
 
   async getTorrents(filter?: string, category?: string): Promise<TorrentInfo[]> {

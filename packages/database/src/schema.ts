@@ -264,7 +264,9 @@ export const subscriptions = sqliteTable("subscriptions", {
   isSubscribed: integer("is_subscribed", { mode: "boolean" }).notNull().default(true),
   searchCutoffDate: text("search_cutoff_date"),
   ...timestamps,
-});
+}, (table) => ({
+  entityIdx: index("subscription_entity_idx").on(table.entityType, table.entityId),
+}));
 
 // Meta Sources Table
 export const metaSources = sqliteTable("meta_sources", {
@@ -303,7 +305,9 @@ export const downloadQueue = sqliteTable("download_queue", {
     .default(0),
   addToClientLastAttempt: text("add_to_client_last_attempt"),
   addToClientError: text("add_to_client_error"),
-});
+}, (table) => ({
+  statusAddedIdx: index("download_queue_status_added_idx").on(table.status, table.addedAt),
+}));
 
 // Scene Files Table
 export const sceneFiles = sqliteTable("scene_files", {
