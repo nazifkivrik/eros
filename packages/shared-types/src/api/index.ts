@@ -7,3 +7,4 @@ export * from "./settings.js";
 export * from "./subscription.js";
 export * from "./download-queue.js";
 export * from "./entities.js";
+export * from "./torrent-search.js";

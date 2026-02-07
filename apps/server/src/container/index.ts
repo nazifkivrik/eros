@@ -6,6 +6,7 @@ import type { ExternalServicesManager } from "../config/external-services.js";
 import { JobProgressService } from "../infrastructure/job-progress.service.js";
 import { getJobProgressService } from "../infrastructure/job-progress.service.js";
 import { TorrentSearchService } from "../application/services/torrent-search/index.js";
+import { TorrentSearchManualService } from "../application/services/torrent-search/torrent-search.manual.service.js";
 import { DownloadService } from "../application/services/torrent-selection/download.service.js";
 // FileManagerService is registered in plugin with runtime config
 import { TorrentParserService } from "../application/services/torrent-quality/parser.service.js";
@@ -173,6 +174,7 @@ export function buildContainer(config: ContainerConfig) {
   container.register({
     performersService: asClass(PerformersService).scoped(),
     torrentSearchService: asClass(TorrentSearchService).scoped(),
+    torrentSearchManualService: asClass(TorrentSearchManualService).scoped(),
     subscriptionsService: asClass(SubscriptionsService).scoped(),
     subscriptionsCoreService: asClass(SubscriptionsCoreService).scoped(),
     subscriptionsScenesService: asClass(SubscriptionsScenesService).scoped(),
@@ -204,7 +206,13 @@ export function buildContainer(config: ContainerConfig) {
   // Register Controllers (Interface Layer)
   container.register({
     performersController: asClass(PerformersController).scoped(),
-    torrentSearchController: asClass(TorrentSearchController).scoped(),
+    torrentSearchController: asClass(TorrentSearchController)
+      .scoped()
+      .inject((container) => ({
+        torrentSearchService: container.cradle.torrentSearchService,
+        torrentSearchManualService: container.cradle.torrentSearchManualService,
+        logsService: container.cradle.logsService,
+      })),
     subscriptionsController: asClass(SubscriptionsController).scoped(),
     qualityProfilesController: asClass(QualityProfilesController).scoped(),
     setupController: asClass(SetupController).scoped(),

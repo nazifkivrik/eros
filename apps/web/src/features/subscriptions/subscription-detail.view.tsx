@@ -17,6 +17,7 @@ import {
   Check,
   X,
   Plus,
+  Search,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -69,6 +70,7 @@ import { useMutationWithToast } from "@/hooks/useMutationWithToast";
 import { ViewToggle } from "@/components/subscriptions/ViewToggle";
 import { SubscriptionFilters } from "@/components/subscriptions/SubscriptionFilters";
 import { useSubscriptionFilters } from "@/features/subscriptions";
+import { ManualSearchDialog } from "@/features/torrent-search";
 
 interface SubscriptionDetailProps {
   id: string;
@@ -88,6 +90,15 @@ export function SubscriptionDetailView({ id }: SubscriptionDetailProps) {
   const resubscribeScene = useResubscribeScene(id);
 
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+
+  // Manual search dialog state
+  const [manualSearchDialog, setManualSearchDialog] = useState<{
+    open: boolean;
+    sceneId: string;
+    sceneTitle: string;
+    performerName?: string;
+    sceneDate?: string;
+  } | null>(null);
 
   // URL-based filter state for detail page
   const {
@@ -1026,53 +1037,76 @@ export function SubscriptionDetailView({ id }: SubscriptionDetailProps) {
                           </div>
 
                           {/* Action Button */}
-                          {scene.subscriptionId ? (
-                            // Scene has individual subscription - show unsubscribe/resubscribe
-                            <Button
-                              variant={scene.isSubscribed ? "ghost" : "default"}
-                              size="sm"
-                              className="h-7 px-2"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                scene.isSubscribed
-                                  ? handleUnsubscribeScene(scene.subscriptionId)
-                                  : handleResubscribeScene(scene.subscriptionId);
-                              }}
-                              disabled={
-                                (scene.isSubscribed && unsubscribeScene.isPending) ||
-                                (!scene.isSubscribed && resubscribeScene.isPending)
-                              }
-                            >
-                              {scene.isSubscribed ? (
-                                <>
-                                  <X className="h-3.5 w-3.5 mr-1" />
-                                  Unsubscribe
-                                </>
-                              ) : (
-                                <>
-                                  <Check className="h-3.5 w-3.5 mr-1" />
-                                  Resubscribe
-                                </>
-                              )}
-                            </Button>
-                          ) : (
-                            // Scene has no individual subscription - show subscribe button
-                            <Button
-                              variant="default"
-                              size="sm"
-                              className="h-7 px-2"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                handleSubscribeScene(scene.id);
-                              }}
-                              disabled={subscribeScene.isPending}
-                            >
-                              <Plus className="h-3.5 w-3.5 mr-1" />
-                              Subscribe
-                            </Button>
-                          )}
+                          <div className="flex gap-2">
+                            {(scene.downloadStatus === "not_queued" || scene.downloadStatus === "add_failed") && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 px-2"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setManualSearchDialog({
+                                    open: true,
+                                    sceneId: scene.id,
+                                    sceneTitle: scene.title,
+                                    performerName: subscription?.entityName || scene.performers?.[0]?.name,
+                                    sceneDate: scene.date,
+                                  });
+                                }}
+                              >
+                                <Search className="h-3.5 w-3.5 mr-1" />
+                                Manual Search
+                              </Button>
+                            )}
+                            {scene.subscriptionId ? (
+                              // Scene has individual subscription - show unsubscribe/resubscribe
+                              <Button
+                                variant={scene.isSubscribed ? "ghost" : "default"}
+                                size="sm"
+                                className="h-7 px-2"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  scene.isSubscribed
+                                    ? handleUnsubscribeScene(scene.subscriptionId)
+                                    : handleResubscribeScene(scene.subscriptionId);
+                                }}
+                                disabled={
+                                  (scene.isSubscribed && unsubscribeScene.isPending) ||
+                                  (!scene.isSubscribed && resubscribeScene.isPending)
+                                }
+                              >
+                                {scene.isSubscribed ? (
+                                  <>
+                                    <X className="h-3.5 w-3.5 mr-1" />
+                                    Unsubscribe
+                                  </>
+                                ) : (
+                                  <>
+                                    <Check className="h-3.5 w-3.5 mr-1" />
+                                    Resubscribe
+                                  </>
+                                )}
+                              </Button>
+                            ) : (
+                              // Scene has no individual subscription - show subscribe button
+                              <Button
+                                variant="default"
+                                size="sm"
+                                className="h-7 px-2"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  handleSubscribeScene(scene.id);
+                                }}
+                                disabled={subscribeScene.isPending}
+                              >
+                                <Plus className="h-3.5 w-3.5 mr-1" />
+                                Subscribe
+                              </Button>
+                            )}
+                          </div>
                         </div>
 
                         {/* File Details (if has files) */}
@@ -1526,6 +1560,18 @@ export function SubscriptionDetailView({ id }: SubscriptionDetailProps) {
             )}
           </CardContent>
         </Card>
+      )}
+
+      {/* Manual Search Dialog */}
+      {manualSearchDialog && (
+        <ManualSearchDialog
+          open={manualSearchDialog.open}
+          onOpenChange={(open) => setManualSearchDialog(open ? manualSearchDialog : null)}
+          sceneId={manualSearchDialog.sceneId}
+          sceneTitle={manualSearchDialog.sceneTitle}
+          performerName={manualSearchDialog.performerName}
+          sceneDate={manualSearchDialog.sceneDate}
+        />
       )}
     </div>
   );

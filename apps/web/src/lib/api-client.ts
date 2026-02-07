@@ -9,6 +9,7 @@ import type {
   EventType,
   LogLevel,
   AppSettings,
+  ManualSearchResult,
 } from "@repo/shared-types";
 
 // Use relative URL for browser requests to work in any environment (local, Docker, etc.)
@@ -179,6 +180,34 @@ class ApiClient {
 
   async getSceneDetails(id: string) {
     return this.request<Scene>(`/search/scenes/${id}`);
+  }
+
+  // Manual Torrent Search
+  async manualSearchScene(
+    sceneId: string,
+    options: { query?: string; limit?: number }
+  ) {
+    return this.request<ManualSearchResult[]>(
+      `/torrent-search/manual/scenes/${sceneId}`,
+      {
+        method: "POST",
+        body: JSON.stringify(options),
+      }
+    );
+  }
+
+  async addToDownloadQueue(data: {
+    sceneId: string;
+    title: string;
+    size: number;
+    seeders: number;
+    quality: string;
+    magnetLink?: string;
+  }) {
+    return this.request<DownloadQueueItem>("/download-queue", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   }
 
   // Performers

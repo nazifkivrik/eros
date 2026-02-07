@@ -14,6 +14,7 @@ import { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
   TorrentResultArraySchema,
+  ManualSearchResultArraySchema,
   ErrorResponseSchema,
 } from "./torrent-search.schema.js";
 
@@ -83,6 +84,39 @@ const torrentSearchRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       return await torrentSearchController.searchManual(
+        request as never,
+        reply
+      );
+    }
+  );
+
+  /**
+   * Manual torrent search for a specific scene with cross-encoder ranking
+   * POST /api/torrent-search/manual/scenes/:sceneId
+   */
+  app.post(
+    "/manual/scenes/:sceneId",
+    {
+      schema: {
+        tags: ["Torrent Search"],
+        description: "Manual torrent search for a specific scene with cross-encoder ranking",
+        params: z.object({
+          sceneId: z.string(),
+        }),
+        body: z.object({
+          query: z.string().optional(),
+          limit: z.number().default(50).optional(),
+        }),
+        response: {
+          200: ManualSearchResultArraySchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          500: ErrorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      return await torrentSearchController.searchManualForScene(
         request as never,
         reply
       );

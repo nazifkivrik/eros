@@ -20,7 +20,7 @@ dist
 # Misc
 .DS_Store
 *.pem
-
+.playwright-mcp
 # Debug
 npm-debug.log*
 yarn-debug.log*

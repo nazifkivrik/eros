@@ -17,19 +17,24 @@ import type {
   ManualSearchRequest,
   TorrentResult,
 } from "@/modules/torrent-search/torrent-search.schema.js";
+import type { TorrentSearchManualService } from "@/application/services/torrent-search/torrent-search.manual.service.js";
+import type { ManualSearchResult } from "@/application/services/torrent-search/torrent-search.manual.service.js";
 
 /**
  * Torrent Search Controller
  */
 export class TorrentSearchController {
   private torrentSearchService: TorrentSearchService;
+  private torrentSearchManualService: TorrentSearchManualService;
   private logsService: LogsService;
 
   constructor(deps: {
     torrentSearchService: TorrentSearchService;
+    torrentSearchManualService: TorrentSearchManualService;
     logsService: LogsService;
   }) {
     this.torrentSearchService = deps.torrentSearchService;
+    this.torrentSearchManualService = deps.torrentSearchManualService;
     this.logsService = deps.logsService;
   }
 
@@ -122,21 +127,103 @@ export class TorrentSearchController {
     },
     _reply: FastifyReply
   ): Promise<TorrentResult[]> {
-    const { query, qualityProfileId, limit = 50 } = request.Body;
+    const { query, limit = 50 } = request.Body;
 
     await this.logsService.info(
       "torrent-search",
       `HTTP API: Manual search for "${query}"`,
       {
         query,
-        qualityProfileId,
         limit,
       }
     );
 
-    // TODO: Implement manual search
-    // This would use the indexer directly to search for torrents
-    throw new Error("Manual search not yet implemented");
+    try {
+      // Manual search without scene context - returns unranked results
+      const results = await this.torrentSearchManualService.searchManualForScene(
+        "", // Empty scene ID - service will handle this
+        query,
+        limit
+      );
+
+      await this.logsService.info(
+        "torrent-search",
+        `HTTP API: Manual search returned ${results.length} results`,
+        {
+          query,
+          resultCount: results.length,
+        }
+      );
+
+      return results;
+    } catch (error) {
+      await this.logsService.error(
+        "torrent-search",
+        `HTTP API: Manual search failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+        {
+          query,
+          error: error instanceof Error ? error.stack : String(error),
+        }
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Manual torrent search for a specific scene with cross-encoder ranking
+   * POST /api/torrent-search/manual/scenes/:sceneId
+   */
+  async searchManualForScene(
+    request: {
+      Params?: { sceneId: string };
+      params?: { sceneId: string };
+      Body?: { query?: string; limit?: number };
+      body?: { query?: string; limit?: number };
+    },
+    _reply: FastifyReply
+  ): Promise<ManualSearchResult[]> {
+    const { sceneId } = request.Params || request.params || {};
+    const { query, limit = 50 } = request.Body || request.body || {};
+
+    await this.logsService.info(
+      "torrent-search",
+      `HTTP API: Manual search for scene ${sceneId} with query "${query || "auto"}"`,
+      {
+        sceneId,
+        query: query || "auto",
+        limit,
+      }
+    );
+
+    try {
+      const results = await this.torrentSearchManualService.searchManualForScene(
+        sceneId,
+        query || "", // Empty query will be handled by service
+        limit
+      );
+
+      await this.logsService.info(
+        "torrent-search",
+        `HTTP API: Scene manual search returned ${results.length} ranked results`,
+        {
+          sceneId,
+          resultCount: results.length,
+          topScore: results[0]?.matchScore ?? 0,
+        }
+      );
+
+      return results;
+    } catch (error) {
+      await this.logsService.error(
+        "torrent-search",
+        `HTTP API: Scene manual search failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+        {
+          sceneId,
+          error: error instanceof Error ? error.stack : String(error),
+        }
+      );
+      throw error;
+    }
   }
 }
 
@@ -145,6 +232,7 @@ export class TorrentSearchController {
  */
 export function createTorrentSearchController(deps: {
   torrentSearchService: TorrentSearchService;
+  torrentSearchManualService: TorrentSearchManualService;
   logsService: LogsService;
 }): TorrentSearchController {
   return new TorrentSearchController(deps);
