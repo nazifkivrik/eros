@@ -2,37 +2,65 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export async function middleware(request: NextRequest) {
-  // Skip middleware for setup page, static files, and API routes
-  if (
-    request.nextUrl.pathname.startsWith("/setup") ||
-    request.nextUrl.pathname.startsWith("/_next") ||
-    request.nextUrl.pathname.startsWith("/api")
-  ) {
+  const { pathname } = request.nextUrl;
+
+  // Skip middleware for static files
+  if (pathname.startsWith("/_next") || pathname.startsWith("/api")) {
     return NextResponse.next();
   }
 
+  // Skip auth check for login and setup pages
+  if (pathname.startsWith("/login") || pathname.startsWith("/setup")) {
+    return NextResponse.next();
+  }
+
+  const backendUrl = process.env.BACKEND_URL || "http://localhost:3001";
+
   try {
-    // Check setup status
-    // Middleware runs server-side, use BACKEND_URL (not NEXT_PUBLIC_API_URL)
-    const backendUrl = process.env.BACKEND_URL || "http://localhost:3001";
-    const response = await fetch(`${backendUrl}/api/setup/status`, {
+    // Get cookie from request
+    const cookie = request.headers.get("cookie");
+
+    // First check setup status
+    const setupResponse = await fetch(`${backendUrl}/api/setup/status`, {
       cache: "no-store",
     });
 
-    if (!response.ok) {
-      // If API is not available, let the request through
-      return NextResponse.next();
-    }
+    if (setupResponse.ok) {
+      const { setupCompleted } = await setupResponse.json();
 
-    const { setupCompleted } = await response.json();
+      if (!setupCompleted) {
+        // Setup not completed, redirect to setup
+        return NextResponse.redirect(new URL("/setup", request.url));
+      }
 
-    if (!setupCompleted) {
-      return NextResponse.redirect(new URL("/setup", request.url));
+      // Setup completed, now check auth status
+      // Forward the session cookie to the backend
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (cookie) {
+        headers["Cookie"] = cookie;
+      }
+
+      const authResponse = await fetch(`${backendUrl}/api/auth/status`, {
+        cache: "no-store",
+        headers,
+      });
+
+      if (authResponse.ok) {
+        const { authenticated } = await authResponse.json();
+
+        if (!authenticated) {
+          // Not authenticated, redirect to login
+          const loginUrl = new URL("/login", request.url);
+          loginUrl.searchParams.set("redirect", pathname);
+          return NextResponse.redirect(loginUrl);
+        }
+      }
     }
   } catch (error) {
-    // If there's an error checking setup status, let the request through
-    // This prevents the app from being inaccessible if the API is down
-    console.error("Error checking setup status:", error);
+    // If API is unavailable, let request through for better UX
+    console.error("Middleware error:", error);
   }
 
   return NextResponse.next();

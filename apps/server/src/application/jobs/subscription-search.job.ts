@@ -11,6 +11,7 @@ import type { SubscriptionsRepository } from "@/infrastructure/repositories/subs
 import type { DownloadQueueRepository } from "@/infrastructure/repositories/download-queue.repository.js";
 import type { LogsService } from "../../application/services/logs.service.js";
 import type { TorrentSearchService } from "../../application/services/torrent-search/index.js";
+import type { TorrentClientRegistry } from "@/infrastructure/registries/provider-registry.js";
 import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
 import type { FileManagerService } from "../../application/services/file-management/file-manager.service.js";
 import type { SettingsService } from "../../application/services/settings.service.js";
@@ -31,7 +32,7 @@ export class SubscriptionSearchJob extends BaseJob {
   private downloadQueueRepository: DownloadQueueRepository;
   private logsService: LogsService;
   private torrentSearchService: TorrentSearchService;
-  private torrentClient: ITorrentClient | undefined;
+  private torrentClientRegistry: TorrentClientRegistry;
   private fileManager: FileManagerService;
   private settingsService: SettingsService;
   private downloadQueueService: DownloadQueueService;
@@ -45,7 +46,7 @@ export class SubscriptionSearchJob extends BaseJob {
     downloadQueueRepository: DownloadQueueRepository;
     logsService: LogsService;
     torrentSearchService: TorrentSearchService;
-    torrentClient: ITorrentClient | undefined;
+    torrentClientRegistry: TorrentClientRegistry;
     fileManager: FileManagerService;
     settingsService: SettingsService;
     downloadQueueService: DownloadQueueService;
@@ -57,12 +58,20 @@ export class SubscriptionSearchJob extends BaseJob {
     this.downloadQueueRepository = deps.downloadQueueRepository;
     this.logsService = deps.logsService;
     this.torrentSearchService = deps.torrentSearchService;
-    this.torrentClient = deps.torrentClient;
+    this.torrentClientRegistry = deps.torrentClientRegistry;
     this.fileManager = deps.fileManager;
     this.settingsService = deps.settingsService;
     this.downloadQueueService = deps.downloadQueueService;
     this.crossEncoderService = deps.crossEncoderService;
     this.db = deps.db;
+  }
+
+  /**
+   * Get the primary torrent client
+   */
+  private getTorrentClient(): ITorrentClient | undefined {
+    const primary = this.torrentClientRegistry.getPrimary();
+    return primary?.provider;
   }
 
   async execute(): Promise<void> {
@@ -499,7 +508,8 @@ export class SubscriptionSearchJob extends BaseJob {
     let qbitHash: string | null = null;
     let dbStatus: "queued" | "downloading" | "add_failed" = "queued";
 
-    if (this.torrentClient && subscription.autoDownload) {
+    const torrentClient = this.getTorrentClient();
+    if (torrentClient && subscription.autoDownload) {
       const settings = await this.settingsService.getSettings();
       const qbittorrentConfig = settings.qbittorrent;
 
@@ -530,7 +540,7 @@ export class SubscriptionSearchJob extends BaseJob {
             hasInfoHash: !!torrent.infoHash,
           }, "Attempting to add torrent to client");
 
-          qbitHash = await this.torrentClient.addTorrentAndGetHash({
+          qbitHash = await torrentClient.addTorrentAndGetHash({
             magnetLinks: magnetLink ? [magnetLink] : undefined,
             urls: torrentUrl ? [torrentUrl] : undefined,
             savePath: downloadPath,

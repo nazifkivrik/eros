@@ -10,6 +10,13 @@ import type {
   LogLevel,
   AppSettings,
   ManualSearchResult,
+  SpeedScheduleSettings,
+  DownloadPathsSettings,
+  PathSpaceInfo,
+  ProvidersConfig,
+  MetadataProviderConfig,
+  IndexerProviderConfig,
+  TorrentClientConfig,
 } from "@repo/shared-types";
 
 // Use relative URL for browser requests to work in any environment (local, Docker, etc.)
@@ -619,6 +626,168 @@ class ApiClient {
       uploadSpeed?: number;
       error?: string;
     }>("/settings/qbittorrent/status");
+  }
+
+  // Speed Schedule
+  async getSpeedSchedule() {
+    return this.request<SpeedScheduleSettings>("/settings/speed-schedule");
+  }
+
+  async updateSpeedSchedule(settings: SpeedScheduleSettings) {
+    return this.request<SpeedScheduleSettings>("/settings/speed-schedule", {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    });
+  }
+
+  // Download Paths
+  async getDownloadPaths() {
+    return this.request<DownloadPathsSettings>("/settings/download-paths");
+  }
+
+  async updateDownloadPaths(settings: DownloadPathsSettings) {
+    return this.request<DownloadPathsSettings>("/settings/download-paths", {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    });
+  }
+
+  async checkPathSpace(path: string) {
+    return this.request<PathSpaceInfo>("/settings/download-paths/check-space", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    });
+  }
+
+  // User Credentials
+  async changePassword(data: {
+    currentPassword: string;
+    newPassword: string;
+  }) {
+    return this.request<{ success: boolean; message: string }>("/settings/user/change-password", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Providers - Get all providers
+  async getProviders(): Promise<ProvidersConfig> {
+    return this.request<ProvidersConfig>("/settings/providers");
+  }
+
+  // Metadata Providers
+  async addMetadataProvider(provider: {
+    name: string;
+    type: "tpdb" | "stashdb";
+    apiUrl: string;
+    apiKey: string;
+    enabled: boolean;
+    priority: number;
+  }): Promise<MetadataProviderConfig> {
+    return this.request<MetadataProviderConfig>("/settings/providers/metadata", {
+      method: "POST",
+      body: JSON.stringify(provider),
+    });
+  }
+
+  async updateMetadataProvider(
+    id: string,
+    updates: Partial<MetadataProviderConfig>
+  ): Promise<MetadataProviderConfig> {
+    return this.request<MetadataProviderConfig>(`/settings/providers/metadata/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(updates),
+    });
+  }
+
+  async deleteMetadataProvider(id: string): Promise<void> {
+    return this.request<void>(`/settings/providers/metadata/${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  async testMetadataProvider(id: string): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>(
+      `/settings/providers/metadata/${id}/test`,
+      { method: "POST" }
+    );
+  }
+
+  // Indexer Providers
+  async addIndexerProvider(provider: {
+    name: string;
+    type: "prowlarr" | "jackett";
+    baseUrl: string;
+    apiKey: string;
+    enabled: boolean;
+    priority: number;
+  }): Promise<IndexerProviderConfig> {
+    return this.request<IndexerProviderConfig>("/settings/providers/indexers", {
+      method: "POST",
+      body: JSON.stringify(provider),
+    });
+  }
+
+  async updateIndexerProvider(
+    id: string,
+    updates: Partial<IndexerProviderConfig>
+  ): Promise<IndexerProviderConfig> {
+    return this.request<IndexerProviderConfig>(`/settings/providers/indexers/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(updates),
+    });
+  }
+
+  async deleteIndexerProvider(id: string): Promise<void> {
+    return this.request<void>(`/settings/providers/indexers/${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  async testIndexerProvider(id: string): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>(
+      `/settings/providers/indexers/${id}/test`,
+      { method: "POST" }
+    );
+  }
+
+  // Torrent Client Providers
+  async addTorrentClientProvider(provider: {
+    name: string;
+    type: "qbittorrent" | "transmission";
+    url: string;
+    username?: string;
+    password?: string;
+    enabled: boolean;
+    priority: number;
+  }): Promise<TorrentClientConfig> {
+    return this.request<TorrentClientConfig>("/settings/providers/torrent-clients", {
+      method: "POST",
+      body: JSON.stringify(provider),
+    });
+  }
+
+  async updateTorrentClientProvider(
+    id: string,
+    updates: Partial<TorrentClientConfig>
+  ): Promise<TorrentClientConfig> {
+    return this.request<TorrentClientConfig>(`/settings/providers/torrent-clients/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(updates),
+    });
+  }
+
+  async deleteTorrentClientProvider(id: string): Promise<void> {
+    return this.request<void>(`/settings/providers/torrent-clients/${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  async testTorrentClientProvider(id: string): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>(
+      `/settings/providers/torrent-clients/${id}/test`,
+      { method: "POST" }
+    );
   }
 }
 

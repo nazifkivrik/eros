@@ -9,6 +9,7 @@ import type { Logger } from "pino";
 import type { JobProgressService } from "@/infrastructure/job-progress.service.js";
 import type { DownloadQueueRepository } from "@/infrastructure/repositories/download-queue.repository.js";
 import type { TorrentCompletionHandlerService } from "../../application/services/torrent-completion/torrent-completion.handler.service.js";
+import type { TorrentClientRegistry } from "@/infrastructure/registries/provider-registry.js";
 import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
 import type { SettingsService } from "../../application/services/settings.service.js";
 import type { SpeedProfileService } from "../../application/services/speed-profile.service.js";
@@ -23,7 +24,7 @@ export class TorrentMonitorJob extends BaseJob {
 
   private downloadQueueRepository: DownloadQueueRepository;
   private torrentCompletionService: TorrentCompletionHandlerService;
-  private torrentClient: ITorrentClient | undefined;
+  private torrentClientRegistry: TorrentClientRegistry;
   private settingsService: SettingsService;
   private speedProfileService: SpeedProfileService;
   private downloadQueueService: DownloadQueueService;
@@ -34,7 +35,7 @@ export class TorrentMonitorJob extends BaseJob {
     jobProgressService: JobProgressService;
     downloadQueueRepository: DownloadQueueRepository;
     torrentCompletionService: TorrentCompletionHandlerService;
-    torrentClient: ITorrentClient | undefined;
+    torrentClientRegistry: TorrentClientRegistry;
     settingsService: SettingsService;
     speedProfileService: SpeedProfileService;
     downloadQueueService: DownloadQueueService;
@@ -43,18 +44,27 @@ export class TorrentMonitorJob extends BaseJob {
     super(deps);
     this.downloadQueueRepository = deps.downloadQueueRepository;
     this.torrentCompletionService = deps.torrentCompletionService;
-    this.torrentClient = deps.torrentClient;
+    this.torrentClientRegistry = deps.torrentClientRegistry;
     this.settingsService = deps.settingsService;
     this.speedProfileService = deps.speedProfileService;
     this.downloadQueueService = deps.downloadQueueService;
     this.db = deps.db;
   }
 
+  /**
+   * Get the primary torrent client
+   */
+  private getTorrentClient(): ITorrentClient | undefined {
+    const primary = this.torrentClientRegistry.getPrimary();
+    return primary?.provider;
+  }
+
   async execute(): Promise<void> {
     this.emitStarted("Starting torrent monitor job");
     this.logger.info("Starting torrent monitor job");
 
-    if (!this.torrentClient) {
+    const torrentClient = this.getTorrentClient();
+    if (!torrentClient) {
       this.logger.warn("qBittorrent not configured, skipping torrent monitor job");
       this.emitCompleted("Skipped: qBittorrent not configured");
       return;
@@ -62,7 +72,7 @@ export class TorrentMonitorJob extends BaseJob {
 
     try {
       // Get all torrents from qBittorrent
-      const torrents = await this.torrentClient.getTorrents();
+      const torrents = await torrentClient.getTorrents();
 
       this.emitProgress(
         `Found ${torrents.length} torrents in qBittorrent`,
@@ -164,10 +174,10 @@ export class TorrentMonitorJob extends BaseJob {
       );
 
       // Move to bottom of queue
-      await this.torrentClient!.setTorrentPriority(torrent.hash, "bottom");
+      await torrentClient!.setTorrentPriority(torrent.hash, "bottom");
 
       // Pause stalled torrent
-      await this.torrentClient!.pauseTorrent(torrent.hash);
+      await torrentClient!.pauseTorrent(torrent.hash);
 
       // Update status in database
       await this.db
@@ -261,8 +271,9 @@ export class TorrentMonitorJob extends BaseJob {
     );
 
     try {
-      if (this.torrentClient) {
-        await this.torrentClient.setGlobalSpeedLimits(
+      const torrentClient = this.getTorrentClient();
+      if (torrentClient) {
+        await torrentClient.setGlobalSpeedLimits(
           limits.downloadLimit,
           limits.uploadLimit
         );
@@ -273,7 +284,8 @@ export class TorrentMonitorJob extends BaseJob {
   }
 
   private async removeOldCompletedTorrents(): Promise<void> {
-    if (!this.torrentClient) {
+    const torrentClient = this.getTorrentClient();
+    if (!torrentClient) {
       return;
     }
 
@@ -307,7 +319,7 @@ export class TorrentMonitorJob extends BaseJob {
     for (const item of oldItems) {
       try {
         if (item.qbitHash) {
-          await this.torrentClient.deleteTorrent(item.qbitHash, false);
+          await torrentClient.deleteTorrent(item.qbitHash, false);
           removedFromQbit++;
           this.logger.debug(
             `Removed torrent ${item.qbitHash} from qBittorrent (kept files)`

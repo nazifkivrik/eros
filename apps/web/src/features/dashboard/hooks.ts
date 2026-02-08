@@ -1,5 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 
+export interface StorageVolume {
+  path: string;
+  name: string;
+  total: number;
+  used: number;
+  available: number;
+  usagePercentage: number;
+}
+
 export interface DashboardStatistics {
   storage: {
     totalDiskSpace: number;
@@ -7,6 +16,7 @@ export interface DashboardStatistics {
     availableDiskSpace: number;
     contentSize: number;
     usagePercentage: number;
+    volumes: StorageVolume[];
   };
   content: {
     totalScenes: number;
@@ -20,6 +30,20 @@ export interface DashboardStatistics {
   queuedDownloads: number;
   completedDownloads: number;
   failedDownloads: number;
+}
+
+export interface ProviderStatus {
+  id: string;
+  name: string;
+  type: string;
+  enabled: boolean;
+  status: "connected" | "disconnected" | "error";
+}
+
+export interface ProviderStatusResponse {
+  metadataProviders: ProviderStatus[];
+  indexers: ProviderStatus[];
+  torrentClients: ProviderStatus[];
 }
 
 export function useDashboardStatistics() {
@@ -40,5 +64,20 @@ export function useDashboardStatistics() {
     },
     refetchInterval: 60000, // Refresh every minute
     staleTime: 30000,
+  });
+}
+
+export function useProviderStatus() {
+  return useQuery({
+    queryKey: ["dashboard", "providers", "status"],
+    queryFn: async (): Promise<ProviderStatusResponse> => {
+      const response = await fetch("/api/dashboard/providers/status");
+      if (!response.ok) {
+        throw new Error("Failed to fetch provider status");
+      }
+      return response.json();
+    },
+    refetchInterval: 30000, // Poll every 30 seconds
+    staleTime: 10000,
   });
 }

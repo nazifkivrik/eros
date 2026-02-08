@@ -3,12 +3,13 @@
  * Handles external search via IIndexer adapter
  *
  * Responsibilities:
- * - External search via IIndexer adapter
+ * - External search via IIndexer adapter (from IndexerRegistry)
  * - Quality/source detection from titles
  * - Raw result transformation
  */
 
 import type { IIndexer, TorrentSearchResult } from "@/infrastructure/adapters/interfaces/indexer.interface.js";
+import type { IndexerRegistry } from "@/infrastructure/registries/provider-registry.js";
 import type { LogsService } from "@/application/services/logs.service.js";
 import type { TorrentResult } from "@/application/services/torrent-search/index.js";
 
@@ -16,12 +17,20 @@ import type { TorrentResult } from "@/application/services/torrent-search/index.
  * Torrent Search Indexer Service
  */
 export class TorrentSearchIndexerService {
-  private indexer: IIndexer;
+  private indexerRegistry: IndexerRegistry;
   private logsService: LogsService;
 
-  constructor(deps: { indexer: IIndexer; logsService: LogsService }) {
-    this.indexer = deps.indexer;
+  constructor(deps: { indexerRegistry: IndexerRegistry; logsService: LogsService }) {
+    this.indexerRegistry = deps.indexerRegistry;
     this.logsService = deps.logsService;
+  }
+
+  /**
+   * Get the primary indexer
+   */
+  private getIndexer(): IIndexer | null {
+    const available = this.indexerRegistry.getAvailable();
+    return available.length > 0 ? available[0].provider : null;
   }
 
   /**
@@ -41,8 +50,9 @@ export class TorrentSearchIndexerService {
       searchTerms.push(...entity.aliases);
     }
 
-    // Check if indexer is configured
-    if (!this.indexer) {
+    // Get primary indexer
+    const indexer = this.getIndexer();
+    if (!indexer) {
       await this.logsService.warning("torrent", `No indexer configured`, {
         entityType,
         entityId: entity.name,
@@ -53,7 +63,7 @@ export class TorrentSearchIndexerService {
     // Search using indexer adapter for each search term
     for (const term of searchTerms) {
       try {
-        const indexerResults = await this.indexer.search(term, {
+        const indexerResults = await indexer.search(term, {
           limit: 1000,
         });
 

@@ -11,6 +11,7 @@
 
 import type { TorrentsRepository } from "@/infrastructure/repositories/torrents.repository.js";
 import type { FileManagerService } from "@/application/services/file-management/file-manager.service.js";
+import type { TorrentClientRegistry } from "@/infrastructure/registries/provider-registry.js";
 import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
 import type { LogsService } from "@/application/services/logs.service.js";
 import { logger } from "@/utils/logger.js";
@@ -22,18 +23,26 @@ export class TorrentCompletionHandlerService {
   private repository: TorrentsRepository;
   private fileManager: FileManagerService;
   private logsService: LogsService;
-  private torrentClient?: ITorrentClient;
+  private torrentClientRegistry: TorrentClientRegistry;
 
   constructor(deps: {
     torrentsRepository: TorrentsRepository;
     fileManager: FileManagerService;
     logsService: LogsService;
-    torrentClient?: ITorrentClient;
+    torrentClientRegistry: TorrentClientRegistry;
   }) {
     this.repository = deps.torrentsRepository;
     this.fileManager = deps.fileManager;
     this.logsService = deps.logsService;
-    this.torrentClient = deps.torrentClient;
+    this.torrentClientRegistry = deps.torrentClientRegistry;
+  }
+
+  /**
+   * Get the primary torrent client
+   */
+  private getTorrentClient(): ITorrentClient | undefined {
+    const primary = this.torrentClientRegistry.getPrimary();
+    return primary?.provider;
   }
 
   /**
@@ -47,7 +56,8 @@ export class TorrentCompletionHandlerService {
     try {
       logger.info("[TorrentCompletionHandler] About to check torrent client");
       // Check if torrent client is configured
-      if (!this.torrentClient) {
+      const torrentClient = this.getTorrentClient();
+      if (!torrentClient) {
         await this.logsService.error(
           "torrent",
           "Torrent client not configured, cannot process completed torrent",
@@ -69,7 +79,7 @@ export class TorrentCompletionHandlerService {
       }
 
       // 2. Get torrent info from torrent client
-      const torrentInfo = await this.torrentClient.getTorrentProperties(qbitHash);
+      const torrentInfo = await torrentClient.getTorrentProperties(qbitHash);
 
       if (!torrentInfo) {
         await this.logsService.error(
@@ -114,8 +124,7 @@ export class TorrentCompletionHandlerService {
       const moveResult = await this.fileManager.moveCompletedTorrentViaQBit(
         queueItem.sceneId,
         qbitHash,
-        // Type cast needed as fileManager still expects QBittorrentService
-        this.torrentClient as any
+        torrentClient
       );
 
       await this.logsService.info(

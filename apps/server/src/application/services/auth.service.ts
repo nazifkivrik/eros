@@ -66,4 +66,74 @@ export class AuthService {
   async getUserById(userId: string) {
     return await this.authRepository.findById(userId);
   }
+
+  /**
+   * Change username for a user
+   * Business logic: Validate new username is not taken and meets requirements
+   */
+  async changeUsername(userId: string, newUsername: string, currentPassword: string): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    this.logger.info({ userId, newUsername }, "Username change requested");
+
+    // Business rule: Username must be at least 3 characters
+    if (newUsername.length < 3) {
+      return {
+        success: false,
+        message: "Username must be at least 3 characters",
+      };
+    }
+
+    // Business rule: Username must be at most 50 characters
+    if (newUsername.length > 50) {
+      return {
+        success: false,
+        message: "Username must be at most 50 characters",
+      };
+    }
+
+    // Get current user
+    const user = await this.authRepository.findById(userId);
+    if (!user) {
+      return {
+        success: false,
+        message: "User not found",
+      };
+    }
+
+    // Business rule: Verify current password
+    const isValidPassword = await argon2.verify(user.passwordHash, currentPassword);
+    if (!isValidPassword) {
+      return {
+        success: false,
+        message: "Current password is incorrect",
+      };
+    }
+
+    // Business rule: Check if new username is already taken
+    const existingUser = await this.authRepository.findByUsername(newUsername);
+    if (existingUser && existingUser.id !== userId) {
+      return {
+        success: false,
+        message: "Username already taken",
+      };
+    }
+
+    // Update username
+    const updated = await this.authRepository.updateUsername(userId, newUsername);
+
+    if (updated) {
+      this.logger.info({ userId, oldUsername: user.username, newUsername }, "Username changed successfully");
+      return {
+        success: true,
+        message: "Username changed successfully",
+      };
+    } else {
+      return {
+        success: false,
+        message: "Failed to update username",
+      };
+    }
+  }
 }

@@ -1,4 +1,5 @@
 import type { Logger } from "pino";
+import type { TorrentClientRegistry } from "@/infrastructure/registries/provider-registry.js";
 import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
 import type { SubscriptionsRepository } from "@/infrastructure/repositories/subscriptions.repository.js";
 import type { QualityProfilesRepository } from "@/infrastructure/repositories/quality-profiles.repository.js";
@@ -48,7 +49,7 @@ export interface AutoDownloadResult {
  * Uses ITorrentClient adapter for qBittorrent integration
  */
 export class SubscriptionsTorrentService {
-  private torrentClient: ITorrentClient | undefined;
+  private torrentClientRegistry: TorrentClientRegistry;
   private subscriptionsRepository: SubscriptionsRepository;
   private qualityProfilesRepository: QualityProfilesRepository;
   private torrentSearchService: TorrentSearchService;
@@ -57,7 +58,7 @@ export class SubscriptionsTorrentService {
   private logger: Logger;
 
   constructor({
-    torrentClient,
+    torrentClientRegistry,
     subscriptionsRepository,
     qualityProfilesRepository,
     torrentSearchService,
@@ -65,7 +66,7 @@ export class SubscriptionsTorrentService {
     db,
     logger,
   }: {
-    torrentClient: ITorrentClient | undefined;
+    torrentClientRegistry: TorrentClientRegistry;
     subscriptionsRepository: SubscriptionsRepository;
     qualityProfilesRepository: QualityProfilesRepository;
     torrentSearchService: TorrentSearchService;
@@ -73,13 +74,21 @@ export class SubscriptionsTorrentService {
     db: Database;
     logger: Logger;
   }) {
-    this.torrentClient = torrentClient;
+    this.torrentClientRegistry = torrentClientRegistry;
     this.subscriptionsRepository = subscriptionsRepository;
     this.qualityProfilesRepository = qualityProfilesRepository;
     this.torrentSearchService = torrentSearchService;
     this.downloadService = downloadService;
     this.db = db;
     this.logger = logger;
+  }
+
+  /**
+   * Get the primary torrent client
+   */
+  private getTorrentClient(): ITorrentClient | undefined {
+    const primary = this.torrentClientRegistry.getPrimary();
+    return primary?.provider;
   }
 
   /**
@@ -91,7 +100,8 @@ export class SubscriptionsTorrentService {
   ): Promise<AddTorrentResult> {
     this.logger.info({ subscriptionId }, "Adding torrent for scene subscription");
 
-    if (!this.torrentClient) {
+    const torrentClient = this.getTorrentClient();
+    if (!torrentClient) {
       return {
         success: false,
         hash: null,
@@ -133,7 +143,7 @@ export class SubscriptionsTorrentService {
       }
 
       // Use torrent client to add magnet
-      const hash = await this.torrentClient?.addMagnet(magnetLink);
+      const hash = await torrentClient?.addMagnet(magnetLink);
 
       if (!hash) {
         return {
@@ -170,7 +180,8 @@ export class SubscriptionsTorrentService {
   }> {
     this.logger.info({ subscriptionId }, "Pausing torrent for scene subscription");
 
-    if (!this.torrentClient) {
+    const torrentClient = this.getTorrentClient();
+    if (!torrentClient) {
       return {
         success: false,
         error: "Torrent client not configured",
@@ -219,7 +230,7 @@ export class SubscriptionsTorrentService {
       }
 
       // Pause torrent using adapter
-      await this.torrentClient.pauseTorrent(queueEntry.torrentHash);
+      await torrentClient.pauseTorrent(queueEntry.torrentHash);
 
       this.logger.info({ subscriptionId, hash: queueEntry.torrentHash }, "Torrent paused");
 
@@ -246,7 +257,8 @@ export class SubscriptionsTorrentService {
   }> {
     this.logger.info({ subscriptionId }, "Resuming torrent for scene subscription");
 
-    if (!this.torrentClient) {
+    const torrentClient = this.getTorrentClient();
+    if (!torrentClient) {
       return {
         success: false,
         error: "Torrent client not configured",
@@ -295,7 +307,7 @@ export class SubscriptionsTorrentService {
       }
 
       // Resume torrent using adapter
-      await this.torrentClient.resumeTorrent(queueEntry.torrentHash);
+      await torrentClient.resumeTorrent(queueEntry.torrentHash);
 
       this.logger.info({ subscriptionId, hash: queueEntry.torrentHash }, "Torrent resumed");
 
@@ -325,7 +337,8 @@ export class SubscriptionsTorrentService {
   }> {
     this.logger.info({ subscriptionId, deleteFiles }, "Removing torrent for scene subscription");
 
-    if (!this.torrentClient) {
+    const torrentClient = this.getTorrentClient();
+    if (!torrentClient) {
       return {
         success: false,
         error: "Torrent client not configured",
@@ -374,7 +387,7 @@ export class SubscriptionsTorrentService {
       }
 
       // Remove torrent using adapter
-      await this.torrentClient.removeTorrent(queueEntry.torrentHash, deleteFiles);
+      await torrentClient.removeTorrent(queueEntry.torrentHash, deleteFiles);
 
       // Delete download queue entry
       await this.db
@@ -406,7 +419,8 @@ export class SubscriptionsTorrentService {
   }> {
     this.logger.info({ subscriptionId }, "Getting torrent status for scene subscription");
 
-    if (!this.torrentClient) {
+    const torrentClient = this.getTorrentClient();
+    if (!torrentClient) {
       return {
         status: null,
         error: "Torrent client not configured",
@@ -455,7 +469,7 @@ export class SubscriptionsTorrentService {
       }
 
       // Get torrent info from client
-      const torrentInfo = await this.torrentClient.getTorrentInfo(queueEntry.torrentHash);
+      const torrentInfo = await torrentClient.getTorrentInfo(queueEntry.torrentHash);
 
       if (!torrentInfo) {
         return {
@@ -497,7 +511,8 @@ export class SubscriptionsTorrentService {
   async autoDownloadScene(sceneId: string): Promise<AutoDownloadResult> {
     this.logger.info({ sceneId }, "Auto-downloading scene");
 
-    if (!this.torrentClient) {
+    const torrentClient = this.getTorrentClient();
+    if (!torrentClient) {
       return {
         success: false,
         hash: null,

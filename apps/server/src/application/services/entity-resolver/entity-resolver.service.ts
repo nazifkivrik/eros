@@ -7,21 +7,28 @@ import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Database } from "@repo/database";
 import { performers, studios, scenes } from "@repo/database";
-import type { IMetadataProvider } from "@/infrastructure/adapters/interfaces/metadata-provider.interface.js";
+import type { MetadataProviderRegistry } from "@/infrastructure/registries/provider-registry.js";
 import { logger } from "@/utils/logger.js";
 
 export class EntityResolverService {
   private db: Database;
-  private metadataProvider?: IMetadataProvider;
+  private metadataRegistry: MetadataProviderRegistry;
 
-  constructor({ db, metadataProvider }: { db: Database; metadataProvider?: IMetadataProvider }) {
+  constructor({ db, metadataRegistry }: { db: Database; metadataRegistry: MetadataProviderRegistry }) {
     this.db = db;
-    this.metadataProvider = metadataProvider;
+    this.metadataRegistry = metadataRegistry;
+  }
+
+  /**
+   * Get the primary metadata provider
+   */
+  private getMetadataProvider() {
+    return this.metadataRegistry.getPrimary()?.provider;
   }
 
   /**
    * Resolve performer entity ID
-   * Checks local DB, external IDs, then fetches from TPDB if needed
+   * Checks local DB, external IDs, then fetches from metadata provider if needed
    */
   async resolvePerformer(entityId: string): Promise<string | null> {
     // Check local DB first by local ID
@@ -29,7 +36,7 @@ export class EntityResolverService {
       where: eq(performers.id, entityId),
     });
 
-    // If not found by local ID, try by external ID (TPDB)
+    // If not found by local ID, try by external ID (TPDB/StashDB)
     if (!performer) {
       const allPerformers = await this.db.query.performers.findMany();
       performer = allPerformers.find((p) =>
@@ -37,20 +44,21 @@ export class EntityResolverService {
       );
     }
 
-    // If still not found and TPDB is available, try fetching from TPDB
-    if (!performer && this.metadataProvider) {
+    // If still not found and metadata provider is available, try fetching from it
+    const metadataProvider = this.getMetadataProvider();
+    if (!performer && metadataProvider) {
       try {
         logger.info(
-          `[EntityResolver] Performer ${entityId} not found locally, fetching from TPDB`
+          `[EntityResolver] Performer ${entityId} not found locally, fetching from metadata provider`
         );
-        const tpdbPerformer = await this.metadataProvider.getPerformerById(entityId);
+        const externalPerformer = await metadataProvider.getPerformerById(entityId);
 
-        if (tpdbPerformer) {
+        if (externalPerformer) {
           // Check once more if performer was created in the meantime (race condition)
           const allPerformers = await this.db.query.performers.findMany();
           performer = allPerformers.find((p) =>
             p.externalIds.some(
-              (ext) => ext.source === "tpdb" && ext.id === tpdbPerformer.id
+              (ext) => ext.source === "tpdb" && ext.id === externalPerformer.id
             )
           );
 
@@ -58,7 +66,7 @@ export class EntityResolverService {
             // Create performer in local DB
             const localId = nanoid();
             // Generate slug from name
-            const slug = tpdbPerformer.name
+            const slug = externalPerformer.name
               .toLowerCase()
               .replace(/[^\w\s-]/g, '')
               .replace(/\s+/g, '-')
@@ -67,36 +75,36 @@ export class EntityResolverService {
 
             await this.db.insert(performers).values({
               id: localId,
-              externalIds: [{ source: "tpdb", id: tpdbPerformer.id }],
+              externalIds: [{ source: "tpdb", id: externalPerformer.id }],
               slug,
-              name: tpdbPerformer.name,
-              fullName: tpdbPerformer.name,
+              name: externalPerformer.name,
+              fullName: externalPerformer.name,
               rating: 0,
-              aliases: tpdbPerformer.aliases || [],
-              disambiguation: tpdbPerformer.disambiguation,
-              gender: tpdbPerformer.gender,
-              birthdate: tpdbPerformer.birthDate,
-              deathDate: tpdbPerformer.deathDate,
-              careerStartYear: tpdbPerformer.careerStartYear,
-              careerEndYear: tpdbPerformer.careerEndYear,
-              bio: tpdbPerformer.bio,
-              measurements: tpdbPerformer.measurements,
-              tattoos: tpdbPerformer.tattoos,
-              piercings: tpdbPerformer.piercings,
-              fakeBoobs: tpdbPerformer.fakeBoobs || false,
-              sameSexOnly: tpdbPerformer.sameSexOnly || false,
-              images: tpdbPerformer.images || [],
+              aliases: externalPerformer.aliases || [],
+              disambiguation: externalPerformer.disambiguation,
+              gender: externalPerformer.gender,
+              birthdate: externalPerformer.birthDate,
+              deathDate: externalPerformer.deathDate,
+              careerStartYear: externalPerformer.careerStartYear,
+              careerEndYear: externalPerformer.careerEndYear,
+              bio: externalPerformer.bio,
+              measurements: externalPerformer.measurements,
+              tattoos: externalPerformer.tattoos,
+              piercings: externalPerformer.piercings,
+              fakeBoobs: externalPerformer.fakeBoobs || false,
+              sameSexOnly: externalPerformer.sameSexOnly || false,
+              images: externalPerformer.images || [],
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             });
             logger.info(
-              `[EntityResolver] Created performer ${tpdbPerformer.name} with ID ${localId}`
+              `[EntityResolver] Created performer ${externalPerformer.name} with ID ${localId}`
             );
             return localId;
           }
         }
       } catch (error) {
-        logger.error({ error }, `[EntityResolver] Failed to fetch performer from TPDB`);
+        logger.error({ error }, `[EntityResolver] Failed to fetch performer from metadata provider`);
       }
     }
 
@@ -105,7 +113,7 @@ export class EntityResolverService {
 
   /**
    * Resolve studio entity ID
-   * Checks local DB, external IDs, then fetches from TPDB if needed
+   * Checks local DB, external IDs, then fetches from metadata provider if needed
    */
   async resolveStudio(entityId: string): Promise<string | null> {
     // Check local DB first by local ID
@@ -113,7 +121,7 @@ export class EntityResolverService {
       where: eq(studios.id, entityId),
     });
 
-    // If not found by local ID, try by external ID (TPDB)
+    // If not found by local ID, try by external ID (TPDB/StashDB)
     if (!studio) {
       const allStudios = await this.db.query.studios.findMany();
       studio = allStudios.find((s) =>
@@ -121,20 +129,21 @@ export class EntityResolverService {
       );
     }
 
-    // If still not found and TPDB is available, try fetching from TPDB
-    if (!studio && this.metadataProvider) {
+    // If still not found and metadata provider is available, try fetching from it
+    const metadataProvider = this.getMetadataProvider();
+    if (!studio && metadataProvider) {
       try {
         logger.info(
-          `[EntityResolver] Studio ${entityId} not found locally, fetching from TPDB`
+          `[EntityResolver] Studio ${entityId} not found locally, fetching from metadata provider`
         );
-        const tpdbSite = await this.metadataProvider.getStudioById(entityId);
+        const externalStudio = await metadataProvider.getStudioById(entityId);
 
-        if (tpdbSite) {
+        if (externalStudio) {
           // Check once more if studio was created in the meantime (race condition)
           const allStudios = await this.db.query.studios.findMany();
           studio = allStudios.find((s) =>
             s.externalIds.some(
-              (ext) => ext.source === "tpdb" && ext.id === tpdbSite.id
+              (ext) => ext.source === "tpdb" && ext.id === externalStudio.id
             )
           );
 
@@ -142,7 +151,7 @@ export class EntityResolverService {
             // Create studio in local DB
             const localId = nanoid();
             // Generate slug from name
-            const slug = tpdbSite.name
+            const slug = externalStudio.name
               .toLowerCase()
               .replace(/[^\w\s-]/g, '')
               .replace(/\s+/g, '-')
@@ -151,24 +160,24 @@ export class EntityResolverService {
 
             await this.db.insert(studios).values({
               id: localId,
-              externalIds: [{ source: "tpdb", id: tpdbSite.id }],
-              name: tpdbSite.name,
+              externalIds: [{ source: "tpdb", id: externalStudio.id }],
+              name: externalStudio.name,
               slug,
               rating: 0,
-              parentStudioId: tpdbSite.parent?.id || null,
-              url: tpdbSite.urls[0]?.url || null,
-              images: tpdbSite.images || [],
+              parentStudioId: externalStudio.parent?.id || null,
+              url: externalStudio.urls[0]?.url || null,
+              images: externalStudio.images || [],
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             });
             logger.info(
-              `[EntityResolver] Created studio ${tpdbSite.name} with ID ${localId}`
+              `[EntityResolver] Created studio ${externalStudio.name} with ID ${localId}`
             );
             return localId;
           }
         }
       } catch (error) {
-        logger.error({ error }, `[EntityResolver] Failed to fetch studio from TPDB`);
+        logger.error({ error }, `[EntityResolver] Failed to fetch studio from metadata provider`);
       }
     }
 
@@ -177,7 +186,7 @@ export class EntityResolverService {
 
   /**
    * Resolve scene entity ID
-   * Simple lookup - scenes are not fetched from TPDB individually
+   * Simple lookup - scenes are not fetched from metadata provider individually
    */
   async resolveScene(entityId: string): Promise<string | null> {
     const scene = await this.db.query.scenes.findFirst({
@@ -212,7 +221,7 @@ export class EntityResolverService {
  */
 export function createEntityResolverService(
   db: Database,
-  metadataProvider?: IMetadataProvider
+  metadataRegistry: MetadataProviderRegistry
 ): EntityResolverService {
-  return new EntityResolverService({ db, metadataProvider });
+  return new EntityResolverService({ db, metadataRegistry });
 }

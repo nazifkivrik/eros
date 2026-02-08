@@ -2,23 +2,16 @@
 
 import { useState, useEffect } from "react";
 import {
-  Settings as SettingsIcon,
   Save,
-  Server,
-  Database,
-  Download,
-  RefreshCw,
   Loader2,
   Brain,
-  XCircle,
   HardDrive,
+  Download,
+  XCircle,
 } from "lucide-react";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,9 +19,12 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
 import { QualityProfilesTab } from "@/components/settings/QualityProfilesTab";
-import { useSettings, useUpdateSettings, useTestConnection, useAIModelStatus, useLoadAIModel } from "./hooks";
+import { DownloadPathsSection } from "@/components/settings/DownloadPathsSection";
+import { UserCredentialsSection } from "@/components/settings/UserCredentialsSection";
+import { SpeedScheduleTab } from "@/components/settings/SpeedScheduleTab";
+import { ServicesTab } from "@/components/settings/ServicesTab";
+import { useSettings, useUpdateSettings, useAIModelStatus, useLoadAIModel } from "./hooks";
 import type { AppSettings } from "@repo/shared-types";
 import { DEFAULT_SETTINGS } from "@repo/shared-types";
 
@@ -39,7 +35,6 @@ import { DEFAULT_SETTINGS } from "@repo/shared-types";
 export function SettingsView() {
   const { data: settingsData, isLoading } = useSettings();
   const updateSettings = useUpdateSettings();
-  const testConnection = useTestConnection();
   const { data: aiStatus } = useAIModelStatus();
   const loadAIModel = useLoadAIModel();
 
@@ -67,29 +62,14 @@ export function SettingsView() {
         qbittorrent: { ...DEFAULT_SETTINGS.qbittorrent, ...(data.qbittorrent || {}) },
         ai: { ...DEFAULT_SETTINGS.ai, ...(data.ai || {}) },
         jobs: { ...DEFAULT_SETTINGS.jobs, ...(data.jobs || {}) },
+        speedSchedule: { ...DEFAULT_SETTINGS.speedSchedule, ...(data.speedSchedule || {}) },
+        downloadPaths: { ...DEFAULT_SETTINGS.downloadPaths, ...(data.downloadPaths || {}) },
       });
     }
   }, [settingsData]);
 
   const handleSave = () => {
     updateSettings.mutate(settings);
-  };
-
-  const handleTestConnection = (service: "stashdb" | "tpdb" | "prowlarr" | "qbittorrent") => {
-    toast.info(`Testing ${service} connection...`);
-
-    // For TPDB, send current config in the request body
-    if (service === "tpdb") {
-      testConnection.mutate({
-        service,
-        config: {
-          apiUrl: settings.tpdb.apiUrl,
-          apiKey: settings.tpdb.apiKey,
-        },
-      });
-    } else {
-      testConnection.mutate({ service });
-    }
   };
 
   if (isLoading) {
@@ -128,56 +108,33 @@ export function SettingsView() {
         <TabsList>
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="quality">Quality Profiles</TabsTrigger>
+          <TabsTrigger value="speed">Speed Schedule</TabsTrigger>
           <TabsTrigger value="services">Services</TabsTrigger>
         </TabsList>
 
         {/* General Settings */}
-        <TabsContent value="general" className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <SettingsIcon className="h-5 w-5" />
-                General Settings
-              </CardTitle>
-              <CardDescription>Basic application configuration</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="appName">Application Name</Label>
-                <Input
-                  id="appName"
-                  value={settings.general.appName}
-                  onChange={(e) =>
-                    setSettings({
-                      ...settings,
-                      general: { ...settings.general, appName: e.target.value },
-                    })
-                  }
-                />
-              </div>
+        <TabsContent value="general" className="mt-6 space-y-6">
+          {/* Download Paths Section */}
+          <div>
+            <DownloadPathsSection
+              settings={settings.downloadPaths}
+              onChange={(downloadPaths) => setSettings({ ...settings, downloadPaths })}
+            />
+          </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="downloadPath">Download Path</Label>
-                <Input
-                  id="downloadPath"
-                  value={settings.general.downloadPath}
-                  onChange={(e) =>
-                    setSettings({
-                      ...settings,
-                      general: {
-                        ...settings.general,
-                        downloadPath: e.target.value,
-                      },
-                    })
-                  }
-                  placeholder="/path/to/downloads"
-                />
-              </div>
+          {/* User Credentials Section */}
+          <div>
+            <UserCredentialsSection />
+          </div>
 
-              <div className="border-t pt-4">
+          {/* AI Settings Section */}
+          <div>
+            <h3 className="text-sm font-medium text-muted-foreground mb-3">AI Settings</h3>
+            <Card>
+              <CardContent className="pt-6 space-y-4">
                 {/* AI Model Status Card */}
                 {settings.ai.useCrossEncoder && (
-                  <div className="mb-4 p-4 rounded-lg border bg-card">
+                  <div className="p-4 rounded-lg border bg-card">
                     <div className="flex items-start gap-3">
                       <Brain className="h-5 w-5 mt-0.5 text-muted-foreground" />
                       <div className="flex-1 space-y-2">
@@ -232,7 +189,7 @@ export function SettingsView() {
                   </div>
                 )}
 
-                <div className="space-y-4 pl-0">
+                <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div className="space-y-0.5">
                       <Label htmlFor="useCrossEncoder">
@@ -342,9 +299,9 @@ export function SettingsView() {
                     </p>
                   </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         {/* Quality Profiles Tab */}
@@ -356,355 +313,21 @@ export function SettingsView() {
           </Card>
         </TabsContent>
 
+        {/* Speed Schedule Tab */}
+        <TabsContent value="speed" className="mt-6">
+          <Card>
+            <CardContent className="pt-6">
+              <SpeedScheduleTab
+                settings={settings.speedSchedule}
+                onChange={(speedSchedule) => setSettings({ ...settings, speedSchedule })}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* Services Settings */}
         <TabsContent value="services" className="mt-6">
-          <div className="space-y-6">
-            {/* Metadata Services Section */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold">Metadata Services</h3>
-
-              {/* TPDB Configuration */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Database className="h-5 w-5" />
-                    ThePornDB (TPDB)
-                  </CardTitle>
-                  <CardDescription>
-                    Configure TPDB API for metadata lookups
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="tpdbEnabled">Enable TPDB</Label>
-                    <Switch
-                      id="tpdbEnabled"
-                      checked={settings.tpdb.enabled}
-                      onCheckedChange={(checked) =>
-                        setSettings({
-                          ...settings,
-                          tpdb: { ...settings.tpdb, enabled: checked },
-                        })
-                      }
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="tpdbApiUrl">API URL</Label>
-                    <Input
-                      id="tpdbApiUrl"
-                      value={settings.tpdb.apiUrl}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          tpdb: { ...settings.tpdb, apiUrl: e.target.value },
-                        })
-                      }
-                      placeholder="https://api.theporndb.net"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="tpdbApiKey">API Key</Label>
-                    <Input
-                      id="tpdbApiKey"
-                      type="password"
-                      value={settings.tpdb.apiKey}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          tpdb: { ...settings.tpdb, apiKey: e.target.value },
-                        })
-                      }
-                      placeholder="Enter TPDB API key"
-                    />
-                  </div>
-
-                  <Button
-                    onClick={() => handleTestConnection("tpdb")}
-                    disabled={testConnection.isPending}
-                    variant="outline"
-                    size="sm"
-                  >
-                    {testConnection.isPending ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Testing...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2" />
-                        Test Connection
-                      </>
-                    )}
-                  </Button>
-                </CardContent>
-              </Card>
-
-              {/* StashDB Configuration */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>StashDB</CardTitle>
-                  <CardDescription>
-                    Configure StashDB GraphQL API for metadata lookups
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="stashdbEnabled">Enable StashDB</Label>
-                    <Switch
-                      id="stashdbEnabled"
-                      checked={settings.stashdb.enabled}
-                      onCheckedChange={(checked) =>
-                        setSettings({
-                          ...settings,
-                          stashdb: { ...settings.stashdb, enabled: checked },
-                        })
-                      }
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="stashdbApiUrl">API URL</Label>
-                    <Input
-                      id="stashdbApiUrl"
-                      value={settings.stashdb.apiUrl}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          stashdb: { ...settings.stashdb, apiUrl: e.target.value },
-                        })
-                      }
-                      placeholder="https://stashdb.org/graphql"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="stashdbApiKey">API Key</Label>
-                    <Input
-                      id="stashdbApiKey"
-                      type="password"
-                      value={settings.stashdb.apiKey}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          stashdb: { ...settings.stashdb, apiKey: e.target.value },
-                        })
-                      }
-                      placeholder="Enter StashDB API key"
-                    />
-                  </div>
-
-                  <Button
-                    onClick={() => handleTestConnection("stashdb")}
-                    disabled={testConnection.isPending}
-                    variant="outline"
-                    size="sm"
-                  >
-                    {testConnection.isPending ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Testing...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2" />
-                        Test Connection
-                      </>
-                    )}
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Prowlarr Section */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold">Indexer Services</h3>
-
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="flex items-center gap-2">
-                        <Server className="h-5 w-5" />
-                        Prowlarr Configuration
-                      </CardTitle>
-                      <CardDescription>
-                        Configure Prowlarr for indexer management
-                      </CardDescription>
-                    </div>
-                    <Switch
-                      checked={settings.prowlarr.enabled}
-                      onCheckedChange={(checked) =>
-                        setSettings({
-                          ...settings,
-                          prowlarr: { ...settings.prowlarr, enabled: checked },
-                        })
-                      }
-                    />
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="prowlarrUrl">API URL</Label>
-                    <Input
-                      id="prowlarrUrl"
-                      value={settings.prowlarr.apiUrl}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          prowlarr: {
-                            ...settings.prowlarr,
-                            apiUrl: e.target.value,
-                          },
-                        })
-                      }
-                      placeholder="http://localhost:9696"
-                      disabled={!settings.prowlarr.enabled}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="prowlarrKey">API Key</Label>
-                    <Input
-                      id="prowlarrKey"
-                      type="password"
-                      value={settings.prowlarr.apiKey}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          prowlarr: {
-                            ...settings.prowlarr,
-                            apiKey: e.target.value,
-                          },
-                        })
-                      }
-                      placeholder="Enter your Prowlarr API key"
-                      disabled={!settings.prowlarr.enabled}
-                    />
-                  </div>
-
-                  <Button
-                    onClick={() => handleTestConnection("prowlarr")}
-                    disabled={!settings.prowlarr.enabled || testConnection.isPending}
-                    variant="outline"
-                  >
-                    {testConnection.isPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                    )}
-                    Test Connection
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Download Services Section */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold">Download Services</h3>
-
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="flex items-center gap-2">
-                        <Download className="h-5 w-5" />
-                        qBittorrent Configuration
-                      </CardTitle>
-                      <CardDescription>
-                        Configure qBittorrent Web UI connection
-                      </CardDescription>
-                    </div>
-                    <Switch
-                      checked={settings.qbittorrent.enabled}
-                      onCheckedChange={(checked) =>
-                        setSettings({
-                          ...settings,
-                          qbittorrent: {
-                            ...settings.qbittorrent,
-                            enabled: checked,
-                          },
-                        })
-                      }
-                    />
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="qbitUrl">Web UI URL</Label>
-                    <Input
-                      id="qbitUrl"
-                      value={settings.qbittorrent.url}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          qbittorrent: {
-                            ...settings.qbittorrent,
-                            url: e.target.value,
-                          },
-                        })
-                      }
-                      placeholder="http://localhost:8080"
-                      disabled={!settings.qbittorrent.enabled}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="qbitUsername">Username</Label>
-                    <Input
-                      id="qbitUsername"
-                      value={settings.qbittorrent.username}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          qbittorrent: {
-                            ...settings.qbittorrent,
-                            username: e.target.value,
-                          },
-                        })
-                      }
-                      placeholder="admin"
-                      disabled={!settings.qbittorrent.enabled}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="qbitPassword">Password</Label>
-                    <Input
-                      id="qbitPassword"
-                      type="password"
-                      value={settings.qbittorrent.password}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          qbittorrent: {
-                            ...settings.qbittorrent,
-                            password: e.target.value,
-                          },
-                        })
-                      }
-                      placeholder="Enter password"
-                      disabled={!settings.qbittorrent.enabled}
-                    />
-                  </div>
-
-                  <Button
-                    onClick={() => handleTestConnection("qbittorrent")}
-                    disabled={!settings.qbittorrent.enabled || testConnection.isPending}
-                    variant="outline"
-                  >
-                    {testConnection.isPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                    )}
-                    Test Connection
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
+          <ServicesTab />
         </TabsContent>
 
       </Tabs>

@@ -1,6 +1,8 @@
 import { eq } from "drizzle-orm";
 import type { Database } from "@repo/database";
 import { appSettings } from "@repo/database/schema";
+import type { ProvidersConfig } from "@repo/shared-types";
+import { migrateToMultiProviders, needsProviderMigration } from "@repo/shared-types/migrations";
 
 /**
  * Settings Repository
@@ -26,6 +28,14 @@ export class SettingsRepository {
   }
 
   /**
+   * Get all application settings
+   */
+  async getSettings() {
+    const setting = await this.findByKey("app-settings");
+    return setting?.value as any;
+  }
+
+  /**
    * Create or update settings
    */
   async upsert(key: string, value: unknown): Promise<void> {
@@ -48,5 +58,27 @@ export class SettingsRepository {
         updatedAt: now,
       });
     }
+  }
+
+  /**
+   * Check if provider migration is needed
+   */
+  async needsProviderMigration(): Promise<boolean> {
+    const settings = await this.getSettings();
+    return needsProviderMigration(settings);
+  }
+
+  /**
+   * Run provider migration from single-instance to multi-provider format
+   */
+  async migrateProviders(): Promise<void> {
+    const settings = await this.getSettings();
+    const providers = migrateToMultiProviders(settings);
+
+    // Update settings with migrated providers
+    await this.upsert("app-settings", {
+      ...settings,
+      providers,
+    });
   }
 }

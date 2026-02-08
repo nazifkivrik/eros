@@ -19,6 +19,14 @@ const dashboardRoutes: FastifyPluginAsyncZod = async (app) => {
               availableDiskSpace: z.number(),
               contentSize: z.number(),
               usagePercentage: z.number(),
+              volumes: z.array(z.object({
+                path: z.string(),
+                name: z.string(),
+                total: z.number(),
+                used: z.number(),
+                available: z.number(),
+                usagePercentage: z.number(),
+              })),
             }),
             content: z.object({
               totalScenes: z.number(),
@@ -46,6 +54,45 @@ const dashboardRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async () => {
       return await dashboardController.getStatistics();
+    }
+  );
+
+  app.get(
+    "/providers/status",
+    {
+      schema: {
+        tags: ["dashboard"],
+        summary: "Get provider status",
+        description: "Get status of all configured providers (metadata, indexers, torrent clients)",
+        response: {
+          200: z.object({
+            metadataProviders: z.array(z.object({
+              id: z.string(),
+              name: z.string(),
+              type: z.string(),
+              enabled: z.boolean(),
+              status: z.enum(["connected", "disconnected", "error"]),
+            })),
+            indexers: z.array(z.object({
+              id: z.string(),
+              name: z.string(),
+              type: z.string(),
+              enabled: z.boolean(),
+              status: z.enum(["connected", "disconnected", "error"]),
+            })),
+            torrentClients: z.array(z.object({
+              id: z.string(),
+              name: z.string(),
+              type: z.string(),
+              enabled: z.boolean(),
+              status: z.enum(["connected", "disconnected", "error"]),
+            })),
+          }),
+        },
+      },
+    },
+    async () => {
+      return await dashboardController.getProviderStatus();
     }
   );
 };

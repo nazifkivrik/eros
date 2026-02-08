@@ -2,6 +2,7 @@ import type { Logger } from "pino";
 import { nanoid } from "nanoid";
 import type { DownloadStatus } from "@repo/shared-types";
 import { DownloadQueueRepository } from "@/infrastructure/repositories/download-queue.repository.js";
+import type { TorrentClientRegistry } from "@/infrastructure/registries/provider-registry.js";
 import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
 
 /**
@@ -56,21 +57,29 @@ export interface UnifiedDownload {
  */
 export class DownloadQueueService {
   private downloadQueueRepository: DownloadQueueRepository;
-  private torrentClient?: ITorrentClient;
+  private torrentClientRegistry: TorrentClientRegistry;
   private logger: Logger;
 
   constructor({
     downloadQueueRepository,
-    torrentClient,
+    torrentClientRegistry,
     logger,
   }: {
     downloadQueueRepository: DownloadQueueRepository;
-    torrentClient?: ITorrentClient;
+    torrentClientRegistry: TorrentClientRegistry;
     logger: Logger;
   }) {
     this.downloadQueueRepository = downloadQueueRepository;
-    this.torrentClient = torrentClient;
+    this.torrentClientRegistry = torrentClientRegistry;
     this.logger = logger;
+  }
+
+  /**
+   * Get the primary torrent client
+   */
+  private getTorrentClient(): ITorrentClient | undefined {
+    const primary = this.torrentClientRegistry.getPrimary();
+    return primary?.provider;
   }
 
   /**
@@ -152,20 +161,23 @@ export class DownloadQueueService {
     await this.downloadQueueRepository.create(newItem);
 
     // Business logic: If magnetLink provided and torrent client available, add torrent
-    if (dto.magnetLink && this.torrentClient) {
-      try {
-        await this.torrentClient.addTorrent({
-          magnetLinks: [dto.magnetLink],
-          category: "eros",
-          paused: false,
-        });
+    if (dto.magnetLink) {
+      const torrentClient = this.getTorrentClient();
+      if (torrentClient) {
+        try {
+          await torrentClient.addTorrent({
+            magnetLinks: [dto.magnetLink],
+            category: "eros",
+            paused: false,
+          });
 
-        this.logger.info({ sceneId: dto.sceneId, title: dto.title }, "Added torrent to client");
-      } catch (error) {
-        this.logger.error(
-          { error, sceneId: dto.sceneId, title: dto.title },
-          "Failed to add torrent to client"
-        );
+          this.logger.info({ sceneId: dto.sceneId, title: dto.title }, "Added torrent to client");
+        } catch (error) {
+          this.logger.error(
+            { error, sceneId: dto.sceneId, title: dto.title },
+            "Failed to add torrent to client"
+          );
+        }
       }
     }
 
@@ -205,18 +217,21 @@ export class DownloadQueueService {
     }
 
     // Business logic: Remove from torrent client if torrent hash exists
-    if (item.torrentHash && deleteTorrent && this.torrentClient) {
-      try {
-        await this.torrentClient.removeTorrent(item.torrentHash, deleteTorrent);
-        this.logger.info(
-          { torrentHash: item.torrentHash },
-          "Removed torrent from client"
-        );
-      } catch (error) {
-        this.logger.error(
-          { error, torrentHash: item.torrentHash },
-          "Failed to remove torrent from client"
-        );
+    if (item.torrentHash && deleteTorrent) {
+      const torrentClient = this.getTorrentClient();
+      if (torrentClient) {
+        try {
+          await torrentClient.removeTorrent(item.torrentHash, deleteTorrent);
+          this.logger.info(
+            { torrentHash: item.torrentHash },
+            "Removed torrent from client"
+          );
+        } catch (error) {
+          this.logger.error(
+            { error, torrentHash: item.torrentHash },
+            "Failed to remove torrent from client"
+          );
+        }
       }
     }
 
@@ -236,12 +251,15 @@ export class DownloadQueueService {
       throw new Error("Download queue item not found");
     }
 
-    if (item.torrentHash && this.torrentClient) {
-      try {
-        await this.torrentClient.pauseTorrent(item.torrentHash);
-        this.logger.info({ id, torrentHash: item.torrentHash }, "Paused torrent in client");
-      } catch (error) {
-        this.logger.error({ error, id }, "Failed to pause torrent");
+    if (item.torrentHash) {
+      const torrentClient = this.getTorrentClient();
+      if (torrentClient) {
+        try {
+          await torrentClient.pauseTorrent(item.torrentHash);
+          this.logger.info({ id, torrentHash: item.torrentHash }, "Paused torrent in client");
+        } catch (error) {
+          this.logger.error({ error, id }, "Failed to pause torrent");
+        }
       }
     }
 
@@ -261,12 +279,15 @@ export class DownloadQueueService {
       throw new Error("Download queue item not found");
     }
 
-    if (item.torrentHash && this.torrentClient) {
-      try {
-        await this.torrentClient.resumeTorrent(item.torrentHash);
-        this.logger.info({ id, torrentHash: item.torrentHash }, "Resumed torrent in client");
-      } catch (error) {
-        this.logger.error({ error, id }, "Failed to resume torrent");
+    if (item.torrentHash) {
+      const torrentClient = this.getTorrentClient();
+      if (torrentClient) {
+        try {
+          await torrentClient.resumeTorrent(item.torrentHash);
+          this.logger.info({ id, torrentHash: item.torrentHash }, "Resumed torrent in client");
+        } catch (error) {
+          this.logger.error({ error, id }, "Failed to resume torrent");
+        }
       }
     }
 
@@ -287,9 +308,10 @@ export class DownloadQueueService {
 
     // Get torrents from torrent client if available
     let torrentsMap = new Map<string, unknown>();
-    if (this.torrentClient) {
+    const torrentClient = this.getTorrentClient();
+    if (torrentClient) {
       try {
-        const torrents = await this.torrentClient.getTorrents();
+        const torrents = await torrentClient.getTorrents();
         // Normalize hashes to lowercase for consistent matching
         torrentsMap = new Map(torrents.map((t) => [t.hash.toLowerCase(), t]));
         this.logger.debug({ torrentsCount: torrents.length }, "Fetched torrents from client");
@@ -402,8 +424,13 @@ export class DownloadQueueService {
         "Attempting to add torrent to client"
       );
 
+      const torrentClient = this.getTorrentClient();
+      if (!torrentClient) {
+        throw new Error("Torrent client not configured");
+      }
+
       // Use addTorrentAndGetHash to get the torrent client hash immediately
-      const qbitHash = await this.torrentClient!.addTorrentAndGetHash(
+      const qbitHash = await torrentClient.addTorrentAndGetHash(
         {
           magnetLinks: options.magnetLink ? [options.magnetLink] : undefined,
           urls: options.torrentUrl ? [options.torrentUrl] : undefined,

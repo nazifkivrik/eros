@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
 import type { IMetadataProvider, MetadataScene } from "@/infrastructure/adapters/interfaces/metadata-provider.interface.js";
+import type { MetadataProviderRegistry } from "@/infrastructure/registries/provider-registry.js";
 import { SubscriptionsScenesService } from "./subscriptions.scenes.service.js";
 import { SubscriptionsCoreService } from "./subscriptions.core.service.js";
 import type { SaveSceneDTO, LinkScenePerformersDTO } from "./subscriptions.scenes.service.js";
@@ -33,35 +34,42 @@ export interface DiscoveryResult {
 /**
  * Subscriptions Discovery Service
  * Handles scene discovery from metadata providers (TPDB/StashDB)
- * Uses IMetadataProvider adapter for external API calls
+ * Uses MetadataRegistry to get the primary metadata provider
  */
 export class SubscriptionsDiscoveryService {
-  private metadataProvider: IMetadataProvider | undefined;
+  private metadataRegistry: MetadataProviderRegistry;
   private subscriptionsScenesService: SubscriptionsScenesService;
   private subscriptionsCoreService: SubscriptionsCoreService;
   private db: Database;
   private logger: Logger;
 
   constructor({
-    metadataProvider,
+    metadataRegistry,
     subscriptionsScenesService,
     subscriptionsCoreService,
     db,
     logger,
   }: {
-    metadataProvider: IMetadataProvider | undefined;
+    metadataRegistry: MetadataProviderRegistry;
     subscriptionsScenesService: SubscriptionsScenesService;
     subscriptionsCoreService: SubscriptionsCoreService;
     db: Database;
     logger: Logger;
   }) {
-    this.metadataProvider = metadataProvider;
+    this.metadataRegistry = metadataRegistry;
     this.subscriptionsScenesService = subscriptionsScenesService;
     this.subscriptionsCoreService = subscriptionsCoreService;
     this.db = db;
     this.logger = logger;
     // Set logger for deduplicator utility
     setDeduplicatorLogger(logger);
+  }
+
+  /**
+   * Get the primary metadata provider
+   */
+  private getMetadataProvider(): IMetadataProvider | undefined {
+    return this.metadataRegistry.getPrimary()?.provider;
   }
 
   /**
@@ -73,7 +81,8 @@ export class SubscriptionsDiscoveryService {
   ): Promise<DiscoveryResult> {
     this.logger.info({ performerId, options }, "Starting scene discovery for performer");
 
-    if (!this.metadataProvider) {
+    const metadataProvider = this.getMetadataProvider();
+    if (!metadataProvider) {
       this.logger.warn("No metadata provider configured");
       return { totalFound: 0, totalSaved: 0, totalSkipped: 0, allSceneIds: [], errors: ["No metadata provider"] };
     }
@@ -109,8 +118,8 @@ export class SubscriptionsDiscoveryService {
           let hasMore = true;
 
           while (hasMore) {
-            scenesResponse = this.metadataProvider.getPerformerScenes
-              ? await this.metadataProvider.getPerformerScenes(tpdbId, contentType, page)
+            scenesResponse = metadataProvider.getPerformerScenes
+              ? await metadataProvider.getPerformerScenes(tpdbId, contentType, page)
               : null;
 
             if (!scenesResponse || !scenesResponse.scenes || scenesResponse.scenes.length === 0) {
@@ -254,13 +263,14 @@ export class SubscriptionsDiscoveryService {
   async discoverSceneById(sceneId: string): Promise<any | null> {
     this.logger.info({ sceneId }, "Discovering scene by ID");
 
-    if (!this.metadataProvider) {
+    const metadataProvider = this.getMetadataProvider();
+    if (!metadataProvider) {
       this.logger.warn("No metadata provider configured");
       return null;
     }
 
     try {
-      const scene = await this.metadataProvider.getSceneById(sceneId);
+      const scene = await metadataProvider.getSceneById(sceneId);
       return scene;
     } catch (error) {
       this.logger.error({ error, sceneId }, "Failed to discover scene");
@@ -274,13 +284,14 @@ export class SubscriptionsDiscoveryService {
   async searchScenes(query: string, _options: DiscoveryOptions = {}): Promise<any[]> {
     this.logger.info({ query }, "Searching for scenes");
 
-    if (!this.metadataProvider) {
+    const metadataProvider = this.getMetadataProvider();
+    if (!metadataProvider) {
       this.logger.warn("No metadata provider configured");
       return [];
     }
 
     try {
-      const scenes = await this.metadataProvider.searchScenes(query);
+      const scenes = await metadataProvider.searchScenes(query);
       return scenes;
     } catch (error) {
       this.logger.error({ error, query }, "Failed to search scenes");

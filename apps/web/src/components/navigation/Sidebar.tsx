@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Home,
   Search,
@@ -9,12 +9,14 @@ import {
   Download,
   Settings,
   FileText,
-  Briefcase
+  Briefcase,
+  LogOut
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useAuth } from "@/contexts/auth-context";
+import { toast } from "sonner";
 
 interface NavItem {
   name: string;
@@ -34,6 +36,18 @@ const navigation: NavItem[] = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { logout } = useAuth();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      toast.success("Logged out successfully");
+      router.push("/login");
+    } catch {
+      toast.error("Failed to logout");
+    }
+  };
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-background">
@@ -76,17 +90,16 @@ export function Sidebar() {
 
         <Separator />
 
-        {/* Footer */}
-        <div className="p-4">
-          <div className="flex items-center gap-3 rounded-lg bg-accent px-3 py-2">
-            <Avatar>
-              <AvatarFallback>A</AvatarFallback>
-            </Avatar>
-            <div className="flex-1 overflow-hidden">
-              <p className="truncate text-sm font-medium">Admin</p>
-              <p className="text-xs text-muted-foreground">admin@eros.local</p>
-            </div>
-          </div>
+        {/* Logout Button */}
+        <div className="p-3">
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 text-muted-foreground hover:text-destructive"
+            onClick={handleLogout}
+          >
+            <LogOut className="h-5 w-5" />
+            <span>Logout</span>
+          </Button>
         </div>
       </div>
     </aside>

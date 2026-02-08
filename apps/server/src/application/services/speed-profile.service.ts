@@ -1,210 +1,109 @@
 /**
  * Speed Profile Service
  * Manages time-based download/upload speed limits for torrents
+ * Uses a weekly calendar with 168 hourly slots (7 days × 24 hours)
  */
 
-export type SpeedProfileRule = {
-  name: string;
-  enabled: boolean;
-  // Time range (24-hour format)
-  startHour: number; // 0-23
-  endHour: number; // 0-23
-  // Days of week (0 = Sunday, 6 = Saturday)
-  daysOfWeek: number[]; // [0,1,2,3,4,5,6] for all days
-  // Speed limits in KB/s (0 = unlimited)
-  downloadLimit: number;
-  uploadLimit: number;
-};
+import type { SpeedScheduleSettings, SpeedProfile } from "@repo/shared-types";
+import { getActiveSpeedProfile } from "@repo/shared-types";
+import type { Logger } from "pino";
 
-export type SpeedProfileSettings = {
-  enabled: boolean;
-  rules: SpeedProfileRule[];
-  defaultDownloadLimit: number; // Default when no rule matches
-  defaultUploadLimit: number;
+/**
+ * Result of getting active speed limits
+ */
+export type ActiveSpeedLimits = {
+  downloadLimit: number; // KB/s, 0 = unlimited
+  uploadLimit: number; // KB/s, 0 = unlimited
+  profileName?: string;
 };
 
 export class SpeedProfileService {
-  private settings: SpeedProfileSettings;
+  private settings: SpeedScheduleSettings;
+  private logger: Logger;
 
-  constructor(speedProfileSettings?: SpeedProfileSettings) {
-    this.settings = speedProfileSettings || this.getDefaultSettings();
+  constructor(logger: Logger, speedScheduleSettings?: SpeedScheduleSettings) {
+    this.logger = logger;
+    this.settings = speedScheduleSettings || this.getDefaultSettings();
   }
 
   /**
-   * Get default speed profile settings
+   * Get default speed schedule settings
    */
-  private getDefaultSettings(): SpeedProfileSettings {
+  private getDefaultSettings(): SpeedScheduleSettings {
     return {
       enabled: false,
-      defaultDownloadLimit: 0, // Unlimited
-      defaultUploadLimit: 0, // Unlimited
-      rules: [
+      profiles: [
         {
-          name: "Daytime (Slow)",
-          enabled: true,
-          startHour: 8,
-          endHour: 22,
-          daysOfWeek: [1, 2, 3, 4, 5], // Monday-Friday
-          downloadLimit: 1024, // 1 MB/s
-          uploadLimit: 256, // 256 KB/s
-        },
-        {
-          name: "Nighttime (Fast)",
-          enabled: true,
-          startHour: 22,
-          endHour: 8,
-          daysOfWeek: [0, 1, 2, 3, 4, 5, 6], // All days
-          downloadLimit: 0, // Unlimited
-          uploadLimit: 512, // 512 KB/s
-        },
-        {
-          name: "Weekend (Medium)",
-          enabled: true,
-          startHour: 8,
-          endHour: 22,
-          daysOfWeek: [0, 6], // Sunday, Saturday
-          downloadLimit: 2048, // 2 MB/s
-          uploadLimit: 512, // 512 KB/s
+          id: "default",
+          name: "Unlimited",
+          color: "#22c55e", // green
+          downloadLimit: 0,
+          uploadLimit: 0,
         },
       ],
+      schedule: Array.from({ length: 168 }, (_, i) => ({
+        dayOfWeek: Math.floor(i / 24),
+        hour: i % 24,
+        speedProfileId: "default",
+      })),
     };
   }
 
   /**
-   * Update speed profile settings
+   * Update speed schedule settings
    */
-  updateSettings(settings: SpeedProfileSettings): void {
+  updateSettings(settings: SpeedScheduleSettings): void {
     this.settings = settings;
+    this.logger.info({ settings }, "Speed schedule settings updated");
   }
 
   /**
-   * Get current speed profile settings
+   * Get current speed schedule settings
    */
-  getSettings(): SpeedProfileSettings {
+  getSettings(): SpeedScheduleSettings {
     return this.settings;
   }
 
   /**
    * Get active speed limits for current time
    */
-  getActiveSpeedLimits(): {
-    downloadLimit: number;
-    uploadLimit: number;
-    ruleName?: string;
-  } {
+  getActiveSpeedLimits(): ActiveSpeedLimits {
     if (!this.settings.enabled) {
       return {
-        downloadLimit: this.settings.defaultDownloadLimit,
-        uploadLimit: this.settings.defaultUploadLimit,
+        downloadLimit: 0,
+        uploadLimit: 0,
       };
     }
 
-    const now = new Date();
-    const currentHour = now.getHours();
-    const currentDay = now.getDay();
+    const profile = getActiveSpeedProfile(this.settings);
 
-    // Find matching rule (first match wins)
-    const matchingRule = this.findMatchingRule(currentHour, currentDay);
-
-    if (matchingRule) {
+    if (profile) {
       return {
-        downloadLimit: matchingRule.downloadLimit,
-        uploadLimit: matchingRule.uploadLimit,
-        ruleName: matchingRule.name,
+        downloadLimit: profile.downloadLimit,
+        uploadLimit: profile.uploadLimit,
+        profileName: profile.name,
       };
     }
 
-    // No matching rule, use defaults
+    // No matching profile, return unlimited
     return {
-      downloadLimit: this.settings.defaultDownloadLimit,
-      uploadLimit: this.settings.defaultUploadLimit,
+      downloadLimit: 0,
+      uploadLimit: 0,
     };
   }
 
   /**
-   * Find matching speed profile rule for given time
-   */
-  private findMatchingRule(
-    hour: number,
-    dayOfWeek: number
-  ): SpeedProfileRule | null {
-    const enabledRules = this.settings.rules.filter((rule) => rule.enabled);
-
-    for (const rule of enabledRules) {
-      // Check if day matches
-      if (!rule.daysOfWeek.includes(dayOfWeek)) {
-        continue;
-      }
-
-      // Check if hour matches (handle wraparound for overnight rules)
-      if (this.isHourInRange(hour, rule.startHour, rule.endHour)) {
-        return rule;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Check if hour is within time range (handles overnight ranges)
-   */
-  private isHourInRange(
-    hour: number,
-    startHour: number,
-    endHour: number
-  ): boolean {
-    if (startHour <= endHour) {
-      // Normal range (e.g., 8-17)
-      return hour >= startHour && hour < endHour;
-    } else {
-      // Overnight range (e.g., 22-8)
-      return hour >= startHour || hour < endHour;
-    }
-  }
-
-  /**
-   * Add a new speed profile rule
-   */
-  addRule(rule: SpeedProfileRule): void {
-    this.settings.rules.push(rule);
-  }
-
-  /**
-   * Remove a speed profile rule by name
-   */
-  removeRule(ruleName: string): void {
-    this.settings.rules = this.settings.rules.filter(
-      (rule) => rule.name !== ruleName
-    );
-  }
-
-  /**
-   * Update a specific rule
-   */
-  updateRule(ruleName: string, updatedRule: SpeedProfileRule): void {
-    const index = this.settings.rules.findIndex(
-      (rule) => rule.name === ruleName
-    );
-    if (index !== -1) {
-      this.settings.rules[index] = updatedRule;
-    }
-  }
-
-  /**
-   * Enable/disable speed profiling
+   * Enable/disable speed scheduling
    */
   setEnabled(enabled: boolean): void {
     this.settings.enabled = enabled;
+    this.logger.info({ enabled }, `Speed scheduling ${enabled ? "enabled" : "disabled"}`);
   }
 
   /**
    * Get formatted speed limit string for logging
    */
-  formatSpeedLimits(limits: {
-    downloadLimit: number;
-    uploadLimit: number;
-    ruleName?: string;
-  }): string {
+  formatSpeedLimits(limits: ActiveSpeedLimits): string {
     const dl =
       limits.downloadLimit === 0
         ? "unlimited"
@@ -214,11 +113,77 @@ export class SpeedProfileService {
         ? "unlimited"
         : `${Math.round(limits.uploadLimit / 1024)} MB/s`;
 
-    if (limits.ruleName) {
-      return `${limits.ruleName}: ↓${dl} ↑${ul}`;
+    if (limits.profileName) {
+      return `${limits.profileName}: ↓${dl} ↑${ul}`;
     }
 
     return `Default: ↓${dl} ↑${ul}`;
+  }
+
+  /**
+   * Add a new speed profile
+   */
+  addProfile(profile: Omit<SpeedProfile, "id">): SpeedProfile {
+    const newProfile: SpeedProfile = {
+      ...profile,
+      id: `profile-${Date.now()}`,
+    };
+    this.settings.profiles.push(newProfile);
+    this.logger.info({ profile: newProfile }, "Speed profile added");
+    return newProfile;
+  }
+
+  /**
+   * Update an existing speed profile
+   */
+  updateProfile(id: string, updates: Partial<SpeedProfile>): boolean {
+    const index = this.settings.profiles.findIndex((p) => p.id === id);
+    if (index === -1) {
+      return false;
+    }
+    this.settings.profiles[index] = { ...this.settings.profiles[index], ...updates };
+    this.logger.info({ id, updates }, "Speed profile updated");
+    return true;
+  }
+
+  /**
+   * Delete a speed profile
+   */
+  deleteProfile(id: string): boolean {
+    const index = this.settings.profiles.findIndex((p) => p.id === id);
+    if (index === -1) {
+      return false;
+    }
+    this.settings.profiles.splice(index, 1);
+    // Reset any slots using this profile to use the first available profile
+    const fallbackProfileId = this.settings.profiles[0]?.id || "default";
+    this.settings.schedule = this.settings.schedule.map((slot) =>
+      slot.speedProfileId === id ? { ...slot, speedProfileId: fallbackProfileId } : slot
+    );
+    this.logger.info({ id }, "Speed profile deleted");
+    return true;
+  }
+
+  /**
+   * Update schedule slots
+   */
+  updateScheduleSlot(dayOfWeek: number, hour: number, speedProfileId: string): void {
+    const slot = this.settings.schedule.find(
+      (s) => s.dayOfWeek === dayOfWeek && s.hour === hour
+    );
+    if (slot) {
+      slot.speedProfileId = speedProfileId;
+    }
+  }
+
+  /**
+   * Bulk update schedule slots (e.g., for "apply weekday preset")
+   */
+  updateScheduleSlots(slots: Array<{ dayOfWeek: number; hour: number; speedProfileId: string }>): void {
+    for (const slot of slots) {
+      this.updateScheduleSlot(slot.dayOfWeek, slot.hour, slot.speedProfileId);
+    }
+    this.logger.info({ count: slots.length }, "Schedule slots updated");
   }
 }
 
@@ -226,12 +191,13 @@ export class SpeedProfileService {
 let speedProfileServiceInstance: SpeedProfileService | null = null;
 
 export function createSpeedProfileService(
-  speedProfileSettings?: SpeedProfileSettings
+  logger: Logger,
+  speedScheduleSettings?: SpeedScheduleSettings
 ): SpeedProfileService {
   if (!speedProfileServiceInstance) {
-    speedProfileServiceInstance = new SpeedProfileService(speedProfileSettings);
-  } else if (speedProfileSettings) {
-    speedProfileServiceInstance.updateSettings(speedProfileSettings);
+    speedProfileServiceInstance = new SpeedProfileService(logger, speedScheduleSettings);
+  } else if (speedScheduleSettings) {
+    speedProfileServiceInstance.updateSettings(speedScheduleSettings);
   }
   return speedProfileServiceInstance;
 }

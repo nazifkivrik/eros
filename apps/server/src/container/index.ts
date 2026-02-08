@@ -130,7 +130,12 @@ export function buildContainer(config: ContainerConfig) {
     db: asValue(config.db),
     logger: asValue(config.logger),
     ...(config.externalServicesManager
-      ? { externalServicesManager: asValue(config.externalServicesManager) }
+      ? {
+          externalServicesManager: asValue(config.externalServicesManager),
+          metadataRegistry: asValue(config.externalServicesManager.getMetadataRegistry()),
+          indexerRegistry: asValue(config.externalServicesManager.getIndexerRegistry()),
+          torrentClientRegistry: asValue(config.externalServicesManager.getTorrentClientRegistry()),
+        }
       : {}),
   });
 
@@ -227,69 +232,8 @@ export function buildContainer(config: ContainerConfig) {
   });
 
   // === External Service Adapters ===
-
-  const ext = config.externalServices || {};
-  const logger = config.logger;
-
-  // Prowlarr adapter (indexer)
-  if (ext.prowlarr) {
-    const prowlarrAdapter = createProwlarrAdapter(ext.prowlarr, logger);
-    container.register({
-      indexer: asValue(prowlarrAdapter as IIndexer),
-    });
-  } else {
-    container.register({
-      indexer: asValue(undefined),
-    });
-  }
-
-  // qBittorrent adapter (torrent client)
-  if (ext.qbittorrent) {
-    const qbittorrentAdapter = createQBittorrentAdapter(ext.qbittorrent, logger);
-    container.register({
-      torrentClient: asValue(qbittorrentAdapter as ITorrentClient),
-    });
-  } else {
-    container.register({
-      torrentClient: asValue(undefined),
-    });
-  }
-
-  // ThePornDB adapter (metadata provider)
-  if (ext.tpdb) {
-    const tpdbAdapter = createTPDBAdapter(ext.tpdb, logger);
-    container.register({
-      tpdbProvider: asValue(tpdbAdapter as IMetadataProvider),
-    });
-  } else {
-    container.register({
-      tpdbProvider: asValue(undefined),
-    });
-  }
-
-  // StashDB adapter (metadata provider)
-  if (ext.stashdb) {
-    const stashdbAdapter = createStashDBAdapter(ext.stashdb, logger);
-    container.register({
-      stashdbProvider: asValue(stashdbAdapter as unknown as IMetadataProvider),
-    });
-  } else {
-    container.register({
-      stashdbProvider: asValue(undefined),
-    });
-  }
-
-  // Register generic metadataProvider that picks the first available provider
-  // Priority: TPDB > StashDB
-  const metadataProvider = ext.tpdb
-    ? createTPDBAdapter(ext.tpdb, logger)
-    : ext.stashdb
-    ? createStashDBAdapter(ext.stashdb, logger)
-    : undefined;
-
-  container.register({
-    metadataProvider: asValue(metadataProvider as IMetadataProvider | undefined),
-  });
+  // Note: External services are now managed by ExternalServicesManager and exposed via registries
+  // All services now use registries directly, no legacy shim needed
 
   return container;
 }

@@ -1,8 +1,8 @@
 import type { Logger } from "pino";
 import { DEFAULT_SETTINGS, type AppSettings } from "@repo/shared-types";
 import { SettingsRepository } from "@/infrastructure/repositories/settings.repository.js";
-import type { IMetadataProvider } from "@/infrastructure/adapters/interfaces/metadata-provider.interface.js";
-import type { IIndexer } from "@/infrastructure/adapters/interfaces/indexer.interface.js";
+import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
+import type { MetadataProviderRegistry, IndexerRegistry, TorrentClientRegistry } from "@/infrastructure/registries/provider-registry.js";
 
 /**
  * DTOs for Settings Service
@@ -32,32 +32,28 @@ export interface QBittorrentStatusDTO {
 export class SettingsService {
   private settingsRepository: SettingsRepository;
   private logger: Logger;
-  private tpdbProvider?: IMetadataProvider;
-  private stashdbProvider?: IMetadataProvider;
-  private indexer?: IIndexer; // For prowlarr testing
-  private torrentClient?: any; // ITorrentClient - for qbittorrent testing
+  private metadataRegistry: MetadataProviderRegistry;
+  private indexerRegistry: IndexerRegistry;
+  private torrentClientRegistry: TorrentClientRegistry;
 
   constructor({
     settingsRepository,
     logger,
-    tpdbProvider,
-    stashdbProvider,
-    indexer,
-    torrentClient,
+    metadataRegistry,
+    indexerRegistry,
+    torrentClientRegistry,
   }: {
     settingsRepository: SettingsRepository;
     logger: Logger;
-    tpdbProvider?: IMetadataProvider;
-    stashdbProvider?: IMetadataProvider;
-    indexer?: IIndexer;
-    torrentClient?: any;
+    metadataRegistry: MetadataProviderRegistry;
+    indexerRegistry: IndexerRegistry;
+    torrentClientRegistry: TorrentClientRegistry;
   }) {
     this.settingsRepository = settingsRepository;
     this.logger = logger;
-    this.tpdbProvider = tpdbProvider;
-    this.stashdbProvider = stashdbProvider;
-    this.indexer = indexer;
-    this.torrentClient = torrentClient;
+    this.metadataRegistry = metadataRegistry;
+    this.indexerRegistry = indexerRegistry;
+    this.torrentClientRegistry = torrentClientRegistry;
   }
 
   /**
@@ -143,6 +139,18 @@ export class SettingsService {
             ...DEFAULT_SETTINGS.jobs.qbittorrentCleanup,
             ...(savedSettings.jobs?.qbittorrentCleanup || {}),
           },
+        },
+        speedSchedule: {
+          ...DEFAULT_SETTINGS.speedSchedule,
+          ...(savedSettings.speedSchedule || {}),
+        },
+        downloadPaths: {
+          ...DEFAULT_SETTINGS.downloadPaths,
+          ...(savedSettings.downloadPaths || {}),
+        },
+        providers: {
+          ...DEFAULT_SETTINGS.providers,
+          ...(savedSettings.providers || {}),
         },
       };
     }
@@ -285,7 +293,9 @@ export class SettingsService {
   async getQBittorrentStatus(): Promise<QBittorrentStatusDTO> {
     this.logger.debug("Fetching qBittorrent status");
 
-    if (!this.torrentClient) {
+    const primaryTorrentClient = this.torrentClientRegistry.getPrimary();
+
+    if (!primaryTorrentClient) {
       return {
         connected: false,
         error: "Torrent client not configured",
@@ -293,7 +303,7 @@ export class SettingsService {
     }
 
     try {
-      const torrents = await this.torrentClient.getTorrents();
+      const torrents = await primaryTorrentClient.provider.getTorrents();
       const downloadSpeed = torrents.reduce((sum: number, t: any) => sum + (t.downloadSpeed || 0), 0);
       const uploadSpeed = torrents.reduce((sum: number, t: any) => sum + (t.uploadSpeed || 0), 0);
 
@@ -322,11 +332,14 @@ export class SettingsService {
    * Business rule: Validate API URL and key before testing
    */
   private async testTPDBConnectionAdapter(): Promise<TestConnectionResult> {
-    if (!this.tpdbProvider) {
+    const providers = this.metadataRegistry.getAll().filter(p => p.id.includes('tpdb'));
+
+    if (providers.length === 0) {
       return { success: false, message: "TPDB provider not configured" };
     }
 
-    const isConnected = await this.tpdbProvider.testConnection();
+    const provider = providers[0].provider;
+    const isConnected = await provider.testConnection();
 
     if (isConnected) {
       return { success: true, message: "Connected to TPDB successfully" };
@@ -340,11 +353,14 @@ export class SettingsService {
    * Business rule: Validate API URL before testing
    */
   private async testStashDBConnectionAdapter(): Promise<TestConnectionResult> {
-    if (!this.stashdbProvider) {
+    const providers = this.metadataRegistry.getAll().filter(p => p.id.includes('stashdb'));
+
+    if (providers.length === 0) {
       return { success: false, message: "StashDB provider not configured" };
     }
 
-    const isConnected = await this.stashdbProvider.testConnection();
+    const provider = providers[0].provider;
+    const isConnected = await provider.testConnection();
 
     if (isConnected) {
       return { success: true, message: "Connected to StashDB successfully" };
@@ -358,11 +374,14 @@ export class SettingsService {
    * Business rule: Validate API URL and key before testing
    */
   private async testProwlarrConnectionAdapter(): Promise<TestConnectionResult> {
-    if (!this.indexer) {
+    const providers = this.indexerRegistry.getAll().filter(p => p.id.includes('prowlarr'));
+
+    if (providers.length === 0) {
       return { success: false, message: "Indexer provider not configured" };
     }
 
-    const isConnected = await this.indexer.testConnection();
+    const provider = providers[0].provider;
+    const isConnected = await provider.testConnection();
 
     if (isConnected) {
       return { success: true, message: "Connected to Prowlarr successfully" };
@@ -376,11 +395,14 @@ export class SettingsService {
    * Business rule: Validate URL and credentials before testing
    */
   private async testQBittorrentConnectionAdapter(): Promise<TestConnectionResult> {
-    if (!this.torrentClient) {
+    const providers = this.torrentClientRegistry.getAll().filter(p => p.id.includes('qbittorrent'));
+
+    if (providers.length === 0) {
       return { success: false, message: "Torrent client not configured" };
     }
 
-    const isConnected = await this.torrentClient.testConnection();
+    const provider = providers[0].provider;
+    const isConnected = await provider.testConnection();
 
     if (isConnected) {
       return { success: true, message: "Connected to qBittorrent successfully" };

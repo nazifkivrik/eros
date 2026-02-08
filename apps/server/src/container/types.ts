@@ -11,6 +11,9 @@ import type { AIMatchingService } from "../application/services/ai-matching/ai-m
 import type { CrossEncoderService } from "../application/services/ai-matching/cross-encoder.service.js";
 import type { SpeedProfileService } from "../application/services/speed-profile.service.js";
 
+// Provider Registries
+import type { MetadataProviderRegistry, IndexerRegistry, TorrentClientRegistry } from "../infrastructure/registries/provider-registry.js";
+
 // Adapters (self-contained, no longer wrap old services)
 import type { IIndexer } from "../infrastructure/adapters/interfaces/indexer.interface.js";
 import type { ITorrentClient } from "../infrastructure/adapters/interfaces/torrent-client.interface.js";
@@ -100,14 +103,10 @@ export interface ServiceContainer {
   crossEncoderService: CrossEncoderService;
   speedProfileService: SpeedProfileService;
 
-  // External service adapters (optional)
-  indexer?: IIndexer;
-  torrentClient?: ITorrentClient;
-  tpdbProvider?: IMetadataProvider;
-  stashdbProvider?: IMetadataProvider;
-
-  // Generic metadata provider (picks first available)
-  metadataProvider?: IMetadataProvider | undefined;
+  // External service registries (multi-provider architecture)
+  metadataRegistry: MetadataProviderRegistry;
+  indexerRegistry: IndexerRegistry;
+  torrentClientRegistry: TorrentClientRegistry;
 
   // === Clean Architecture Layers ===
 

@@ -175,9 +175,13 @@ export class StashDBAdapter implements IMetadataProvider {
       `;
 
       const data = await this.request<FindPerformerResponse>(performerQuery, { id });
+      if (!data.findPerformer) {
+        this.logger.warn({ id }, "StashDB performer not found");
+        return null;
+      }
       return this.mapPerformerToInterface(data.findPerformer);
     } catch (error) {
-      this.logger.error({ error, id }, "StashDB performer lookup failed");
+      this.logger.error({ error: error instanceof Error ? error.message : String(error), id }, "StashDB performer lookup failed");
       return null;
     }
   }

@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 import type { Logger } from "pino";
-import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
+import type { TorrentClientRegistry } from "@/infrastructure/registries/provider-registry.js";
 import { SubscriptionsRepository } from "@/infrastructure/repositories/subscriptions.repository.js";
 import { ScenesRepository } from "@/infrastructure/repositories/scenes.repository.js";
 import { SubscriptionsCoreService } from "./subscriptions/subscriptions.core.service.js";
@@ -55,7 +55,7 @@ export class SubscriptionsService {
   private subscriptionsDiscoveryService: SubscriptionsDiscoveryService;
   private entityResolverService: EntityResolverService;
   private fileManager: FileManagerService;
-  private torrentClient: ITorrentClient | undefined;
+  private torrentClientRegistry: TorrentClientRegistry;
   private logger: Logger;
 
   constructor({
@@ -66,7 +66,7 @@ export class SubscriptionsService {
     subscriptionsDiscoveryService,
     entityResolverService,
     fileManager,
-    torrentClient,
+    torrentClientRegistry,
     logger,
   }: {
     subscriptionsRepository: SubscriptionsRepository;
@@ -76,7 +76,7 @@ export class SubscriptionsService {
     subscriptionsDiscoveryService: SubscriptionsDiscoveryService;
     entityResolverService: EntityResolverService;
     fileManager: FileManagerService;
-    torrentClient?: ITorrentClient;
+    torrentClientRegistry: TorrentClientRegistry;
     logger: Logger;
   }) {
     this.subscriptionsRepository = subscriptionsRepository;
@@ -86,8 +86,16 @@ export class SubscriptionsService {
     this.subscriptionsDiscoveryService = subscriptionsDiscoveryService;
     this.entityResolverService = entityResolverService;
     this.fileManager = fileManager;
-    this.torrentClient = torrentClient;
+    this.torrentClientRegistry = torrentClientRegistry;
     this.logger = logger;
+  }
+
+  /**
+   * Get the primary torrent client
+   */
+  private getTorrentClient() {
+    const primary = this.torrentClientRegistry.getPrimary();
+    return primary?.provider;
   }
 
   /**
@@ -434,9 +442,10 @@ export class SubscriptionsService {
 
         // 2b. Delete torrent from qBittorrent
         const downloadQueue = await this.subscriptionsRepository.getSceneDownloadQueue(scene.id);
-        if (downloadQueue?.qbitHash && this.torrentClient) {
+        const torrentClient = this.getTorrentClient();
+        if (downloadQueue?.qbitHash && torrentClient) {
           try {
-            await this.torrentClient.removeTorrent(downloadQueue.qbitHash, false);
+            await torrentClient.removeTorrent(downloadQueue.qbitHash, false);
             this.logger.info({ sceneId: scene.id, torrentHash: downloadQueue.qbitHash }, "Torrent deleted from qBittorrent");
           } catch (error) {
             this.logger.error({ sceneId: scene.id, error }, "Failed to delete torrent from qBittorrent");

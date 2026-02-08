@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
   Clock,
-  CheckCircle2,
   HardDrive,
   Film,
   TrendingUp,
@@ -15,6 +14,7 @@ import {
   Activity,
   Zap,
   Download,
+  DownloadCloud,
   Users,
   Settings,
   ArrowUpRight,
@@ -22,14 +22,14 @@ import {
   Globe,
   Database,
   Cpu,
+  Search,
 } from "lucide-react";
 import Link from "next/link";
 import { useSubscriptions } from "@/features/subscriptions";
 import { useUnifiedDownloads } from "@/features/downloads";
 import { useTorrents } from "@/features/downloads";
 import { useJobs } from "@/features/jobs";
-import { useSettings } from "@/features/settings";
-import { useDashboardStatistics } from "./hooks";
+import { useDashboardStatistics, useProviderStatus } from "./hooks";
 import { formatBytes } from "@/features/downloads/components/utils";
 import { formatDistanceToNow } from "date-fns";
 import { useEffect, useState } from "react";
@@ -157,11 +157,13 @@ function ProgressWithLabel({
   max,
   label,
   color = "primary",
+  showPercentage = true,
 }: {
   value: number;
   max: number;
-  label: string;
+  label: string | null;
   color?: "primary" | "success" | "warning" | "danger";
+  showPercentage?: boolean;
 }) {
   const percentage = max > 0 ? (value / max) * 100 : 0;
   const colorClasses = {
@@ -173,10 +175,17 @@ function ProgressWithLabel({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between text-sm">
-        <span className="font-medium">{label}</span>
-        <span className="text-muted-foreground">{percentage.toFixed(1)}%</span>
-      </div>
+      {label && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="font-medium">{label}</span>
+          {showPercentage && <span className="text-muted-foreground">{percentage.toFixed(1)}%</span>}
+        </div>
+      )}
+      {!label && showPercentage && (
+        <div className="flex items-center justify-end text-sm">
+          <span className="text-muted-foreground">{percentage.toFixed(1)}%</span>
+        </div>
+      )}
       <div className="relative h-2 bg-secondary rounded-full overflow-hidden">
         <div
           className={cn("h-full rounded-full transition-all duration-500", colorClasses[color])}
@@ -196,26 +205,12 @@ export function DashboardView() {
   const { data: downloads, isLoading: loadingDownloads } = useUnifiedDownloads();
   const { data: torrents, isLoading: loadingTorrents } = useTorrents();
   const { data: jobs, isLoading: loadingJobs } = useJobs();
-  const { data: settings } = useSettings();
   const { data: stats, isLoading: loadingStats } = useDashboardStatistics();
+  const { data: providerStatus } = useProviderStatus();
+  const [volumesExpanded, setVolumesExpanded] = useState(false);
 
   const activeDownloads = downloads?.downloads?.filter((item) => item.status === "downloading").length || 0;
   const activeTorrents = torrents?.torrents?.length || 0;
-
-  const getServiceStatus = (service: string) => {
-    if (!settings) return { status: "Not Configured", variant: "secondary" as const, icon: Settings };
-
-    const serviceConfig = (settings as any)[service];
-    if (!serviceConfig) return { status: "Not Configured", variant: "secondary" as const, icon: Settings };
-
-    if (typeof serviceConfig === "object" && "enabled" in serviceConfig) {
-      if (serviceConfig.enabled) {
-        return { status: "Connected", variant: "default" as const, className: "bg-green-500", icon: CheckCircle2 };
-      }
-    }
-
-    return { status: "Not Configured", variant: "secondary" as const, icon: Settings };
-  };
 
   const recentJobs = jobs?.jobs
     ?.filter((j) => j.lastRun)
@@ -246,6 +241,32 @@ export function DashboardView() {
       "hash-generation": Activity,
     };
     return iconMap[jobName] || Clock;
+  };
+
+  // Helper functions for provider display
+  const getProviderIcon = (type: string) => {
+    const iconMap: Record<string, any> = {
+      "tpdb": Database,
+      "stashdb": Globe,
+      "prowlarr": Search,
+      "jackett": Search,
+      "qbittorrent": DownloadCloud,
+      "transmission": DownloadCloud,
+    };
+    return iconMap[type] || Settings;
+  };
+
+  const getProviderStatusDisplay = (status: string) => {
+    switch (status) {
+      case "connected":
+        return { status: "Connected", variant: "default" as const, className: "bg-green-500" };
+      case "disconnected":
+        return { status: "Disabled", variant: "secondary" as const };
+      case "error":
+        return { status: "Error", variant: "destructive" as const };
+      default:
+        return { status: "Unknown", variant: "secondary" as const };
+    }
   };
 
   return (
@@ -348,6 +369,60 @@ export function DashboardView() {
                       color="blue"
                     />
                   </div>
+
+                  {/* Individual Volumes - Expandable */}
+                  {stats?.storage.volumes && stats.storage.volumes.length > 0 && (
+                    <div className="border-t pt-4 mt-4">
+                      <button
+                        onClick={() => setVolumesExpanded(!volumesExpanded)}
+                        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors w-full"
+                      >
+                        <Clock
+                          className={cn(
+                            "h-4 w-4 transition-transform",
+                            volumesExpanded && "rotate-90"
+                          )}
+                        />
+                        <span>
+                          {volumesExpanded ? "Hide" : "Show"} individual volumes ({stats.storage.volumes.length})
+                        </span>
+                      </button>
+
+                      {volumesExpanded && (
+                        <div className="mt-4 space-y-3">
+                          {stats.storage.volumes.map((volume) => (
+                            <div key={volume.path} className="p-3 rounded-lg bg-muted/50 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium">{volume.name}</span>
+                                <span className="text-xs text-muted-foreground">{volume.path}</span>
+                              </div>
+                              <ProgressWithLabel
+                                value={volume.used}
+                                max={volume.total}
+                                label={null}
+                                color={volume.usagePercentage > 80 ? "danger" : volume.usagePercentage > 60 ? "warning" : "primary"}
+                                showPercentage={true}
+                              />
+                              <div className="grid grid-cols-3 gap-2 text-xs">
+                                <div>
+                                  <span className="text-muted-foreground">Used: </span>
+                                  {formatBytes(volume.used)}
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Available: </span>
+                                  {formatBytes(volume.available)}
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Total: </span>
+                                  {formatBytes(volume.total)}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
             </CardContent>
@@ -516,11 +591,15 @@ export function DashboardView() {
                               <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
                                 <span className="flex items-center gap-1">
                                   <ArrowDownRight className="h-3 w-3 text-green-500" />
-                                  {(torrent.dlspeed / 1024 / 1024).toFixed(1)} MB/s
+                                  {torrent.dlspeed != null && torrent.dlspeed > 0
+                                    ? `${(torrent.dlspeed / 1024 / 1024).toFixed(1)} MB/s`
+                                    : "-"}
                                 </span>
                                 <span className="flex items-center gap-1">
                                   <ArrowUpRight className="h-3 w-3 text-blue-500" />
-                                  {(torrent.upspeed / 1024 / 1024).toFixed(1)} MB/s
+                                  {torrent.upspeed != null && torrent.upspeed > 0
+                                    ? `${(torrent.upspeed / 1024 / 1024).toFixed(1)} MB/s`
+                                    : "-"}
                                 </span>
                               </div>
                             </div>
@@ -571,32 +650,63 @@ export function DashboardView() {
               </div>
 
               {[
-                { name: "StashDB", key: "stashdb" },
-                { name: "Prowlarr", key: "prowlarr" },
-                { name: "qBittorrent", key: "qbittorrent" },
-              ].map((service) => {
-                const status = getServiceStatus(service.key);
-                const Icon = status.icon;
-                return (
-                  <div
-                    key={service.key}
-                    className={cn(
-                      "flex items-center justify-between p-3 rounded-lg",
-                      status.variant === "default"
-                        ? "bg-green-50 dark:bg-green-950"
-                        : "bg-muted/50"
-                    )}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Icon className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">{service.name}</span>
+                {
+                  title: "Metadata Providers",
+                  providers: providerStatus?.metadataProviders || [],
+                  icon: Database,
+                },
+                {
+                  title: "Indexers",
+                  providers: providerStatus?.indexers || [],
+                  icon: Search,
+                },
+                {
+                  title: "Torrent Clients",
+                  providers: providerStatus?.torrentClients || [],
+                  icon: DownloadCloud,
+                },
+              ].map((group) => (
+                <div key={group.title}>
+                  {group.providers.length > 0 && (
+                    <>
+                      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 mt-3">
+                        {group.title}
+                      </div>
+                      {group.providers.map((provider) => {
+                        const ProviderIcon = getProviderIcon(provider.type);
+                        const statusDisplay = getProviderStatusDisplay(provider.status);
+                        return (
+                          <div
+                            key={provider.id}
+                            className={cn(
+                              "flex items-center justify-between p-3 rounded-lg mb-2",
+                              provider.status === "connected"
+                                ? "bg-green-50 dark:bg-green-950"
+                                : "bg-muted/50"
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <ProviderIcon className="h-4 w-4 text-muted-foreground" />
+                              <span className="text-sm font-medium">{provider.name}</span>
+                              <Badge variant="outline" className="text-xs">
+                                {provider.type}
+                              </Badge>
+                            </div>
+                            <Badge variant={statusDisplay.variant} className={statusDisplay.className}>
+                              {statusDisplay.status}
+                            </Badge>
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
+                  {group.providers.length === 0 && (
+                    <div className="text-xs text-muted-foreground text-center py-2">
+                      No {group.title.toLowerCase()} configured
                     </div>
-                    <Badge variant={status.variant} className={status.className}>
-                      {status.status}
-                    </Badge>
-                  </div>
-                );
-              })}
+                  )}
+                </div>
+              ))}
             </CardContent>
           </Card>
 

@@ -33,7 +33,7 @@ export default fp(async (app: FastifyInstance) => {
     : DEFAULT_SETTINGS;
 
   // Initialize external services configuration manager
-  const externalServicesManager = new ExternalServicesManager(app.db);
+  const externalServicesManager = new ExternalServicesManager(app.db, app.log as unknown as Logger);
   await externalServicesManager.initialize();
 
   // Build container with infrastructure dependencies and external service configs
@@ -135,13 +135,11 @@ export default fp(async (app: FastifyInstance) => {
     dashboardController: container.cradle.dashboardController,
   };
 
-  // Add optional services
-  // Always include adapters (will be undefined if none available)
-  containerCradle.metadataProvider = container.cradle.metadataProvider;
-  containerCradle.tpdbProvider = container.cradle.tpdbProvider;
-  containerCradle.stashdbProvider = container.cradle.stashdbProvider;
-  containerCradle.indexer = container.cradle.indexer;
-  containerCradle.torrentClient = container.cradle.torrentClient;
+  // Add optional services and registries
+  // External Service Registries (multi-provider architecture)
+  containerCradle.metadataRegistry = container.cradle.metadataRegistry;
+  containerCradle.indexerRegistry = container.cradle.indexerRegistry;
+  containerCradle.torrentClientRegistry = container.cradle.torrentClientRegistry;
 
   app.decorate("container", containerCradle as ServiceContainer);
 

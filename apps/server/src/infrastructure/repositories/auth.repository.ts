@@ -38,4 +38,16 @@ export class AuthRepository {
 
     return userList.length > 0 ? userList[0] : null;
   }
+
+  /**
+   * Update username for a user
+   */
+  async updateUsername(userId: string, newUsername: string): Promise<boolean> {
+    const result = await this.db
+      .update(users)
+      .set({ username: newUsername })
+      .where(eq(users.id, userId));
+
+    return result.rowCount > 0;
+  }
 }

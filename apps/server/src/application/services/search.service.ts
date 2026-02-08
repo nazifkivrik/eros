@@ -3,6 +3,7 @@ import type { IMetadataProvider } from "@/infrastructure/adapters/interfaces/met
 import { SearchRepository } from "@/infrastructure/repositories/search.repository.js";
 import { SettingsRepository } from "@/infrastructure/repositories/settings.repository.js";
 import type { AppSettings } from "@repo/shared-types";
+import { MetadataProviderRegistry } from "@/infrastructure/registries/provider-registry.js";
 
 type MetadataSource = "tpdb" | "stashdb";
 
@@ -15,75 +16,53 @@ interface MetadataServiceResult {
  * Search Service
  * Business logic for searching performers, studios, scenes
  * Responsibilities:
- * - Determine which metadata service to use (TPDB vs StashDB)
+ * - Use configured metadata provider from registry
  * - Delegate searches to external metadata services
  * - Check local database first for detail queries
- * - UUID validation for TPDB lookups
  */
 export class SearchService {
   private searchRepository: SearchRepository;
   private settingsRepository: SettingsRepository;
   private logger: Logger;
-  private tpdbProvider?: IMetadataProvider;
-  private stashdbProvider?: IMetadataProvider;
+  private metadataRegistry: MetadataProviderRegistry;
 
   constructor({
     searchRepository,
     settingsRepository,
     logger,
-    tpdbProvider,
-    stashdbProvider,
+    metadataRegistry,
   }: {
     searchRepository: SearchRepository;
     settingsRepository: SettingsRepository;
     logger: Logger;
-    tpdbProvider?: IMetadataProvider;
-    stashdbProvider?: IMetadataProvider;
+    metadataRegistry: MetadataProviderRegistry;
   }) {
     this.searchRepository = searchRepository;
     this.settingsRepository = settingsRepository;
     this.logger = logger;
-    this.tpdbProvider = tpdbProvider;
-    this.stashdbProvider = stashdbProvider;
+    this.metadataRegistry = metadataRegistry;
   }
 
   /**
-   * Determine which metadata service to use based on settings
+   * Determine which metadata service to use based on provider registry
    */
   private async getMetadataService(): Promise<MetadataServiceResult> {
-    const settingRecord = await this.settingsRepository.findByKey("app-settings");
-    const settings = settingRecord?.value as AppSettings | undefined;
+    const availableProviders = this.metadataRegistry.getAvailable();
 
-    // Use TPDB if enabled and configured
-    if (
-      settings?.tpdb?.enabled &&
-      settings.tpdb.apiKey &&
-      this.tpdbProvider
-    ) {
-      return {
-        service: this.tpdbProvider,
-        source: "tpdb",
-      };
+    if (availableProviders.length === 0) {
+      throw new Error("No metadata service configured");
     }
 
-    // Fall back to StashDB
-    if (settings?.stashdb?.enabled && this.stashdbProvider) {
-      return {
-        service: this.stashdbProvider,
-        source: "stashdb",
-      };
-    }
+    // Get first available provider (already sorted by priority in registry)
+    const { provider, id } = availableProviders[0];
 
-    throw new Error("No metadata service configured");
-  }
+    // Determine source from provider ID or configuration
+    const source: MetadataSource = id.includes("tpdb") ? "tpdb" : "stashdb";
 
-  /**
-   * Validate UUID format for TPDB lookups
-   */
-  private isValidUUID(id: string): boolean {
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      id
-    );
+    return {
+      service: provider,
+      source,
+    };
   }
 
   /**
@@ -154,28 +133,14 @@ export class SearchService {
       return localPerformer;
     }
 
-    // If not found locally, try external source
-    // ID format: source:externalId (e.g., "tpdb:12345")
-    const [source, externalId] = id.includes(":") ? id.split(":") : ["tpdb", id];
-
-    // UUID validation for TPDB
-    if (!this.isValidUUID(externalId)) {
-      this.logger.warn({ id, externalId }, "Invalid UUID format for TPDB lookup");
+    // If not found locally, fetch from external service
+    try {
+      const { service } = await this.getMetadataService();
+      return await service.getPerformerById(id);
+    } catch (error) {
+      this.logger.error({ error, id }, "Failed to fetch performer from metadata service");
       return null;
     }
-
-    try {
-      if (source === "tpdb" && this.tpdbProvider) {
-        return await this.tpdbProvider.getPerformerById(externalId);
-      }
-    } catch (error) {
-      this.logger.error(
-        { error, id, externalId },
-        "Failed to fetch performer from TPDB"
-      );
-    }
-
-    return null;
   }
 
   /**

@@ -4,14 +4,14 @@
  *
  * This service coordinates all torrent search subservices:
  * - Core orchestration (this file)
- * - Indexer service (external search)
+ * - Indexer service (external search via IndexerRegistry)
  * - Filter service (deduplication, filtering, grouping)
  * - Match service (scene matching with AI)
  * - Quality service (quality profile-based selection)
  */
 
 import type { TorrentsRepository } from "@/infrastructure/repositories/torrents.repository.js";
-import type { IIndexer } from "@/infrastructure/adapters/interfaces/indexer.interface.js";
+import type { IndexerRegistry } from "@/infrastructure/registries/provider-registry.js";
 import type { LogsService } from "@/application/services/logs.service.js";
 import type { SettingsService } from "@/application/services/settings.service.js";
 import type { AIMatchingService } from "@/application/services/ai-matching/ai-matching.service.js";
@@ -90,7 +90,7 @@ export class TorrentSearchService {
 
   constructor(deps: {
     torrentsRepository: TorrentsRepository;
-    indexer: IIndexer;
+    indexerRegistry: IndexerRegistry;
     logsService: LogsService;
     settingsService: SettingsService;
     aiMatchingService: AIMatchingService;
@@ -103,7 +103,7 @@ export class TorrentSearchService {
 
     // Initialize subservices
     this.indexerService = new TorrentSearchIndexerService({
-      indexer: deps.indexer,
+      indexerRegistry: deps.indexerRegistry,
       logsService: deps.logsService,
     });
 
@@ -361,7 +361,7 @@ export class TorrentSearchService {
  */
 export function createTorrentSearchService(deps: {
   torrentsRepository: TorrentsRepository;
-  indexer: IIndexer;
+  indexerRegistry: IndexerRegistry;
   logsService: LogsService;
   settingsService: SettingsService;
   aiMatchingService: AIMatchingService;

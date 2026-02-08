@@ -1,5 +1,5 @@
 import type { Logger } from "pino";
-import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
+import type { TorrentClientRegistry } from "@/infrastructure/registries/provider-registry.js";
 
 /**
  * DTOs for Torrents Service
@@ -28,32 +28,42 @@ export type TorrentPriority = "increase" | "decrease" | "top" | "bottom";
  * Torrents Service (Clean Architecture)
  * Business logic for torrent management via torrent client
  *
- * Note: This service delegates to ITorrentClient adapter
+ * Note: This service delegates to ITorrentClient adapter via TorrentClientRegistry
  * No database interaction required - all state managed by torrent client
  */
 export class TorrentsService {
-  private torrentClient?: ITorrentClient;
+  private torrentClientRegistry: TorrentClientRegistry;
   private logger: Logger;
 
   constructor({
-    torrentClient,
+    torrentClientRegistry,
     logger,
   }: {
-    torrentClient?: ITorrentClient;
+    torrentClientRegistry: TorrentClientRegistry;
     logger: Logger;
   }) {
-    this.torrentClient = torrentClient;
+    this.torrentClientRegistry = torrentClientRegistry;
     this.logger = logger;
   }
 
   /**
-   * Check if torrent client is configured
+   * Get the primary torrent client
    * Business rule: Operations require torrent client to be configured
    */
-  private ensureTorrentClientAvailable(): void {
-    if (!this.torrentClient) {
+  private getTorrentClient() {
+    const primary = this.torrentClientRegistry.getPrimary();
+    if (!primary) {
       throw new Error("Torrent client not configured");
     }
+    return primary.provider;
+  }
+
+  /**
+   * Check if torrent client is configured
+   */
+  private isTorrentClientAvailable(): boolean {
+    const primary = this.torrentClientRegistry.getPrimary();
+    return !!primary;
   }
 
   /**
@@ -61,14 +71,15 @@ export class TorrentsService {
    * Business logic: Map torrent client's format to our internal format
    */
   async getAllTorrents(): Promise<{ torrents: TorrentInfo[]; total: number }> {
-    if (!this.torrentClient) {
+    if (!this.isTorrentClientAvailable()) {
       this.logger.warn("Torrent client not configured, returning empty list");
       return { torrents: [], total: 0 };
     }
 
     this.logger.debug("Fetching all torrents from client");
 
-    const torrents = await this.torrentClient.getTorrents();
+    const torrentClient = this.getTorrentClient();
+    const torrents = await torrentClient.getTorrents();
 
     // Map ITorrentClient format to our TorrentInfo format
     const mapped: TorrentInfo[] = torrents.map((t) => ({
@@ -102,11 +113,11 @@ export class TorrentsService {
    * Business rule: Returns false if torrent not found, true on success
    */
   async pauseTorrent(hash: string): Promise<boolean> {
-    this.ensureTorrentClientAvailable();
+    const torrentClient = this.getTorrentClient();
 
     this.logger.info({ hash }, "Pausing torrent");
 
-    const success = await this.torrentClient!.pauseTorrent(hash);
+    const success = await torrentClient.pauseTorrent(hash);
 
     if (!success) {
       this.logger.warn({ hash }, "Torrent not found");
@@ -122,11 +133,11 @@ export class TorrentsService {
    * Business rule: Returns false if torrent not found, true on success
    */
   async resumeTorrent(hash: string): Promise<boolean> {
-    this.ensureTorrentClientAvailable();
+    const torrentClient = this.getTorrentClient();
 
     this.logger.info({ hash }, "Resuming torrent");
 
-    const success = await this.torrentClient!.resumeTorrent(hash);
+    const success = await torrentClient.resumeTorrent(hash);
 
     if (!success) {
       this.logger.warn({ hash }, "Torrent not found");
@@ -145,11 +156,11 @@ export class TorrentsService {
     hash: string,
     deleteFiles: boolean = false
   ): Promise<boolean> {
-    this.ensureTorrentClientAvailable();
+    const torrentClient = this.getTorrentClient();
 
     this.logger.info({ hash, deleteFiles }, "Removing torrent");
 
-    const success = await this.torrentClient!.removeTorrent(hash, deleteFiles);
+    const success = await torrentClient.removeTorrent(hash, deleteFiles);
 
     if (!success) {
       this.logger.warn({ hash }, "Torrent not found");
@@ -169,7 +180,7 @@ export class TorrentsService {
     hash: string,
     priority: TorrentPriority
   ): Promise<boolean> {
-    this.ensureTorrentClientAvailable();
+    const torrentClient = this.getTorrentClient();
 
     this.logger.info({ hash, priority }, "Setting torrent priority");
 

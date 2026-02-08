@@ -8,12 +8,13 @@
  * - Score aggregation and result transformation
  */
 
-import type { IIndexer } from "@/infrastructure/adapters/interfaces/indexer.interface.js";
+import type { IndexerRegistry } from "@/infrastructure/registries/provider-registry.js";
 import type { LogsService } from "@/application/services/logs.service.js";
 import type { ScenesRepository } from "@/infrastructure/repositories/scenes.repository.js";
 import type { CrossEncoderService } from "@/application/services/ai-matching/cross-encoder.service.js";
 import type { Candidate, MatchQuery } from "@/application/services/ai-matching/cross-encoder.service.js";
 import type { TorrentResult } from "./index.js";
+import type { IIndexer } from "@/infrastructure/adapters/interfaces/indexer.interface.js";
 
 /**
  * Manual search result with match score
@@ -116,21 +117,29 @@ function cleanPerformersFromTitle(
  * Torrent Search Manual Service
  */
 export class TorrentSearchManualService {
-  private indexer: IIndexer;
+  private indexerRegistry: IndexerRegistry;
   private crossEncoderService: CrossEncoderService;
   private scenesRepository: ScenesRepository;
   private logsService: LogsService;
 
   constructor(deps: {
-    indexer: IIndexer;
+    indexerRegistry: IndexerRegistry;
     crossEncoderService: CrossEncoderService;
     scenesRepository: ScenesRepository;
     logsService: LogsService;
   }) {
-    this.indexer = deps.indexer;
+    this.indexerRegistry = deps.indexerRegistry;
     this.crossEncoderService = deps.crossEncoderService;
     this.scenesRepository = deps.scenesRepository;
     this.logsService = deps.logsService;
+  }
+
+  /**
+   * Get the primary indexer
+   */
+  private getIndexer(): IIndexer | null {
+    const available = this.indexerRegistry.getAvailable();
+    return available.length > 0 ? available[0].provider : null;
   }
 
   /**
@@ -210,7 +219,8 @@ export class TorrentSearchManualService {
   ): Promise<TorrentResult[]> {
     const results: TorrentResult[] = [];
 
-    if (!this.indexer) {
+    const indexer = this.getIndexer();
+    if (!indexer) {
       await this.logsService.warning("torrent-search", `No indexer configured`, {
         query,
       });
@@ -218,7 +228,7 @@ export class TorrentSearchManualService {
     }
 
     try {
-      const indexerResults = await this.indexer.search(query, { limit });
+      const indexerResults = await indexer.search(query, { limit });
 
       for (const result of indexerResults) {
         const dbIndexerId = `prowlarr-${result.indexerId}`;

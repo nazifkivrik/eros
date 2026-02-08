@@ -6,10 +6,11 @@ import { Sidebar } from "./Sidebar";
 export function LayoutContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isSetupPage = pathname?.startsWith("/setup");
+  const isLoginPage = pathname?.startsWith("/login");
 
-  if (isSetupPage) {
-    // Setup page: no sidebar, full width
-    return <main className="min-h-screen p-8">{children}</main>;
+  if (isSetupPage || isLoginPage) {
+    // Setup and login pages: no sidebar, full width
+    return <main className="min-h-screen">{children}</main>;
   }
 
   // Normal pages: with sidebar

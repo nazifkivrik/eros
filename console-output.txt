@@ -1,0 +1,66 @@
+Total messages: 64 (Errors: 1, Warnings: 0)
+
+[INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ webpack-internal:///(app-pages-browser)/../../node_modules/.pnpm/next@15.5.7_@playwright+test@1.58.2_react-dom@19.2.1_react@19.2.1__react@19.2.1/node_modules/next/dist/compiled/react-dom/cjs/react-dom-client.development.js:25630
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3000/favicon.ico:0
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Fetching dashboard statistics from /api/dashboard/statistics @ webpack-internal:///(app-pages-browser)/./src/features/dashboard/hooks.ts:15
+[LOG] Dashboard API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/dashboard/hooks.ts:17
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Dashboard API response: {storage: Object, content: Object, activeDownloads: 1, queuedDownloads: 1, completedDownloads: 0} @ webpack-internal:///(app-pages-browser)/./src/features/dashboard/hooks.ts:24
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Auth status: {authenticated: true, userId: GDGCKcgc2qm7RaxI4vSva} @ webpack-internal:///(app-pages-browser)/./src/contexts/auth-context.tsx:22
+[LOG] Setting user: GDGCKcgc2qm7RaxI4vSva @ webpack-internal:///(app-pages-browser)/./src/contexts/auth-context.tsx:24
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32
+[LOG] Fetching downloads from /api/download-queue/unified @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:22
+[LOG] Downloads API response status: 200 true @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:25
+[LOG] Downloads API response: {downloads: Array(8)} @ webpack-internal:///(app-pages-browser)/./src/features/downloads/hooks/useUnifiedDownloads.ts:32

@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Copy, ChevronDown, ChevronUp } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
   DialogContent,
@@ -74,23 +76,25 @@ export function QualityProfilesTab() {
         <Button onClick={() => setIsCreateDialogOpen(true)}>+ Create Profile</Button>
       </div>
 
-      <div className="grid gap-4">
-        {profiles?.data && profiles.data.length > 0 ? (
-          profiles.data.map((profile) => (
-            <QualityProfileRow
-              key={profile.id}
-              profile={profile}
-              onEdit={() => setEditingProfile(profile)}
-            />
-          ))
-        ) : (
-          <Card>
-            <CardContent className="text-center p-8">
-              <p className="text-muted-foreground">No quality profiles yet. Create one to get started.</p>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+      <ScrollArea className="h-[500px]">
+        <div className="grid gap-4 pr-4">
+          {profiles?.data && profiles.data.length > 0 ? (
+            profiles.data.map((profile) => (
+              <QualityProfileRow
+                key={profile.id}
+                profile={profile}
+                onEdit={() => setEditingProfile(profile)}
+              />
+            ))
+          ) : (
+            <Card>
+              <CardContent className="text-center p-8">
+                <p className="text-muted-foreground">No quality profiles yet. Create one to get started.</p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </ScrollArea>
 
       {isCreateDialogOpen && (
         <QualityProfileDialog onClose={() => setIsCreateDialogOpen(false)} profile={null} />
@@ -110,6 +114,15 @@ function QualityProfileRow({
   onEdit: () => void;
 }) {
   const deleteProfile = useDeleteQualityProfile();
+  const createProfile = useCreateQualityProfile();
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  const handleDuplicate = () => {
+    createProfile.mutate({
+      name: `${profile.name} (Copy)`,
+      items: profile.items,
+    });
+  };
 
   return (
     <Card>
@@ -123,8 +136,18 @@ function QualityProfileRow({
             </CardDescription>
           </div>
           <div className="flex gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsExpanded(!isExpanded)}
+            >
+              {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </Button>
             <Button variant="outline" size="sm" onClick={onEdit}>
               Edit
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleDuplicate}>
+              <Copy className="h-4 w-4" />
             </Button>
             <Button
               variant="destructive"
@@ -138,25 +161,27 @@ function QualityProfileRow({
           </div>
         </div>
       </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <div className="text-sm font-medium">Quality Order (Best → Worst):</div>
-          <div className="flex flex-wrap gap-2">
-            {profile.items.map((item, index) => (
-              <Badge key={index} variant="secondary" className="text-sm">
-                <span className="font-medium">{item.quality}</span> • {item.source}
-                {item.minSeeders !== 0 && item.minSeeders !== "any" && (
-                  <span className="ml-1 font-normal opacity-70">(min {item.minSeeders} seeds)</span>
-                )}
-                {item.minSeeders === "any" && <span className="ml-1 font-normal opacity-70">(any seeds)</span>}
-                {item.maxSize > 0 && (
-                  <span className="ml-1 font-normal opacity-70">(max {item.maxSize}GB)</span>
-                )}
-              </Badge>
-            ))}
+      {isExpanded && (
+        <CardContent>
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Quality Order (Best → Worst):</div>
+            <div className="flex flex-wrap gap-2">
+              {profile.items.map((item, index) => (
+                <Badge key={index} variant="secondary" className="text-sm">
+                  <span className="font-medium">{item.quality}</span> • {item.source}
+                  {item.minSeeders !== 0 && item.minSeeders !== "any" && (
+                    <span className="ml-1 font-normal opacity-70">(min {item.minSeeders} seeds)</span>
+                  )}
+                  {item.minSeeders === "any" && <span className="ml-1 font-normal opacity-70">(any seeds)</span>}
+                  {item.maxSize > 0 && (
+                    <span className="ml-1 font-normal opacity-70">(max {item.maxSize}GB)</span>
+                  )}
+                </Badge>
+              ))}
+            </div>
           </div>
-        </div>
-      </CardContent>
+        </CardContent>
+      )}
     </Card>
   );
 }

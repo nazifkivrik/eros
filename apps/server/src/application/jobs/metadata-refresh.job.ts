@@ -13,23 +13,23 @@ import type { SubscriptionsRepository } from "@/infrastructure/repositories/subs
 import type { PerformersRepository } from "@/infrastructure/repositories/performers.repository.js";
 import type { StudiosRepository } from "@/infrastructure/repositories/studios.repository.js";
 import type { ScenesRepository } from "@/infrastructure/repositories/scenes.repository.js";
-import type { IMetadataProvider } from "@/infrastructure/adapters/interfaces/metadata-provider.interface.js";
 import type { FileManagerService } from "../../application/services/file-management/file-manager.service.js";
 import type { SettingsService } from "../../application/services/settings.service.js";
 import type { Database } from "@repo/database";
 import { eq } from "drizzle-orm";
 import { subscriptions, scenes } from "@repo/database";
 import { nanoid } from "nanoid";
+import type { MetadataProviderRegistry } from "@/infrastructure/registries/provider-registry.js";
 
 export class MetadataRefreshJob extends BaseJob {
   readonly name = "metadata-refresh";
-  readonly description = "Update and fix missing metadata for scenes from TPDB";
+  readonly description = "Update and fix missing metadata for scenes from metadata providers";
 
   private subscriptionsRepository: SubscriptionsRepository;
   private performersRepository: PerformersRepository;
   private studiosRepository: StudiosRepository;
   private scenesRepository: ScenesRepository;
-  private tpdbProvider: IMetadataProvider | undefined;
+  private metadataRegistry: MetadataProviderRegistry;
   private fileManager: FileManagerService;
   private settingsService: SettingsService;
   private db: Database;
@@ -41,7 +41,7 @@ export class MetadataRefreshJob extends BaseJob {
     performersRepository: PerformersRepository;
     studiosRepository: StudiosRepository;
     scenesRepository: ScenesRepository;
-    tpdbProvider: IMetadataProvider | undefined;
+    metadataRegistry: MetadataProviderRegistry;
     fileManager: FileManagerService;
     settingsService: SettingsService;
     db: Database;
@@ -51,7 +51,7 @@ export class MetadataRefreshJob extends BaseJob {
     this.performersRepository = deps.performersRepository;
     this.studiosRepository = deps.studiosRepository;
     this.scenesRepository = deps.scenesRepository;
-    this.tpdbProvider = deps.tpdbProvider;
+    this.metadataRegistry = deps.metadataRegistry;
     this.fileManager = deps.fileManager;
     this.settingsService = deps.settingsService;
     this.db = deps.db;
@@ -204,7 +204,7 @@ export class MetadataRefreshJob extends BaseJob {
     totalTasks: number,
     baseCount: number
   ): Promise<void> {
-    const settings = await this.settingsService.getSettings();
+    const availableProviders = this.metadataRegistry.getAvailable();
 
     for (let i = 0; i < sceneIds.length; i++) {
       const id = sceneIds[i];
@@ -227,14 +227,21 @@ export class MetadataRefreshJob extends BaseJob {
         }
 
         let metadata: any = null;
-        let source: "tpdb" | null = null;
+        let source: string | null = null;
+        let providerId: string | null = null;
 
-        // Use existing ID to refresh (subscribed scenes)
-        if (!metadata) {
-          const tpdbId = scene.externalIds?.find(e => e.source === 'tpdb')?.id;
-          if (tpdbId && settings.tpdb.enabled && this.tpdbProvider) {
-            metadata = await this.tpdbProvider.getSceneById(tpdbId);
-            source = "tpdb";
+        // Try each provider based on external IDs
+        for (const externalId of scene.externalIds || []) {
+          const provider = availableProviders.find(p => p.id.includes(externalId.source));
+          if (provider) {
+            try {
+              metadata = await provider.provider.getSceneById(externalId.id);
+              source = externalId.source;
+              providerId = provider.id;
+              break;
+            } catch (error) {
+              this.logger.debug({ error, providerId: provider.id, externalId: externalId.id }, `Failed to fetch scene from provider`);
+            }
           }
         }
 
@@ -254,9 +261,9 @@ export class MetadataRefreshJob extends BaseJob {
           updatedAt: new Date().toISOString(),
         };
 
-        if (source === "tpdb" && metadata.id) {
-          const existingIds = scene.externalIds.filter(e => e.source !== 'tpdb');
-          updateData.externalIds = [...existingIds, { source: 'tpdb', id: metadata.id }];
+        if (source && metadata.id) {
+          const existingIds = scene.externalIds.filter(e => e.source !== source);
+          updateData.externalIds = [...existingIds, { source, id: metadata.id }];
           updateData.contentType = metadata.contentType || "scene";
         }
 
@@ -281,10 +288,10 @@ export class MetadataRefreshJob extends BaseJob {
   private async discoverNewScenesForPerformers(
     performerIds: string[]
   ): Promise<number> {
-    const settings = await this.settingsService.getSettings();
+    const availableProviders = this.metadataRegistry.getAvailable();
 
-    if (!settings.tpdb.enabled || !this.tpdbProvider) {
-      this.logger.info("TPDB not enabled, skipping performer scene discovery");
+    if (availableProviders.length === 0) {
+      this.logger.info("No metadata providers available, skipping performer scene discovery");
       return 0;
     }
 
@@ -293,7 +300,7 @@ export class MetadataRefreshJob extends BaseJob {
     for (let i = 0; i < performerIds.length; i++) {
       const performerId = performerIds[i];
 
-      // Add delay to avoid TPDB rate limiting
+      // Add delay to avoid rate limiting
       if (i > 0) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
@@ -308,62 +315,85 @@ export class MetadataRefreshJob extends BaseJob {
           continue;
         }
 
-        const tpdbId = performer.externalIds?.find(e => e.source === 'tpdb')?.id;
-        if (!tpdbId) {
-          this.logger.debug(`Performer ${performer.name} has no TPDB ID, skipping discovery`);
-          continue;
-        }
+        let discoveredForPerformer = false;
 
-        const result = this.tpdbProvider.getPerformerScenes
-          ? await this.tpdbProvider.getPerformerScenes(tpdbId, "scene", 1)
-          : undefined;
-        const performerScenes = result?.scenes || [];
+        // Try each provider
+        for (const { id: providerId, provider } of availableProviders) {
+          // Find external ID for this provider
+          const providerSource = providerId.includes('tpdb') ? 'tpdb' : 'stashdb';
+          const externalId = performer.externalIds?.find(e => e.source === providerSource)?.id;
 
-        if (!performerScenes || performerScenes.length === 0) {
-          this.logger.debug(`No scenes found for performer ${performer.name} in TPDB`);
-          continue;
-        }
-
-        let newScenesCreated = 0;
-        for (const tpdbScene of performerScenes) {
-          const existingScene = await this.db.query.scenes.findFirst({
-            where: eq(scenes.id, tpdbScene.id),
-          });
-
-          if (existingScene) {
+          if (!externalId) {
             continue;
           }
 
-          const newSceneId = nanoid();
-          await this.db.insert(scenes).values({
-            id: newSceneId,
-            slug: tpdbScene.title?.toLowerCase().replace(/\s+/g, "-") || `tpdb-${tpdbScene.id}`,
-            title: tpdbScene.title || "Unknown Title",
-            date: tpdbScene.date || null,
-            duration: tpdbScene.duration || null,
-            code: tpdbScene.code || null,
-            images: tpdbScene.images || [],
-            hasMetadata: true,
-            externalIds: [{ source: 'tpdb', id: tpdbScene.id }],
-            contentType: tpdbScene.contentType || "scene",
-            inferredFromIndexers: false,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          });
+          // Check if provider supports getPerformerScenes
+          if (!('getPerformerScenes' in provider)) {
+            continue;
+          }
 
-          newScenesCreated++;
-          totalDiscovered++;
+          try {
+            const result = await provider.getPerformerScenes(externalId, "scene", 1);
+            const performerScenes = result?.scenes || [];
 
-          this.logger.info(
-            { sceneId: newSceneId, tpdbId: tpdbScene.id, title: tpdbScene.title },
-            `Discovered new scene for performer ${performer.name}`
-          );
+            if (!performerScenes || performerScenes.length === 0) {
+              this.logger.debug(`No scenes found for performer ${performer.name} in ${providerId}`);
+              continue;
+            }
+
+            let newScenesCreated = 0;
+            for (const providerScene of performerScenes) {
+              const existingScene = await this.db.query.scenes.findFirst({
+                where: eq(scenes.id, providerScene.id),
+              });
+
+              if (existingScene) {
+                continue;
+              }
+
+              const newSceneId = nanoid();
+              await this.db.insert(scenes).values({
+                id: newSceneId,
+                slug: providerScene.title?.toLowerCase().replace(/\s+/g, "-") || `${providerSource}-${providerScene.id}`,
+                title: providerScene.title || "Unknown Title",
+                date: providerScene.date || null,
+                duration: providerScene.duration || null,
+                code: providerScene.code || null,
+                images: providerScene.images || [],
+                hasMetadata: true,
+                externalIds: [{ source: providerSource, id: providerScene.id }],
+                contentType: providerScene.contentType || "scene",
+                inferredFromIndexers: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              });
+
+              newScenesCreated++;
+              totalDiscovered++;
+
+              this.logger.info(
+                { sceneId: newSceneId, providerId, externalId: providerScene.id, title: providerScene.title },
+                `Discovered new scene for performer ${performer.name}`
+              );
+            }
+
+            if (newScenesCreated > 0) {
+              this.logger.info(
+                `Discovered ${newScenesCreated} new scenes for performer ${performer.name} from ${providerId}`
+              );
+              discoveredForPerformer = true;
+              break; // Use first successful provider
+            }
+          } catch (error) {
+            this.logger.debug(
+              { error, providerId, performerId },
+              `Failed to discover scenes from ${providerId}`
+            );
+          }
         }
 
-        if (newScenesCreated > 0) {
-          this.logger.info(
-            `Discovered ${newScenesCreated} new scenes for performer ${performer.name}`
-          );
+        if (!discoveredForPerformer) {
+          this.logger.debug(`No scenes discovered for performer ${performer.name}`);
         }
       } catch (error) {
         this.logger.error(
@@ -379,10 +409,10 @@ export class MetadataRefreshJob extends BaseJob {
   private async discoverNewScenesForStudios(
     studioIds: string[]
   ): Promise<number> {
-    const settings = await this.settingsService.getSettings();
+    const availableProviders = this.metadataRegistry.getAvailable();
 
-    if (!settings.tpdb.enabled || !this.tpdbProvider) {
-      this.logger.info("TPDB not enabled, skipping studio scene discovery");
+    if (availableProviders.length === 0) {
+      this.logger.info("No metadata providers available, skipping studio scene discovery");
       return 0;
     }
 
@@ -391,7 +421,7 @@ export class MetadataRefreshJob extends BaseJob {
     for (let i = 0; i < studioIds.length; i++) {
       const studioId = studioIds[i];
 
-      // Add delay to avoid TPDB rate limiting
+      // Add delay to avoid rate limiting
       if (i > 0) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
@@ -406,62 +436,85 @@ export class MetadataRefreshJob extends BaseJob {
           continue;
         }
 
-        const tpdbId = studio.externalIds?.find(e => e.source === 'tpdb')?.id;
-        if (!tpdbId) {
-          this.logger.debug(`Studio ${studio.name} has no TPDB ID, skipping discovery`);
-          continue;
-        }
+        let discoveredForStudio = false;
 
-        const result = this.tpdbProvider.getStudioScenes
-          ? await this.tpdbProvider.getStudioScenes(tpdbId, "scene", 1)
-          : undefined;
-        const studioScenes = result?.scenes || [];
+        // Try each provider
+        for (const { id: providerId, provider } of availableProviders) {
+          // Find external ID for this provider
+          const providerSource = providerId.includes('tpdb') ? 'tpdb' : 'stashdb';
+          const externalId = studio.externalIds?.find(e => e.source === providerSource)?.id;
 
-        if (!studioScenes || studioScenes.length === 0) {
-          this.logger.debug(`No scenes found for studio ${studio.name} in TPDB`);
-          continue;
-        }
-
-        let newScenesCreated = 0;
-        for (const tpdbScene of studioScenes) {
-          const existingScene = await this.db.query.scenes.findFirst({
-            where: eq(scenes.id, tpdbScene.id),
-          });
-
-          if (existingScene) {
+          if (!externalId) {
             continue;
           }
 
-          const newSceneId = nanoid();
-          await this.db.insert(scenes).values({
-            id: newSceneId,
-            slug: tpdbScene.title?.toLowerCase().replace(/\s+/g, "-") || `tpdb-${tpdbScene.id}`,
-            title: tpdbScene.title || "Unknown Title",
-            date: tpdbScene.date || null,
-            duration: tpdbScene.duration || null,
-            code: tpdbScene.code || null,
-            images: tpdbScene.images || [],
-            hasMetadata: true,
-            externalIds: [{ source: 'tpdb', id: tpdbScene.id }],
-            contentType: tpdbScene.contentType || "scene",
-            inferredFromIndexers: false,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          });
+          // Check if provider supports getStudioScenes
+          if (!('getStudioScenes' in provider)) {
+            continue;
+          }
 
-          newScenesCreated++;
-          totalDiscovered++;
+          try {
+            const result = await provider.getStudioScenes(externalId, "scene", 1);
+            const studioScenes = result?.scenes || [];
 
-          this.logger.info(
-            { sceneId: newSceneId, tpdbId: tpdbScene.id, title: tpdbScene.title },
-            `Discovered new scene for studio ${studio.name}`
-          );
+            if (!studioScenes || studioScenes.length === 0) {
+              this.logger.debug(`No scenes found for studio ${studio.name} in ${providerId}`);
+              continue;
+            }
+
+            let newScenesCreated = 0;
+            for (const providerScene of studioScenes) {
+              const existingScene = await this.db.query.scenes.findFirst({
+                where: eq(scenes.id, providerScene.id),
+              });
+
+              if (existingScene) {
+                continue;
+              }
+
+              const newSceneId = nanoid();
+              await this.db.insert(scenes).values({
+                id: newSceneId,
+                slug: providerScene.title?.toLowerCase().replace(/\s+/g, "-") || `${providerSource}-${providerScene.id}`,
+                title: providerScene.title || "Unknown Title",
+                date: providerScene.date || null,
+                duration: providerScene.duration || null,
+                code: providerScene.code || null,
+                images: providerScene.images || [],
+                hasMetadata: true,
+                externalIds: [{ source: providerSource, id: providerScene.id }],
+                contentType: providerScene.contentType || "scene",
+                inferredFromIndexers: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              });
+
+              newScenesCreated++;
+              totalDiscovered++;
+
+              this.logger.info(
+                { sceneId: newSceneId, providerId, externalId: providerScene.id, title: providerScene.title },
+                `Discovered new scene for studio ${studio.name}`
+              );
+            }
+
+            if (newScenesCreated > 0) {
+              this.logger.info(
+                `Discovered ${newScenesCreated} new scenes for studio ${studio.name} from ${providerId}`
+              );
+              discoveredForStudio = true;
+              break; // Use first successful provider
+            }
+          } catch (error) {
+            this.logger.debug(
+              { error, providerId, studioId },
+              `Failed to discover scenes from ${providerId}`
+            );
+          }
         }
 
-        if (newScenesCreated > 0) {
-          this.logger.info(
-            `Discovered ${newScenesCreated} new scenes for studio ${studio.name}`
-          );
+        if (!discoveredForStudio) {
+          this.logger.debug(`No scenes discovered for studio ${studio.name}`);
         }
       } catch (error) {
         this.logger.error(
