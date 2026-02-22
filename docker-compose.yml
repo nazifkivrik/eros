@@ -3,8 +3,10 @@ version: "3.8"
 services:
   # Eros Application
   app:
-   
-    image: nazifkivrik/eros-app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: eros:latest 
     container_name: eros-app
     ports:
       - "9697:3000"

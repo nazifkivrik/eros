@@ -14,6 +14,7 @@ import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torren
 import type { SettingsService } from "../../application/services/settings.service.js";
 import type { SpeedProfileService } from "../../application/services/speed-profile.service.js";
 import type { DownloadQueueService } from "../../application/services/download-queue.service.js";
+import type { TorrentManagementService } from "../../application/services/torrent-management.service.js";
 import type { Database } from "@repo/database";
 import { eq, inArray, lt, and } from "drizzle-orm";
 import { downloadQueue } from "@repo/database";
@@ -28,6 +29,7 @@ export class TorrentMonitorJob extends BaseJob {
   private settingsService: SettingsService;
   private speedProfileService: SpeedProfileService;
   private downloadQueueService: DownloadQueueService;
+  private torrentManagementService: TorrentManagementService;
   private db: Database;
 
   constructor(deps: {
@@ -39,6 +41,7 @@ export class TorrentMonitorJob extends BaseJob {
     settingsService: SettingsService;
     speedProfileService: SpeedProfileService;
     downloadQueueService: DownloadQueueService;
+    torrentManagementService: TorrentManagementService;
     db: Database;
   }) {
     super(deps);
@@ -48,6 +51,7 @@ export class TorrentMonitorJob extends BaseJob {
     this.settingsService = deps.settingsService;
     this.speedProfileService = deps.speedProfileService;
     this.downloadQueueService = deps.downloadQueueService;
+    this.torrentManagementService = deps.torrentManagementService;
     this.db = deps.db;
   }
 
@@ -82,12 +86,19 @@ export class TorrentMonitorJob extends BaseJob {
 
       this.logger.info(`Found ${torrents.length} torrents in qBittorrent`);
 
-      // Get all download queue items
+      // Get all download queue items with scene info for title matching
       const downloadingItems = await this.db.query.downloadQueue.findMany({
         where: inArray(downloadQueue.status, ["downloading", "queued", "completed"]),
+        with: {
+          scene: {
+            columns: {
+              title: true,
+            },
+          },
+        },
       });
 
-      // Map torrent hashes to download queue items
+      // Map torrent hashes to download queue items (primary matching)
       const hashToQueueItem = new Map(
         downloadingItems
           .filter((item) => item.qbitHash || item.torrentHash)
@@ -96,6 +107,9 @@ export class TorrentMonitorJob extends BaseJob {
             return [hash, item];
           })
       );
+
+      // Create a set of already matched items to avoid duplicate processing
+      const matchedItemIds = new Set<string>();
 
       this.logger.info(
         {
@@ -107,15 +121,57 @@ export class TorrentMonitorJob extends BaseJob {
 
       let processedCount = 0;
       for (const torrent of torrents) {
-        const queueItem = hashToQueueItem.get(torrent.hash);
+        let queueItem = hashToQueueItem.get(torrent.hash);
+
+        // Fallback: If no hash match, try to match by title
+        if (!queueItem) {
+          const torrentName = (torrent.name as string)?.toLowerCase() || '';
+          queueItem = downloadingItems.find(item => {
+            // Skip if already matched by hash
+            if (matchedItemIds.has(item.id)) return false;
+
+            const itemTitle = (item.scene?.title || item.title)?.toLowerCase() || '';
+            // Try title matching
+            return torrentName === itemTitle ||
+                   torrentName.includes(itemTitle) ||
+                   itemTitle.includes(torrentName);
+          });
+
+          // If found by title, update qbitHash in database for future matches
+          if (queueItem && torrent.hash) {
+            this.logger.info(
+              {
+                itemId: queueItem.id,
+                torrentName: torrent.name,
+                torrentHash: torrent.hash,
+                itemTitle: queueItem.title
+              },
+              "Found torrent by title match, updating qbitHash"
+            );
+            try {
+              await this.db
+                .update(downloadQueue)
+                .set({ qbitHash: torrent.hash })
+                .where(eq(downloadQueue.id, queueItem.id));
+            } catch (error) {
+              this.logger.error(
+                { error, itemId: queueItem.id },
+                "Failed to update qbitHash after title match"
+              );
+            }
+          }
+        }
 
         if (!queueItem) {
           this.logger.debug(
             { torrentHash: torrent.hash, torrentName: torrent.name },
-            "Torrent not found in queue map"
+            "Torrent not found in queue map (no hash or title match)"
           );
           continue;
         }
+
+        // Track matched item to avoid duplicate processing
+        matchedItemIds.add(queueItem.id);
 
         try {
           processedCount++;
@@ -153,6 +209,9 @@ export class TorrentMonitorJob extends BaseJob {
 
       // Apply speed profiles
       await this.applySpeedProfiles();
+
+      // Run auto-management
+      await this.runAutoManagement();
 
       // Remove old completed torrents
       await this.removeOldCompletedTorrents();
@@ -197,10 +256,12 @@ export class TorrentMonitorJob extends BaseJob {
       );
 
       // Move to bottom of queue
-      await torrentClient!.setTorrentPriority(torrent.hash, "bottom");
-
-      // Pause stalled torrent
-      await torrentClient!.pauseTorrent(torrent.hash);
+      const torrentClient = this.getTorrentClient();
+      if (torrentClient) {
+        await torrentClient.setTorrentPriority(torrent.hash, "bottom");
+        // Pause stalled torrent
+        await torrentClient.pauseTorrent(torrent.hash);
+      }
 
       // Update status in database
       await this.db
@@ -391,6 +452,61 @@ export class TorrentMonitorJob extends BaseJob {
       }
     } catch (error) {
       this.logger.error({ error }, "Failed to retry torrents");
+    }
+  }
+
+  /**
+   * Run automatic torrent management
+   */
+  private async runAutoManagement(): Promise<void> {
+    try {
+      // Update settings from current app settings
+      const settings = await this.settingsService.getSettings();
+      this.torrentManagementService.updateSettings(settings.torrentAutoManagement);
+
+      const pauseResult = await this.torrentManagementService.checkAndPauseTorrents();
+
+      this.logger.info(
+        {
+          checked: pauseResult.checked,
+          paused: pauseResult.paused,
+        },
+        "Auto-management check completed"
+      );
+
+      // Also update last activity for active torrents
+      await this.updateActivityTracking();
+
+      // Try retrying paused torrents
+      const retryResult = await this.torrentManagementService.retryPausedTorrents();
+
+      this.logger.info(
+        {
+          total: retryResult.total,
+          retried: retryResult.retried,
+          skipped: retryResult.skipped,
+        },
+        "Auto-management retry completed"
+      );
+    } catch (error) {
+      this.logger.error({ error }, "Auto-management failed");
+    }
+  }
+
+  /**
+   * Update last activity timestamp for active torrents
+   */
+  private async updateActivityTracking(): Promise<void> {
+    const torrentClient = this.getTorrentClient();
+    if (!torrentClient) return;
+
+    const torrents = await torrentClient.getTorrents();
+    const activeTorrents = torrents.filter(
+      (t) => t.dlspeed > 0 && t.state !== "pausedDL"
+    );
+
+    for (const torrent of activeTorrents) {
+      await this.downloadQueueRepository.updateLastActivity(torrent.hash);
     }
   }
 }

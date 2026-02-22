@@ -42,6 +42,30 @@ export const DownloadPathsSettingsSchema = z.object({
   selectionMode: z.enum(["most-space", "round-robin", "priority"]),
 });
 
+// Torrent Auto-Management Schemas
+export const StallThresholdSchema = z.object({
+  maxSeeders: z.number().int().min(0),
+  minSpeed: z.number().int().min(0), // Bytes/s
+});
+
+export const TorrentAutoManagementSettingsSchema = z.object({
+  enabled: z.boolean(),
+  pauseOnStalled: z.boolean(),
+  stallThreshold: StallThresholdSchema,
+  pauseOnMetadataStuck: z.boolean(),
+  metadataTimeoutMinutes: z.number().int().positive(),
+  pauseOnSlowSpeed: z.boolean(),
+  slowSpeedThreshold: z.number().int().min(0), // Bytes/s
+  slowSpeedDurationMinutes: z.number().int().positive(),
+  pauseOnNoActivity: z.boolean(),
+  noActivityMinutes: z.number().int().positive(),
+  maxRetries: z.number().int().positive(),
+  retryBehavior: z.enum(["queue_empty", "immediate", "delayed"]),
+  retryDelayMinutes: z.number().int().min(0),
+  useCombinedPriority: z.boolean(),
+  retryCountWeight: z.number().int().positive(),
+});
+
 // Provider Schemas
 export const ProvidersConfigSchema: z.ZodType<ProvidersConfig> = z.object({
   metadata: z.array(z.object({
@@ -156,6 +180,7 @@ export const SettingsSchema: z.ZodType<AppSettings> = z.object({
   speedSchedule: SpeedScheduleSettingsSchema,
   downloadPaths: DownloadPathsSettingsSchema,
   providers: ProvidersConfigSchema,
+  torrentAutoManagement: TorrentAutoManagementSettingsSchema,
 });
 
 export const ServiceNameSchema = z.enum(["stashdb", "tpdb", "prowlarr", "qbittorrent"]);

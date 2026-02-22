@@ -152,6 +152,14 @@ export class SettingsService {
           ...DEFAULT_SETTINGS.providers,
           ...(savedSettings.providers || {}),
         },
+        torrentAutoManagement: {
+          ...DEFAULT_SETTINGS.torrentAutoManagement,
+          ...(savedSettings.torrentAutoManagement || {}),
+          stallThreshold: {
+            ...DEFAULT_SETTINGS.torrentAutoManagement.stallThreshold,
+            ...(savedSettings.torrentAutoManagement?.stallThreshold || {}),
+          },
+        },
       };
     }
 

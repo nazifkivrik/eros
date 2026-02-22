@@ -5,3 +5,4 @@ export * from "./services.js";
 export * from "./ai.js";
 export * from "./jobs.js";
 export * from "./app-settings.js";
+export * from "./torrent-management.js";

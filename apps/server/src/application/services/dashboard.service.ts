@@ -4,7 +4,7 @@ import { eq, count, sum, sql } from "drizzle-orm";
 import { scenes, performers, studios, sceneFiles, downloadQueue } from "@repo/database";
 import type { FileManagerService } from "./file-management/file-manager.service.js";
 import type { MetadataProviderRegistry, IndexerRegistry, TorrentClientRegistry } from "@/infrastructure/registries/provider-registry.js";
-import type { SettingsRepository } from "@/infrastructure/repositories/settings.repository.js";
+import type { SettingsService } from "./settings.service.js";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -67,7 +67,7 @@ export class DashboardService {
   private db: Database;
   private fileManager: FileManagerService;
   private logger: Logger;
-  private settingsRepository: SettingsRepository;
+  private settingsService: SettingsService;
   private metadataRegistry: MetadataProviderRegistry;
   private indexerRegistry: IndexerRegistry;
   private torrentClientRegistry: TorrentClientRegistry;
@@ -76,7 +76,7 @@ export class DashboardService {
     db,
     fileManager,
     logger,
-    settingsRepository,
+    settingsService,
     metadataRegistry,
     indexerRegistry,
     torrentClientRegistry,
@@ -84,7 +84,7 @@ export class DashboardService {
     db: Database;
     fileManager: FileManagerService;
     logger: Logger;
-    settingsRepository: SettingsRepository;
+    settingsService: SettingsService;
     metadataRegistry: MetadataProviderRegistry;
     indexerRegistry: IndexerRegistry;
     torrentClientRegistry: TorrentClientRegistry;
@@ -92,7 +92,7 @@ export class DashboardService {
     this.db = db;
     this.fileManager = fileManager;
     this.logger = logger;
-    this.settingsRepository = settingsRepository;
+    this.settingsService = settingsService;
     this.metadataRegistry = metadataRegistry;
     this.indexerRegistry = indexerRegistry;
     this.torrentClientRegistry = torrentClientRegistry;
@@ -128,7 +128,7 @@ export class DashboardService {
       const contentSize = Number(contentSizeResult?.total || 0);
 
       // Get settings to find download paths
-      const settings = await this.settingsRepository.getSettings();
+      const settings = await this.settingsService.getSettings();
       const downloadPaths = settings.downloadPaths?.paths || [];
 
       // Build list of paths to check - use download paths or fallback to root
@@ -383,7 +383,7 @@ export class DashboardService {
   async getProviderStatus(): Promise<ProviderStatusResponse> {
     this.logger.debug("Fetching provider status");
 
-    const settings = await this.settingsRepository.getSettings();
+    const settings = await this.settingsService.getSettings();
     const providers = settings.providers;
 
     // Get metadata provider status

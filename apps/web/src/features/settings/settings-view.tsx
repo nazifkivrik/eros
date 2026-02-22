@@ -24,6 +24,7 @@ import { DownloadPathsSection } from "@/components/settings/DownloadPathsSection
 import { UserCredentialsSection } from "@/components/settings/UserCredentialsSection";
 import { SpeedScheduleTab } from "@/components/settings/SpeedScheduleTab";
 import { ServicesTab } from "@/components/settings/ServicesTab";
+import { TorrentManagementTab } from "@/components/settings/TorrentManagementTab";
 import { useSettings, useUpdateSettings, useAIModelStatus, useLoadAIModel } from "./hooks";
 import type { AppSettings } from "@repo/shared-types";
 import { DEFAULT_SETTINGS } from "@repo/shared-types";
@@ -64,6 +65,7 @@ export function SettingsView() {
         jobs: { ...DEFAULT_SETTINGS.jobs, ...(data.jobs || {}) },
         speedSchedule: { ...DEFAULT_SETTINGS.speedSchedule, ...(data.speedSchedule || {}) },
         downloadPaths: { ...DEFAULT_SETTINGS.downloadPaths, ...(data.downloadPaths || {}) },
+        torrentAutoManagement: { ...DEFAULT_SETTINGS.torrentAutoManagement, ...(data.torrentAutoManagement || {}) },
       });
     }
   }, [settingsData]);
@@ -109,6 +111,7 @@ export function SettingsView() {
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="quality">Quality Profiles</TabsTrigger>
           <TabsTrigger value="speed">Speed Schedule</TabsTrigger>
+          <TabsTrigger value="torrents">Torrent Management</TabsTrigger>
           <TabsTrigger value="services">Services</TabsTrigger>
         </TabsList>
 
@@ -320,6 +323,18 @@ export function SettingsView() {
               <SpeedScheduleTab
                 settings={settings.speedSchedule}
                 onChange={(speedSchedule) => setSettings({ ...settings, speedSchedule })}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Torrent Management Tab */}
+        <TabsContent value="torrents" className="mt-6">
+          <Card>
+            <CardContent className="pt-6">
+              <TorrentManagementTab
+                settings={settings.torrentAutoManagement}
+                onChange={(torrentAutoManagement) => setSettings({ ...settings, torrentAutoManagement })}
               />
             </CardContent>
           </Card>

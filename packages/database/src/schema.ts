@@ -305,8 +305,22 @@ export const downloadQueue = sqliteTable("download_queue", {
     .default(0),
   addToClientLastAttempt: text("add_to_client_last_attempt"),
   addToClientError: text("add_to_client_error"),
+  // Auto-management tracking
+  autoManagementPaused: integer("auto_management_paused", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  autoPauseReason: text("auto_pause_reason"), // 'stalled' | 'metadata' | 'slow' | 'no_activity'
+  autoPauseCount: integer("auto_pause_count")
+    .notNull()
+    .default(0),
+  lastAutoPauseAt: text("last_auto_pause_at"),
+  lastActivityAt: text("last_activity_at"),
 }, (table) => ({
   statusAddedIdx: index("download_queue_status_added_idx").on(table.status, table.addedAt),
+  autoMgmtIdx: index("download_queue_auto_mgmt_idx").on(
+    table.autoManagementPaused,
+    table.status
+  ),
 }));
 
 // Scene Files Table

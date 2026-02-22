@@ -165,13 +165,31 @@ export class DownloadQueueService {
       const torrentClient = this.getTorrentClient();
       if (torrentClient) {
         try {
-          await torrentClient.addTorrent({
-            magnetLinks: [dto.magnetLink],
-            category: "eros",
-            paused: false,
-          });
+          // Use addTorrentAndGetHash to immediately get the torrent client hash
+          const qbitHash = await torrentClient.addTorrentAndGetHash(
+            {
+              magnetLinks: [dto.magnetLink],
+              category: "eros",
+              paused: false,
+              matchInfoHash: dto.magnetLink.match(/btih:([a-fA-F0-9]{40})/)?.[1],
+              matchTitle: dto.title,
+            },
+            10000 // 10 second timeout
+          );
 
-          this.logger.info({ sceneId: dto.sceneId, title: dto.title }, "Added torrent to client");
+          if (qbitHash) {
+            // Update the database item with the qbitHash
+            await this.downloadQueueRepository.update(id, { qbitHash });
+            this.logger.info(
+              { sceneId: dto.sceneId, title: dto.title, qbitHash },
+              "Added torrent to client with hash"
+            );
+          } else {
+            this.logger.warn(
+              { sceneId: dto.sceneId, title: dto.title },
+              "Added torrent to client but hash not available yet"
+            );
+          }
         } catch (error) {
           this.logger.error(
             { error, sceneId: dto.sceneId, title: dto.title },
@@ -299,6 +317,7 @@ export class DownloadQueueService {
    * Get unified downloads
    * Business logic: Merge database queue items with real-time torrent client data
    * Complex status determination based on torrent state
+   * Includes fallback title-based matching when qbitHash is missing/incorrect
    */
   async getUnifiedDownloads(): Promise<UnifiedDownload[]> {
     this.logger.debug("Fetching unified downloads");
@@ -308,10 +327,12 @@ export class DownloadQueueService {
 
     // Get torrents from torrent client if available
     let torrentsMap = new Map<string, unknown>();
+    let torrentsList: any[] = [];
     const torrentClient = this.getTorrentClient();
     if (torrentClient) {
       try {
         const torrents = await torrentClient.getTorrents();
+        torrentsList = torrents as any[];
         // Normalize hashes to lowercase for consistent matching
         torrentsMap = new Map(torrents.map((t) => [t.hash.toLowerCase(), t]));
         this.logger.debug({ torrentsCount: torrents.length }, "Fetched torrents from client");
@@ -323,11 +344,35 @@ export class DownloadQueueService {
     }
 
     // Business logic: Merge data and determine unified status
-    const unifiedDownloads = queueItems.map((item) => {
+    const unifiedDownloads = await Promise.all(queueItems.map(async (item) => {
       // Normalize qbitHash to lowercase for matching with torrentsMap keys
-      const torrent = item.qbitHash
-        ? (torrentsMap.get(item.qbitHash.toLowerCase()) as Record<string, unknown> | undefined)
-        : null;
+      let torrent: any = item.qbitHash
+        ? (torrentsMap.get(item.qbitHash.toLowerCase()))
+        : undefined;
+
+      // Fallback: If no hash match, try to match by title
+      if (!torrent && torrentsList.length > 0) {
+        const itemTitle = (item.scene?.title || item.title).toLowerCase();
+        // Try exact match first
+        torrent = torrentsList.find(t => {
+          const torrentName = (t.name as string)?.toLowerCase() || '';
+          return torrentName === itemTitle || torrentName.includes(itemTitle) || itemTitle.includes(torrentName);
+        }) as Record<string, unknown> | undefined;
+
+        // If found by title, update qbitHash in database for future matches
+        if (torrent && torrent.hash && item.qbitHash !== torrent.hash) {
+          this.logger.info(
+            { itemId: item.id, oldHash: item.qbitHash, newHash: torrent.hash, title: itemTitle },
+            "Found torrent by title match, updating qbitHash"
+          );
+          try {
+            await this.downloadQueueRepository.update(item.id, { qbitHash: torrent.hash as string });
+          } catch (error) {
+            this.logger.error({ error, itemId: item.id }, "Failed to update qbitHash");
+          }
+        }
+      }
+
       const scene = item.scene;
       const studio = scene?.site;
 
@@ -386,7 +431,7 @@ export class DownloadQueueService {
         addToClientLastAttempt: item.addToClientLastAttempt ?? null,
         addToClientError: item.addToClientError ?? null,
       };
-    });
+    }));
 
     this.logger.info({ count: unifiedDownloads.length }, "Generated unified downloads");
 
@@ -526,7 +571,7 @@ export class DownloadQueueService {
 
       const success = await this.tryAddToQbittorrent(item.id, {
         magnetLink,
-        torrentHash: isValidHash ? item.torrentHash : undefined,
+        torrentHash: isValidHash ? (item.torrentHash || undefined) : undefined,
       });
 
       if (success) {
@@ -576,7 +621,7 @@ export class DownloadQueueService {
 
     const success = await this.tryAddToQbittorrent(id, {
       magnetLink,
-      torrentHash: isValidHash ? item.torrentHash : undefined,
+      torrentHash: isValidHash ? (item.torrentHash || undefined) : undefined,
     });
 
     return {

@@ -61,6 +61,7 @@ import { JobsService } from "../application/services/jobs.service.js";
 import { SchedulerService } from "../application/services/scheduler.service.js";
 import { TorrentCompletionHandlerService } from "../application/services/torrent-completion/torrent-completion.handler.service.js";
 import { DashboardService } from "../application/services/dashboard.service.js";
+import { TorrentManagementService } from "../application/services/torrent-management.service.js";
 
 // Clean Architecture - Jobs
 import { CleanupJob } from "../application/jobs/cleanup.job.js";
@@ -197,7 +198,11 @@ export function buildContainer(config: ContainerConfig) {
     jobsService: asClass(JobsService).scoped(),
     schedulerService: asClass(SchedulerService).scoped(),
     torrentCompletionService: asClass(TorrentCompletionHandlerService).scoped(),
-    dashboardService: asClass(DashboardService).scoped(),
+    dashboardService: asClass(DashboardService).scoped()
+      .inject((container) => ({
+        settingsService: container.cradle.settingsService,
+      })),
+    torrentManagementService: asClass(TorrentManagementService).scoped(),
   });
 
   // Register Jobs

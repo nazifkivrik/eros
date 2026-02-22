@@ -1,4 +1,4 @@
-import { eq, and, or, isNull, lt } from "drizzle-orm";
+import { eq, and, or, isNull, lt, inArray } from "drizzle-orm";
 import type { Database } from "@repo/database";
 import { downloadQueue } from "@repo/database/schema";
 import type { DownloadStatus } from "@repo/shared-types";
@@ -214,5 +214,72 @@ export class DownloadQueueRepository {
       },
     });
     return item || null;
+  }
+
+  /**
+   * Find download queue item by qBittorrent hash
+   */
+  async findByQbitHash(qbitHash: string) {
+    const item = await this.db.query.downloadQueue.findFirst({
+      where: eq(downloadQueue.qbitHash, qbitHash),
+      with: {
+        scene: {
+          columns: {
+            id: true,
+            title: true,
+            images: true,
+          },
+        },
+      },
+    });
+    return item || null;
+  }
+
+  /**
+   * Find auto-paused torrents that are candidates for retry
+   * @param maxRetries - Maximum number of auto-pause retries allowed
+   */
+  async findAutoPausedForRetry(maxRetries: number) {
+    return await this.db.query.downloadQueue.findMany({
+      where: and(
+        eq(downloadQueue.autoManagementPaused, true),
+        lt(downloadQueue.autoPauseCount, maxRetries),
+        inArray(downloadQueue.status, ["paused", "downloading"] as DownloadStatus[])
+      ),
+      with: {
+        scene: {
+          columns: {
+            id: true,
+            title: true,
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Update auto-management tracking fields
+   */
+  async updateAutoManagementTracking(
+    id: string,
+    data: {
+      autoManagementPaused: boolean;
+      autoPauseReason?: "stalled" | "metadata" | "slow" | "no_activity" | null;
+      autoPauseCount?: number;
+      lastAutoPauseAt?: string;
+    }
+  ) {
+    await this.db.update(downloadQueue).set(data).where(eq(downloadQueue.id, id));
+    return await this.findById(id);
+  }
+
+  /**
+   * Update last activity timestamp
+   */
+  async updateLastActivity(qbitHash: string) {
+    await this.db
+      .update(downloadQueue)
+      .set({ lastActivityAt: new Date().toISOString() })
+      .where(eq(downloadQueue.qbitHash, qbitHash));
   }
 }
