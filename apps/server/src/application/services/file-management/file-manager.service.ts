@@ -8,10 +8,18 @@ import type { NFOMetadata } from "@repo/shared-types";
 import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
 import { createTorrentParserService } from "@/application/services/torrent-quality/parser.service.js";
 import { logger } from "@/utils/logger.js";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+
+const execAsync = promisify(exec);
+
+// Minimum 5GB free space required
+const MIN_FREE_SPACE_BYTES = 5 * 1024 * 1024 * 1024;
 
 export class FileManagerService {
   private scenesPath: string;
   private incompletePath: string;
+  private settingsRepository: any; // SettingsRepository
 
   private db: Database;
 
@@ -19,14 +27,140 @@ export class FileManagerService {
     db,
     scenesPath,
     incompletePath,
+    settingsRepository,
   }: {
     db: Database;
     scenesPath: string;
     incompletePath: string;
+    settingsRepository?: any;
   }) {
     this.db = db;
     this.scenesPath = scenesPath;
     this.incompletePath = incompletePath;
+    this.settingsRepository = settingsRepository;
+  }
+
+  /**
+   * Get the optimal download path based on available space
+   * Selects the path with the most free space (above 5GB minimum)
+   * Settings paths should be full paths like /app/1tb or /app/1tb/media/scenes
+   */
+  private async getOptimalDownloadPath(): Promise<string> {
+    // If no settings repository, use default scenesPath
+    if (!this.settingsRepository) {
+      return this.scenesPath;
+    }
+
+    try {
+      const settings = await this.settingsRepository.getSettings();
+      const downloadPaths = settings.downloadPaths?.paths || [];
+
+      // If no download paths configured, use default
+      if (downloadPaths.length === 0) {
+        return this.scenesPath;
+      }
+
+      // Get disk space info for each path
+      const pathSpaceInfos: Array<{ path: string; freeBytes: number; name: string }> = [];
+
+      for (const dp of downloadPaths) {
+        if (!dp.path) continue;
+
+        try {
+          // Get disk stats using df command
+          // Use the path as-is from settings, user should configure full path
+          const { stdout } = await execAsync(`LC_ALL=C df -B1 "${dp.path}" 2>/dev/null`);
+          const lines = stdout.trim().split("\n");
+
+          if (lines.length < 2) continue;
+
+          const data = lines[1]?.split(/\s+/);
+          if (!data || data.length < 4) continue;
+
+          const available = parseInt(data[3], 10);
+
+          pathSpaceInfos.push({
+            path: dp.path,
+            freeBytes: available,
+            name: dp.name || dp.path,
+          });
+
+          logger.debug({
+            path: dp.path,
+            availableBytes: available,
+            availableGB: (available / 1024 / 1024 / 1024).toFixed(2),
+          }, "[FileManager] Disk space info");
+        } catch (error) {
+          logger.warn({ path: dp.path, error }, "[FileManager] Failed to get disk space for path");
+        }
+      }
+
+      // Also check the default scenesPath
+      // Extract base path from scenesPath (e.g., /app/media/scenes -> /app/media)
+      const defaultBasePath = this.scenesPath.split('/media')[0] || this.scenesPath.split('/').slice(0, 2).join('/');
+      try {
+        const { stdout } = await execAsync(`LC_ALL=C df -B1 "${defaultBasePath}" 2>/dev/null`);
+        const lines = stdout.trim().split("\n");
+
+        if (lines.length >= 2) {
+          const data = lines[1]?.split(/\s+/);
+          if (data && data.length >= 4) {
+            const available = parseInt(data[3], 10);
+            pathSpaceInfos.push({
+              path: this.scenesPath,
+              freeBytes: available,
+              name: "Default Scenes Path",
+            });
+          }
+        }
+      } catch (error) {
+        logger.warn({ path: this.scenesPath, error }, "[FileManager] Failed to get disk space for default path");
+      }
+
+      // Filter paths with at least 5GB free space
+      const viablePaths = pathSpaceInfos.filter(p => p.freeBytes >= MIN_FREE_SPACE_BYTES);
+
+      if (viablePaths.length === 0) {
+        logger.warn(
+          { pathSpaceInfos: pathSpaceInfos.map(p => ({ path: p.path, freeGB: (p.freeBytes / 1024 / 1024 / 1024).toFixed(2) })) },
+          "[FileManager] No paths with 5GB+ free space, using default"
+        );
+        return this.scenesPath;
+      }
+
+      // Sort by free space descending and pick the best
+      viablePaths.sort((a, b) => b.freeBytes - a.freeBytes);
+      const selected = viablePaths[0];
+
+      // Ensure the directory exists (user should configure full path in settings)
+      // If path doesn't end with /media/scenes, append it for backwards compatibility
+      let finalPath = selected.path;
+
+      // Only append /media/scenes if path is a base disk path (doesn't contain /media)
+      // This maintains backwards compatibility while allowing full path configuration
+      if (!finalPath.includes('/media')) {
+        finalPath = join(finalPath, 'media', 'scenes');
+      } else if (!finalPath.includes('/scenes')) {
+        // Path has /media but not /scenes, append /scenes
+        finalPath = join(finalPath, 'scenes');
+      }
+
+      // Ensure the directory exists
+      await mkdir(finalPath, { recursive: true });
+
+      logger.info({
+        originalPath: selected.path,
+        finalPath,
+        selectedName: selected.name,
+        freeGB: (selected.freeBytes / 1024 / 1024 / 1024).toFixed(2),
+        totalViablePaths: viablePaths.length,
+      }, "[FileManager] Selected optimal download path");
+
+      return finalPath;
+    } catch (error) {
+      logger.error({ error }, "[FileManager] Error getting optimal download path, using default");
+      return this.scenesPath;
+    }
   }
 
   /**
@@ -76,7 +210,9 @@ export class FileManagerService {
     const sanitizedTitle = this.sanitizeFilename(scene.title);
 
     // NEW: Check filesystem for existing folders with same/similar title
-    const existingFolder = await this.findExistingFolderByTitle(sanitizedTitle);
+    const scenesPath = await this.getOptimalDownloadPath();
+
+    const existingFolder = await this.findExistingFolderByTitle(sanitizedTitle, scenesPath);
     if (existingFolder) {
       logger.info(
         { sceneId, existingFolder },
@@ -86,7 +222,7 @@ export class FileManagerService {
     }
 
     // Try base path first
-    let folderPath = join(this.scenesPath, sanitizedTitle);
+    let folderPath = join(scenesPath, sanitizedTitle);
 
     // Check for collision
     const exists = await this.checkFolderExists(folderPath);
@@ -140,9 +276,9 @@ export class FileManagerService {
    * Checks for exact match or match with random suffix pattern
    * Returns folder path if found, null otherwise
    */
-  private async findExistingFolderByTitle(title: string): Promise<string | null> {
+  private async findExistingFolderByTitle(title: string, searchPath: string): Promise<string | null> {
     try {
-      const entries = await readdir(this.scenesPath, { withFileTypes: true });
+      const entries = await readdir(searchPath, { withFileTypes: true });
 
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
@@ -151,7 +287,7 @@ export class FileManagerService {
 
         // Check for exact match
         if (folderName === title) {
-          const fullPath = join(this.scenesPath, folderName);
+          const fullPath = join(searchPath, folderName);
           return fullPath;
         }
 
@@ -161,7 +297,7 @@ export class FileManagerService {
           const suffix = folderName.slice(title.length + 1);
           // Match 4 character alphanumeric suffix (our random suffix pattern)
           if (/^[a-z0-9]{4}$/i.test(suffix)) {
-            const fullPath = join(this.scenesPath, folderName);
+            const fullPath = join(searchPath, folderName);
             logger.debug(
               { title, folderName, fullPath },
               "[FileManager] Found folder with matching title and suffix"
@@ -220,20 +356,27 @@ export class FileManagerService {
   }
 
   /**
-   * Generate NFO file for a scene (Kodi/Plex compatible)
+   * Generate NFO file for a scene (Jellyfin/Kodi/Plex compatible)
+   * @param sceneId - Scene ID
+   * @param folderPath - Folder path where NFO will be saved
+   * @param videoFilename - Optional video filename to match NFO name (Jellyfin requires matching names)
    */
-  async generateNFO(sceneId: string, folderPath: string): Promise<string> {
+  async generateNFO(sceneId: string, folderPath: string, videoFilename?: string): Promise<string> {
     const scene = await this.getSceneWithMetadata(sceneId);
 
     if (!scene) {
       throw new Error(`Scene ${sceneId} not found`);
     }
 
-    // Generate NFO content (XML format for Kodi)
+    // Generate NFO content (XML format for Jellyfin/Kodi)
     const nfoContent = this.buildNFOContent(scene);
 
-    // Save to folder
-    const nfoPath = join(folderPath, `${this.sanitizeFilename(scene.title)}.nfo`);
+    // Determine NFO filename
+    // If videoFilename is provided, use it (Jellyfin requires NFO to match video filename)
+    // Use movie.nfo as filename (Jellyfin standard)
+    const nfoFilename = 'movie.nfo';
+
+    const nfoPath = join(folderPath, nfoFilename);
     await writeFile(nfoPath, nfoContent, "utf-8");
 
     return nfoPath;
@@ -276,20 +419,36 @@ export class FileManagerService {
       }
     }
 
+    // Build tags from various sources
+    const tags: string[] = ["Adult Content"];
+    if (scene.contentType) {
+      tags.push(scene.contentType === "jav" ? "JAV" : scene.contentType.toUpperCase());
+    }
+
     return {
       id: scene.id,
       externalIds: scene.externalIds,
       title: scene.title,
+      description: scene.description || null,
       date: scene.date,
       duration: scene.duration,
       code: scene.code,
       url: scene.url,
+      trailer: scene.trailer || null,
+      rating: scene.rating || null,
+      contentType: scene.contentType || null,
       images: scene.images as Array<{ url: string; width?: number; height?: number }>,
+      poster: scene.poster || null,
+      thumbnail: scene.thumbnail || null,
       performers: performersData
         .filter((p) => p !== undefined)
         .map((p) => ({
           id: p!.id,
           name: p!.name,
+          thumbnail: p!.thumbnail || null,
+          images: p!.images as Array<{ url: string; width?: number; height?: number }>,
+          nationality: p!.nationality || null,
+          gender: p!.gender || null,
         })),
       studios: studiosData
         .filter((s) => s !== undefined)
@@ -297,31 +456,122 @@ export class FileManagerService {
           id: s!.id,
           name: s!.name,
         })),
+      tags,
+      director: null, // Could be added from scene metadata if available
     };
   }
 
   /**
-   * Build NFO XML content (Kodi format)
+   * Build NFO XML content (Jellyfin/Kodi format with adult content support)
    */
   private buildNFOContent(scene: NFOMetadata): string {
-    const performers = (scene.performers || []).map((p) => `    <actor>\n      <name>${this.escapeXML(p.name)}</name>\n    </actor>`).join("\n");
+    // Build actors list with thumbnails, images, and profile info
+    const performers = (scene.performers || []).map((p) => {
+      const name = this.escapeXML(p.name);
+      const thumb = p.thumbnail || p.images?.[0]?.url || null;
+      const thumbTag = thumb ? `\n    <thumb>${this.escapeXML(thumb)}</thumb>` : "";
+
+      return `  <actor>
+    <name>${name}</name>
+    <type>Actor</type>${thumbTag}
+  </actor>`;
+    }).join("\n");
 
     const studio = scene.studios[0]?.name || "";
 
-    // Get StashDB ID from externalIds if available
-    const stashdbId = scene.externalIds.find((e) => e.source === "stashdb")?.id || null;
+    // Extract year from date (format: YYYY-MM-DD)
+    let year = "";
+    if (scene.date) {
+      const dateMatch = scene.date.match(/^(\d{4})/);
+      if (dateMatch) {
+        year = dateMatch[1];
+      }
+    }
 
-    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    // Extract external IDs
+    const stashdbId = scene.externalIds?.find((e) => e.source === "stashdb")?.id || null;
+    const tpdbId = scene.externalIds?.find((e) => e.source === "tpdb")?.id || null;
+
+    // Build genre tags (multiple allowed)
+    const genreTags: string[] = ["Adult"];
+    if (scene.contentType) {
+      if (scene.contentType === "jav") {
+        genreTags.push("JAV");
+        genreTags.push("Asian");
+      } else if (scene.contentType === "movie") {
+        genreTags.push("Movie");
+      } else {
+        genreTags.push("Scene");
+      }
+    }
+    if (studio) {
+      genreTags.push(studio);
+    }
+    const genres = genreTags.map(g => `  <genre>${this.escapeXML(g)}</genre>`).join("\n");
+
+    // Build style tags based on performer attributes
+    const styleTags: string[] = [];
+    scene.performers?.forEach(p => {
+      if (p.gender) {
+        const genderTag = p.gender.charAt(0).toUpperCase() + p.gender.slice(1);
+        if (!styleTags.includes(genderTag)) {
+          styleTags.push(genderTag);
+        }
+      }
+      if (p.nationality) {
+        if (!styleTags.includes(p.nationality)) {
+          styleTags.push(p.nationality);
+        }
+      }
+    });
+    const styles = styleTags.length > 0
+      ? "\n" + styleTags.map(s => `  <style>${this.escapeXML(s)}</style>`).join("\n")
+      : "";
+
+    // Build tags (multiple allowed)
+    const tagElements = scene.tags.map(t => `  <tag>${this.escapeXML(t)}</tag>`).join("\n");
+
+    // Build trailer in Kodi format if available
+    let trailerTag = "";
+    if (scene.trailer) {
+      // Convert YouTube URL to Kodi format if needed
+      let youtubeId = null;
+      const youtubeMatch = scene.trailer.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]+)/);
+      if (youtubeMatch) {
+        youtubeId = youtubeMatch[1];
+        trailerTag = `\n  <trailer>plugin://plugin.video.youtube/?action=play_video&videoid=${youtubeId}</trailer>`;
+      } else {
+        trailerTag = `\n  <trailer>${this.escapeXML(scene.trailer)}</trailer>`;
+      }
+    }
+
+    // Build art section if poster or thumbnail available
+    let artTag = "";
+    if (scene.poster || scene.thumbnail) {
+      const posterPath = scene.poster || scene.thumbnail;
+      artTag = `\n  <art>\n    <poster>${this.escapeXML(posterPath!)}</poster>\n  </art>`;
+    }
+
+    // Generate NFO with Jellyfin-compatible structure
+    return `<?xml version="1.0" encoding="UTF-8"?>
 <movie>
   <title>${this.escapeXML(scene.title)}</title>
   <originaltitle>${this.escapeXML(scene.title)}</originaltitle>
+  ${year ? `<year>${year}</year>` : ""}
   ${scene.date ? `<premiered>${scene.date}</premiered>` : ""}
   ${scene.date ? `<releasedate>${scene.date}</releasedate>` : ""}
-  ${studio ? `<studio>${this.escapeXML(studio)}</studio>` : ""}
+  ${scene.description ? `<plot>${this.escapeXML(scene.description)}</plot>` : ""}
   ${scene.code ? `<id>${this.escapeXML(scene.code)}</id>` : ""}
-  ${stashdbId ? `<uniqueid type="stashdb">${stashdbId}</uniqueid>` : ""}
+  ${studio ? `<studio>${this.escapeXML(studio)}</studio>` : ""}
   ${scene.duration ? `<runtime>${Math.floor(scene.duration / 60)}</runtime>` : ""}
-  ${performers}
+  ${scene.rating && scene.rating > 0 ? `<rating>${scene.rating}</rating>` : ""}${trailerTag}${artTag}
+  ${stashdbId ? `<uniqueid type="stashdb" default="true">${stashdbId}</uniqueid>` : ""}
+  ${tpdbId ? `<uniqueid type="tpdb" default="false">${tpdbId}</uniqueid>` : ""}
+${genres}
+${tagElements}${styles}
+  <mpaa>XXX</mpaa>
+  <lockdata>false</lockdata>
+${performers}
 </movie>`;
   }
 
@@ -349,8 +599,83 @@ export class FileManagerService {
   }
 
   /**
+   * Find and rename video file to clean scene title
+   * Removes release group tags, quality info, etc. from filename
+   * Pattern: Scene Title (YYYY-MM-DD).ext
+   */
+  async renameVideoFileToCleanName(
+    sceneId: string,
+    directoryPath: string
+  ): Promise<string | null> {
+    try {
+      const scene = await this.getSceneWithMetadata(sceneId);
+      if (!scene) {
+        return null;
+      }
+
+      // Find video file in directory
+      const files = await readdir(directoryPath);
+      const videoExtensions = [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".webm"];
+
+      let videoFile: string | null = null;
+      let videoExt: string = "";
+
+      for (const file of files) {
+        const ext = extname(file).toLowerCase();
+        if (videoExtensions.includes(ext)) {
+          // Skip NFO and image files
+          if (!file.toLowerCase().endsWith(".nfo") &&
+              !file.toLowerCase().endsWith(".jpg") &&
+              !file.toLowerCase().endsWith(".png") &&
+              !file.toLowerCase().endsWith(".webp")) {
+            videoFile = file;
+            videoExt = ext;
+            break;
+          }
+        }
+      }
+
+      if (!videoFile) {
+        return null;
+      }
+
+      // Build clean filename: Scene Title (Date).ext
+      const cleanTitle = this.sanitizeFilename(scene.title);
+      let newFileName = cleanTitle;
+
+      // Add date suffix if available
+      if (scene.date) {
+        newFileName += ` (${scene.date})`;
+      }
+
+      newFileName += videoExt;
+
+      const oldPath = join(directoryPath, videoFile);
+      const newPath = join(directoryPath, newFileName);
+
+      // Only rename if different
+      if (oldPath !== newPath) {
+        await rename(oldPath, newPath);
+        logger.info({
+          oldName: videoFile,
+          newName: newFileName,
+          sceneId,
+        }, "[FileManager] Renamed video file to clean format");
+      }
+
+      return newPath;
+    } catch (error) {
+      logger.error({ error, sceneId, directoryPath }, "[FileManager] Failed to rename video file");
+      return null;
+    }
+  }
+
+  /**
    * Move completed torrent files using qBittorrent API
    * This preserves seeding by letting qBittorrent track the file location
+   *
+   * IMPORTANT: Checks if destination has enough space before moving.
+   * If not, finds an alternative disk and moves the folder there first.
    */
   async moveCompletedTorrentViaQBit(
     sceneId: string,
@@ -366,14 +691,60 @@ export class FileManagerService {
       throw new Error(`Scene ${sceneId} not found`);
     }
 
-    // Use createSceneFolder which handles collision detection automatically
-    const destinationFolder = await this.createSceneFolder(sceneId);
+    // Get torrent size to check if we have enough space
+    const torrentProps = await qbittorrent.getTorrentProperties(qbitHash);
+    const torrentSize = torrentProps.size || 0;
+
+    // Use createSceneFolder which handles collision detection and optimal disk selection
+    let destinationFolder = await this.createSceneFolder(sceneId);
+
+    // Check if destination has enough space (at least 5GB + torrent size buffer)
+    const destinationHasSpace = await this.checkDiskSpace(destinationFolder, torrentSize);
+
+    if (!destinationHasSpace) {
+      logger.warn({
+        sceneId,
+        destinationFolder,
+        torrentSize,
+      }, "[FileManager] Destination folder does not have enough space, finding alternative disk");
+
+      // Find an alternative disk with enough space
+      const alternativePath = await this.findAlternativeDiskWithSpace(torrentSize);
+
+      if (!alternativePath) {
+        throw new Error(
+          `No disk with sufficient space available for scene ${sceneId}. ` +
+          `Required: ${Math.ceil(torrentSize / 1024 / 1024 / 1024)}GB + 5GB buffer`
+        );
+      }
+
+      // Move existing folder to alternative disk
+      const sanitizedTitle = this.sanitizeFilename(scene.title);
+      const newDestinationFolder = join(alternativePath, sanitizedTitle);
+
+      // Check if folder exists and move it
+      const folderExists = await this.checkFolderExists(destinationFolder);
+      if (folderExists) {
+        logger.info({
+          oldPath: destinationFolder,
+          newPath: newDestinationFolder,
+        }, "[FileManager] Moving existing folder to alternative disk");
+
+        await this.moveFolderToAlternativeDisk(destinationFolder, newDestinationFolder);
+      }
+
+      destinationFolder = newDestinationFolder;
+      logger.info({
+        sceneId,
+        newDestination: destinationFolder,
+      }, "[FileManager] Using alternative disk with sufficient space");
+    }
 
     logger.info({
       sceneId,
       qbitHash,
       destinationFolder,
-      scenesPath: this.scenesPath,
+      torrentSize,
     }, "[FileManager] About to call setLocation");
 
     // Get current torrent properties for debugging
@@ -401,6 +772,13 @@ export class FileManagerService {
     // Wait for qBittorrent to complete the move (poll for confirmation)
     await this.waitForTorrentMove(qbitHash, destinationFolder, qbittorrent);
 
+    // Rename video file to clean format (remove release group tags, quality info, etc.)
+    const renamedFilePath = await this.renameVideoFileToCleanName(sceneId, destinationFolder);
+    logger.info({
+      sceneId,
+      renamedFilePath,
+    }, "[FileManager] Renamed video file to clean format");
+
     // Generate NFO and download poster
     let nfoPath: string | null = null;
     let posterPath: string | null = null;
@@ -425,6 +803,153 @@ export class FileManagerService {
   }
 
   /**
+   * Check if a disk path has at least 5GB + required bytes of free space
+   */
+  private async checkDiskSpace(folderPath: string, requiredBytes: number): Promise<boolean> {
+    try {
+      // Get the mount point for the folder
+      const { stdout } = await execAsync(`LC_ALL=C df -B1 "${folderPath}" 2>/dev/null`);
+      const lines = stdout.trim().split("\n");
+
+      if (lines.length < 2) return false;
+
+      const data = lines[1]?.split(/\s+/);
+      if (!data || data.length < 4) return false;
+
+      const available = parseInt(data[3], 10);
+      const requiredSpace = MIN_FREE_SPACE_BYTES + requiredBytes;
+
+      return available >= requiredSpace;
+    } catch (error) {
+      logger.warn({ error, folderPath }, "[FileManager] Failed to check disk space");
+      return false;
+    }
+  }
+
+  /**
+   * Find an alternative disk with sufficient space
+   * Returns the path with most free space that has at least 5GB + required bytes
+   * The returned path will have /media/scenes appended automatically
+   */
+  private async findAlternativeDiskWithSpace(requiredBytes: number): Promise<string | null> {
+    if (!this.settingsRepository) {
+      return null;
+    }
+
+    try {
+      const settings = await this.settingsRepository.getSettings();
+      const downloadPaths = settings.downloadPaths?.paths || [];
+
+      // Get disk space info for each path
+      const pathSpaceInfos: Array<{ path: string; freeBytes: number; name: string }> = [];
+
+      for (const dp of downloadPaths) {
+        if (!dp.path) continue;
+
+        try {
+          const { stdout } = await execAsync(`LC_ALL=C df -B1 "${dp.path}" 2>/dev/null`);
+          const lines = stdout.trim().split("\n");
+
+          if (lines.length < 2) continue;
+
+          const data = lines[1]?.split(/\s+/);
+          if (!data || data.length < 4) continue;
+
+          const available = parseInt(data[3], 10);
+          const requiredSpace = MIN_FREE_SPACE_BYTES + requiredBytes;
+
+          if (available >= requiredSpace) {
+            pathSpaceInfos.push({
+              path: dp.path,
+              freeBytes: available,
+              name: dp.name || dp.path,
+            });
+          }
+        } catch (error) {
+          logger.warn({ path: dp.path, error }, "[FileManager] Failed to check disk space for path");
+        }
+      }
+
+      if (pathSpaceInfos.length === 0) {
+        return null;
+      }
+
+      // Sort by free space descending and pick the best
+      pathSpaceInfos.sort((a, b) => b.freeBytes - a.freeBytes);
+
+      const selected = pathSpaceInfos[0];
+
+      // Ensure the path has /media/scenes structure
+      let finalPath = selected.path;
+      if (!finalPath.includes('/media')) {
+        finalPath = join(finalPath, 'media', 'scenes');
+      } else if (!finalPath.includes('/scenes')) {
+        finalPath = join(finalPath, 'scenes');
+      }
+
+      // Ensure the directory exists
+      await mkdir(finalPath, { recursive: true });
+
+      logger.info({
+        originalPath: selected.path,
+        finalPath,
+        selectedName: selected.name,
+        freeGB: (selected.freeBytes / 1024 / 1024 / 1024).toFixed(2),
+        requiredGB: (requiredBytes / 1024 / 1024 / 1024).toFixed(2),
+      }, "[FileManager] Selected alternative disk");
+
+      return finalPath;
+    } catch (error) {
+      logger.error({ error }, "[FileManager] Error finding alternative disk");
+      return null;
+    }
+  }
+
+  /**
+   * Move a folder from one disk to another while preserving structure
+   */
+  private async moveFolderToAlternativeDisk(sourcePath: string, targetPath: string): Promise<void> {
+    try {
+      // Create target directory
+      await mkdir(targetPath, { recursive: true });
+
+      // Copy all files from source to target
+      const entries = await readdir(sourcePath, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const srcPath = join(sourcePath, entry.name);
+        const destPath = join(targetPath, entry.name);
+
+        if (entry.isDirectory()) {
+          // Recursively copy subdirectories
+          await this.moveFolderToAlternativeDisk(srcPath, destPath);
+        } else {
+          // Copy file
+          const { copyFile } = await import("fs/promises");
+          await copyFile(srcPath, destPath);
+        }
+      }
+
+      // Verify all files copied successfully, then delete source
+      const targetEntries = await readdir(targetPath, { withFileTypes: true });
+      const sourceEntries = await readdir(sourcePath, { withFileTypes: true });
+
+      if (targetEntries.length >= sourceEntries.length) {
+        await rm(sourcePath, { recursive: true, force: true });
+        logger.info({
+          sourcePath,
+          targetPath,
+        }, "[FileManager] Successfully moved folder to alternative disk");
+      } else {
+        throw new Error(`Copy verification failed: target has ${targetEntries.length} entries, source has ${sourceEntries.length}`);
+      }
+    } catch (error) {
+      logger.error({ error, sourcePath, targetPath }, "[FileManager] Failed to move folder to alternative disk");
+      throw error;
+    }
+  }
+
+  /**
    * Wait for qBittorrent to complete file move operation
    * Polls torrent properties until save_path matches expected path
    */
@@ -439,10 +964,11 @@ export class FileManagerService {
       const torrentInfo = await qbittorrent.getTorrentProperties(qbitHash);
 
       // Check if save_path matches expected path
-      if (
-        torrentInfo.savePath === expectedPath ||
-        torrentInfo.contentPath.startsWith(expectedPath)
-      ) {
+      // contentPath may be undefined for some torrents, so check before calling startsWith
+      const savePathMatches = torrentInfo.savePath === expectedPath;
+      const contentPathMatches = torrentInfo.contentPath?.startsWith(expectedPath);
+
+      if (savePathMatches || contentPathMatches) {
         return; // Move completed successfully
       }
 
@@ -565,6 +1091,7 @@ export class FileManagerService {
 
   /**
    * Scan filesystem for missing scenes
+   * Scans all configured download paths, not just the default scenesPath
    */
   async scanFilesystem(): Promise<{
     missingScenes: Array<{ sceneId: string; expectedPath: string }>;
@@ -591,32 +1118,53 @@ export class FileManagerService {
     // Detect orphaned files (files on disk not in DB)
     const orphanedFiles: Array<{ path: string }> = [];
 
-    try {
-      // Check if scenes directory exists
-      await access(this.scenesPath, constants.F_OK);
+    // Get all download paths to scan
+    const pathsToScan: string[] = [];
 
-      // Scan the scenes directory recursively
-      const filesOnDisk = await this.scanDirectory(this.scenesPath);
+    // Add default scenesPath
+    pathsToScan.push(this.scenesPath);
 
-      // Build a Set of known file paths for quick lookup
-      const knownPaths = new Set(allSceneFiles.map(sf => sf.filePath));
-
-      // Filter video files that aren't in the database
-      const videoExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg'];
-
-      for (const filePath of filesOnDisk) {
-        const ext = extname(filePath).toLowerCase();
-
-        // Only check video files
-        if (videoExtensions.includes(ext)) {
-          if (!knownPaths.has(filePath)) {
-            orphanedFiles.push({ path: filePath });
+    // Add configured download paths
+    if (this.settingsRepository) {
+      try {
+        const settings = await this.settingsRepository.getSettings();
+        const downloadPaths = settings.downloadPaths?.paths || [];
+        for (const dp of downloadPaths) {
+          if (dp.path && !pathsToScan.includes(dp.path)) {
+            pathsToScan.push(dp.path);
           }
         }
+      } catch (error) {
+        logger.warn({ error }, "[FileManager] Failed to get download paths for scanning");
       }
-    } catch (error) {
-      // If scenes directory doesn't exist or can't be accessed, just log and continue
-      logger.error({ error }, `Failed to scan scenes directory ${this.scenesPath}:`);
+    }
+
+    // Scan each path
+    const videoExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg'];
+    const knownPaths = new Set(allSceneFiles.map(sf => sf.filePath));
+
+    for (const scanPath of pathsToScan) {
+      try {
+        // Check if directory exists
+        await access(scanPath, constants.F_OK);
+
+        // Scan the directory recursively
+        const filesOnDisk = await this.scanDirectory(scanPath);
+
+        for (const filePath of filesOnDisk) {
+          const ext = extname(filePath).toLowerCase();
+
+          // Only check video files
+          if (videoExtensions.includes(ext)) {
+            if (!knownPaths.has(filePath)) {
+              orphanedFiles.push({ path: filePath });
+            }
+          }
+        }
+      } catch (error) {
+        // If directory doesn't exist or can't be accessed, just log and continue
+        logger.warn({ error, scanPath }, `[FileManager] Failed to scan directory ${scanPath}`);
+      }
     }
 
     return {
@@ -655,6 +1203,7 @@ export class FileManagerService {
 
   /**
    * Delete scene folder and add to exclusions
+   * Searches all configured download paths for the folder
    */
   async deleteSceneFolder(sceneId: string, reason: "user_deleted" | "manual_removal"): Promise<void> {
     // Get scene files
@@ -685,38 +1234,57 @@ export class FileManagerService {
         });
 
         if (scene) {
-          // Try to find folder by scene title
+          // Try to find folder by scene title in all configured paths
           const sanitizedTitle = this.sanitizeFilename(scene.title);
 
-          // Check for folder with exact title match
-          const potentialFolder = join(this.scenesPath, sanitizedTitle);
-          try {
-            const exists = await this.checkFolderExists(potentialFolder);
-            if (exists) {
-              await rm(potentialFolder, { recursive: true, force: true });
-              logger.info(`[FileManager] Deleted folder by title: ${potentialFolder}`);
-            }
-          } catch (error) {
-            logger.error({ error }, `[FileManager] Failed to delete potential folder ${potentialFolder}:`);
-          }
+          // Get all download paths to search
+          const pathsToSearch: string[] = [];
+          pathsToSearch.push(this.scenesPath);
 
-          // Also check for folders with random suffixes (collision avoidance)
-          // Read scenesPath directory and find folders starting with scene title
-          try {
-            const entries = await readdir(this.scenesPath, { withFileTypes: true });
-            for (const entry of entries) {
-              if (entry.isDirectory() && entry.name.startsWith(sanitizedTitle)) {
-                const folderPath = join(this.scenesPath, entry.name);
-                try {
-                  await rm(folderPath, { recursive: true, force: true });
-                  logger.info(`[FileManager] Deleted matching folder: ${folderPath}`);
-                } catch (error) {
-                  logger.error({ error }, `[FileManager] Failed to delete matching folder ${folderPath}:`);
+          if (this.settingsRepository) {
+            try {
+              const settings = await this.settingsRepository.getSettings();
+              const downloadPaths = settings.downloadPaths?.paths || [];
+              for (const dp of downloadPaths) {
+                if (dp.path && !pathsToSearch.includes(dp.path)) {
+                  pathsToSearch.push(dp.path);
                 }
               }
+            } catch (error) {
+              logger.warn({ error }, "[FileManager] Failed to get download paths for folder deletion");
             }
-          } catch (error) {
-            logger.error({ error }, `[FileManager] Failed to scan scenes directory:`);
+          }
+
+          // Search each path for matching folders
+          for (const searchPath of pathsToSearch) {
+            try {
+              // Check for folder with exact title match
+              const potentialFolder = join(searchPath, sanitizedTitle);
+              const exists = await this.checkFolderExists(potentialFolder);
+              if (exists) {
+                await rm(potentialFolder, { recursive: true, force: true });
+                logger.info(`[FileManager] Deleted folder by title: ${potentialFolder}`);
+                break; // Found and deleted, no need to check other paths
+              }
+
+              // Also check for folders with random suffixes (collision avoidance)
+              const entries = await readdir(searchPath, { withFileTypes: true });
+              for (const entry of entries) {
+                if (entry.isDirectory() && entry.name.startsWith(sanitizedTitle)) {
+                  const folderPath = join(searchPath, entry.name);
+                  try {
+                    await rm(folderPath, { recursive: true, force: true });
+                    logger.info(`[FileManager] Deleted matching folder: ${folderPath}`);
+                    break; // Found and deleted, no need to check other paths
+                  } catch (error) {
+                    logger.error({ error }, `[FileManager] Failed to delete matching folder ${folderPath}:`);
+                  }
+                }
+              }
+            } catch (error) {
+              // Path doesn't exist or can't be accessed, continue to next
+              logger.debug({ error, searchPath }, `[FileManager] Could not search path for folder deletion`);
+            }
           }
         }
       } catch (error) {
@@ -769,8 +1337,24 @@ export class FileManagerService {
     // Download poster
     const posterPath = await this.downloadPoster(sceneId, folderPath);
 
-    // Generate NFO
-    const nfoPath = await this.generateNFO(sceneId, folderPath);
+    // Generate NFO with matching video filename for Jellyfin compatibility
+    // Find the video file in the folder to match NFO name
+    let videoFilename: string | undefined;
+    try {
+      const files = await readdir(folderPath);
+      // Find video files (mp4, mkv, avi, mov, wmv, webm)
+      const videoFile = files.find(f =>
+        /\.(mp4|mkv|avi|mov|wmv|webm|m4v|flv)$/i.test(f)
+      );
+      if (videoFile) {
+        videoFilename = videoFile;
+      }
+    } catch (error) {
+      // Folder might not exist yet, that's okay
+      this.logger.debug({ error, sceneId }, "Could not read folder for video file");
+    }
+
+    const nfoPath = await this.generateNFO(sceneId, folderPath, videoFilename);
 
     return {
       folderPath,
@@ -801,27 +1385,126 @@ export class FileManagerService {
     // Create folder directly with scene title (no studio subfolder, no ID suffix)
     const sanitizedTitle = this.sanitizeFilename(cleanedTitle);
 
+    // Use optimal download path (with most free space)
+    const scenesPath = await this.getOptimalDownloadPath();
+
     const folderPath = join(
-      this.scenesPath,
+      scenesPath,
       sanitizedTitle
     );
 
     await mkdir(folderPath, { recursive: true });
 
-    // Generate simplified NFO content (use cleaned title)
-    const performers = scene.performers.map((p) => `    <actor>\n      <name>${this.escapeXML(p.name)}</name>\n    </actor>`).join("\n");
+    // Generate NFO content using the same logic as buildNFOContent
+    // Build actors list with thumbnails
+    const performers = scene.performers.map((p) => {
+      const name = this.escapeXML(p.name);
+      const thumb = p.thumbnail || p.images?.[0]?.url || null;
+      const thumbTag = thumb ? `\n    <thumb>${this.escapeXML(thumb)}</thumb>` : "";
+
+      return `  <actor>
+    <name>${name}</name>
+    <type>Actor</type>${thumbTag}
+  </actor>`;
+    }).join("\n");
+
     const studio = scene.studios[0]?.name || "";
 
-    const nfoContent = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    // Extract year from date (format: YYYY-MM-DD)
+    let year = "";
+    if (scene.date) {
+      const dateMatch = scene.date.match(/^(\d{4})/);
+      if (dateMatch) {
+        year = dateMatch[1];
+      }
+    }
+
+    // Extract external IDs
+    const stashdbId = scene.externalIds?.find((e) => e.source === "stashdb")?.id || null;
+    const tpdbId = scene.externalIds?.find((e) => e.source === "tpdb")?.id || null;
+
+    // Build genre tags (multiple allowed)
+    const genreTags: string[] = ["Adult"];
+    if (scene.contentType) {
+      if (scene.contentType === "jav") {
+        genreTags.push("JAV");
+        genreTags.push("Asian");
+      } else if (scene.contentType === "movie") {
+        genreTags.push("Movie");
+      } else {
+        genreTags.push("Scene");
+      }
+    }
+    if (studio) {
+      genreTags.push(studio);
+    }
+    const genres = genreTags.map(g => `  <genre>${this.escapeXML(g)}</genre>`).join("\n");
+
+    // Build style tags based on performer attributes
+    const styleTags: string[] = [];
+    scene.performers?.forEach(p => {
+      if (p.gender) {
+        const genderTag = p.gender.charAt(0).toUpperCase() + p.gender.slice(1);
+        if (!styleTags.includes(genderTag)) {
+          styleTags.push(genderTag);
+        }
+      }
+      if (p.nationality) {
+        if (!styleTags.includes(p.nationality)) {
+          styleTags.push(p.nationality);
+        }
+      }
+    });
+    const styles = styleTags.length > 0
+      ? "\n" + styleTags.map(s => `  <style>${this.escapeXML(s)}</style>`).join("\n")
+      : "";
+
+    // Build tags (multiple allowed)
+    const tagElements = scene.tags.map(t => `  <tag>${this.escapeXML(t)}</tag>`).join("\n");
+
+    // Build trailer in Kodi format if available
+    let trailerTag = "";
+    if (scene.trailer) {
+      let youtubeId = null;
+      const youtubeMatch = scene.trailer.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]+)/);
+      if (youtubeMatch) {
+        youtubeId = youtubeMatch[1];
+        trailerTag = `\n  <trailer>plugin://plugin.video.youtube/?action=play_video&videoid=${youtubeId}</trailer>`;
+      } else {
+        trailerTag = `\n  <trailer>${this.escapeXML(scene.trailer)}</trailer>`;
+      }
+    }
+
+    // Build art section if poster or thumbnail available
+    let artTag = "";
+    if (scene.poster || scene.thumbnail) {
+      const posterPath = scene.poster || scene.thumbnail;
+      artTag = `\n  <art>\n    <poster>${this.escapeXML(posterPath!)}</poster>\n  </art>`;
+    }
+
+    const nfoContent = `<?xml version="1.0" encoding="UTF-8"?>
 <movie>
   <title>${this.escapeXML(cleanedTitle)}</title>
   <originaltitle>${this.escapeXML(scene.title)}</originaltitle>
+  ${year ? `<year>${year}</year>` : ""}
+  ${scene.date ? `<premiered>${scene.date}</premiered>` : ""}
+  ${scene.date ? `<releasedate>${scene.date}</releasedate>` : ""}
+  ${scene.description ? `<plot>${this.escapeXML(scene.description)}</plot>` : ""}
+  ${scene.code ? `<id>${this.escapeXML(scene.code)}</id>` : ""}
   ${studio ? `<studio>${this.escapeXML(studio)}</studio>` : ""}
-  ${performers}
+  ${scene.duration ? `<runtime>${Math.floor(scene.duration / 60)}</runtime>` : ""}
+  ${scene.rating && scene.rating > 0 ? `<rating>${scene.rating}</rating>` : ""}${trailerTag}${artTag}
+  ${stashdbId ? `<uniqueid type="stashdb" default="true">${stashdbId}</uniqueid>` : ""}
+  ${tpdbId ? `<uniqueid type="tpdb" default="false">${tpdbId}</uniqueid>` : ""}
+${genres}
+${tagElements}${styles}
+  <mpaa>XXX</mpaa>
+  <lockdata>false</lockdata>
+${performers}
 </movie>`;
 
-    // Save NFO file (use cleaned title for filename)
-    const nfoPath = join(folderPath, `${this.sanitizeFilename(cleanedTitle)}.nfo`);
+    // Save NFO file (use movie.nfo as filename - Jellyfin standard)
+    const nfoPath = join(folderPath, 'movie.nfo');
     await writeFile(nfoPath, nfoContent, "utf-8");
 
     return {

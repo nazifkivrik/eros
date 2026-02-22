@@ -1,34 +1,24 @@
 version: "3.8"
 
 services:
+  # Eros Application
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      cache_from:
-        - eros:latest
-      args:
-        - BUILDKIT_INLINE_CACHE=1
-    image: eros
+   
+    image: nazifkivrik/eros-app:latest
     container_name: eros-app
     ports:
-      - "9697:3000"  # Frontend
+      - "9697:3000"
     environment:
       - NODE_ENV=production
-      - PORT=3001
-      - HOST=0.0.0.0
-      - DATABASE_PATH=/data/app.db
-      - SCENES_PATH=/app/media/scenes
-      - INCOMPLETE_PATH=/app/media/incomplete
-      - SESSION_SECRET=${SESSION_SECRET:-change-this-secret}
+      - SESSION_SECRET=${SESSION_SECRET:-change-this-secret-in-production}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
-      # Don't override NEXT_PUBLIC_API_URL - let Dockerfile default (/api) work for browser
-      # Browser needs relative URL, not localhost which resolves to user's machine in Docker
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
     volumes:
       - ./data:/data:rw
-      - ${MEDIA_PATH:-./media}:/app/media:rw
+      - ${MEDIA_PATH_1}:${MEDIA_PATH_1}:rw
+      - ${MEDIA_PATH_2}:${MEDIA_PATH_2}:rw
+
     networks:
       - eros-network
     restart: unless-stopped
@@ -39,6 +29,26 @@ services:
       retries: 3
       start_period: 40s
 
+  # Jellyfin Media Server
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Istanbul}
+      - JELLYFIN_PublishedServerUrl=http://your-ip:8096
+    volumes:
+      - ./jellyfin/config:/config
+      - ./jellyfin/cache:/cache
+      - ${MEDIA_PATH_1}:${MEDIA_PATH_1}:ro
+      - ${MEDIA_PATH_2}:${MEDIA_PATH_2}:ro
+    ports:
+      - "8096:8096"
+    networks:
+      - eros-network
+    restart: unless-stopped
+  # qBittorrent
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
     container_name: qbittorrent
@@ -49,8 +59,10 @@ services:
       - WEBUI_PORT=8080
       - TORRENTING_PORT=6881
     volumes:
-      - ./qbittorrent/appdata:/config
-      - ${MEDIA_PATH:-./media}:/app/media
+      - ./qbittorrent/config:/config
+      # IMPORTANT: Must use same paths as Eros app for proper file sharing
+      - ${MEDIA_PATH_1}:${MEDIA_PATH_1}:rw
+      - ${MEDIA_PATH_2}:${MEDIA_PATH_2}:rw
     ports:
       - "8080:8080"
       - "6881:6881"
@@ -59,6 +71,7 @@ services:
       - eros-network
     restart: unless-stopped
 
+  # Prowlarr
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
     container_name: prowlarr
@@ -67,31 +80,44 @@ services:
       - PGID=${PGID:-1000}
       - TZ=${TZ:-Europe/Istanbul}
     volumes:
-      - ./prowlarr/data:/config
+      - ./prowlarr/config:/config
     ports:
       - "9696:9696"
     networks:
       - eros-network
     restart: unless-stopped
 
+  # FlareSolverr (optional - for cloudflare-protected sites)
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     container_name: flaresolverr
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-info}
-      - LOG_HTML=${LOG_HTML:-false}
-      - CAPTCHA_SOLVER=${CAPTCHA_SOLVER:-none}
       - TZ=${TZ:-Europe/Istanbul}
     ports:
-      - "${FLARESOLVERR_PORT:-8191}:8191"
+      - "8191:8191"
     networks:
       - eros-network
     restart: unless-stopped
+    profiles:
+      - flaresolverr  # Only start with: docker-compose --profile flaresolverr up
 
 networks:
   eros-network:
     driver: bridge
 
-volumes:
-  eros-data:
-    driver: local
+# Directory structure:
+# Add your disk mount paths in .env as MEDIA_PATH_1, MEDIA_PATH_2, etc.
+# Example:
+#   MEDIA_PATH_1=/data/500gb/media
+#   MEDIA_PATH_2=/data/1tb/media
+#
+# Container paths match host paths (no translation):
+# - Host: /data/500gb/media → Container: /data/500gb/media
+# - Host: /data/1tb/media   → Container: /data/1tb/media
+#
+# In Eros UI, add download paths that match:
+# - /data/500gb/media/scenes
+# - /data/1tb/media/scenes
+#
+# IMPORTANT: All containers (app, qbittorrent, jellyfin) see the same paths

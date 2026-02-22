@@ -3,9 +3,9 @@
  * Presentational component for displaying a scene subscription
  */
 
-import type { SubscriptionDetail } from "@repo/shared-types";
+import type { SubscriptionDetail, Scene } from "@repo/shared-types";
 import Link from "next/link";
-import { Check, X } from "lucide-react";
+import { Check, X, Star, Calendar } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,8 @@ interface SceneCardProps {
 }
 
 export function SceneCard({ subscription, onToggleSubscribe }: SceneCardProps) {
+  const scene = subscription.entity as Scene | null;
+
   // Helper to get the best image URL from entity data
   const getEntityImageUrl = (entity: any): string | null => {
     if (!entity) return null;
@@ -93,21 +95,23 @@ export function SceneCard({ subscription, onToggleSubscribe }: SceneCardProps) {
         </CardHeader>
         <CardContent className="space-y-2 pt-0">
           <div className="flex gap-1 flex-wrap text-xs">
-            <Badge
-              variant={subscription.isSubscribed ? "default" : "secondary"}
-              className={cn(
-                "text-xs",
-                subscription.isSubscribed ? "bg-green-600" : "bg-muted text-muted-foreground"
-              )}
-            >
-              {subscription.isSubscribed ? "✓ Active" : "○ Inactive"}
-            </Badge>
-            <Badge
-              variant={subscription.autoDownload ? "default" : "outline"}
-              className="text-xs"
-            >
-              Auto: {subscription.autoDownload ? "On" : "Off"}
-            </Badge>
+            {scene?.date && (
+              <Badge variant="outline" className="text-xs gap-1">
+                <Calendar className="h-3 w-3" />
+                {new Date(scene.date).toLocaleDateString()}
+              </Badge>
+            )}
+            {scene && scene.rating > 0 && (
+              <Badge variant="outline" className="text-xs gap-1">
+                <Star className="h-3 w-3" />
+                {scene.rating.toFixed(1)}
+              </Badge>
+            )}
+            {scene?.contentType && (
+              <Badge variant="secondary" className="text-xs">
+                {scene.contentType}
+              </Badge>
+            )}
           </div>
           <p className="text-xs text-muted-foreground">
             {new Date(subscription.createdAt).toLocaleDateString()}

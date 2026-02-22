@@ -11,7 +11,7 @@ import type { SubscriptionsRepository } from "@/infrastructure/repositories/subs
 import type { DownloadQueueRepository } from "@/infrastructure/repositories/download-queue.repository.js";
 import type { LogsService } from "../../application/services/logs.service.js";
 import type { TorrentSearchService } from "../../application/services/torrent-search/index.js";
-import type { TorrentClientRegistry } from "@/infrastructure/registries/provider-registry.js";
+import type { TorrentClientRegistry, IndexerRegistry } from "@/infrastructure/registries/provider-registry.js";
 import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
 import type { FileManagerService } from "../../application/services/file-management/file-manager.service.js";
 import type { SettingsService } from "../../application/services/settings.service.js";
@@ -33,6 +33,7 @@ export class SubscriptionSearchJob extends BaseJob {
   private logsService: LogsService;
   private torrentSearchService: TorrentSearchService;
   private torrentClientRegistry: TorrentClientRegistry;
+  private indexerRegistry: IndexerRegistry;
   private fileManager: FileManagerService;
   private settingsService: SettingsService;
   private downloadQueueService: DownloadQueueService;
@@ -47,6 +48,7 @@ export class SubscriptionSearchJob extends BaseJob {
     logsService: LogsService;
     torrentSearchService: TorrentSearchService;
     torrentClientRegistry: TorrentClientRegistry;
+    indexerRegistry: IndexerRegistry;
     fileManager: FileManagerService;
     settingsService: SettingsService;
     downloadQueueService: DownloadQueueService;
@@ -59,6 +61,7 @@ export class SubscriptionSearchJob extends BaseJob {
     this.logsService = deps.logsService;
     this.torrentSearchService = deps.torrentSearchService;
     this.torrentClientRegistry = deps.torrentClientRegistry;
+    this.indexerRegistry = deps.indexerRegistry;
     this.fileManager = deps.fileManager;
     this.settingsService = deps.settingsService;
     this.downloadQueueService = deps.downloadQueueService;
@@ -229,7 +232,19 @@ export class SubscriptionSearchJob extends BaseJob {
     const foundSceneIds = new Set<string>();
 
     if (subscription.autoDownload && selectedTorrents.length > 0) {
-      const torrentsToAdd = selectedTorrents.slice(0, MAX_TORRENTS_PER_RUN);
+      // Deduplicate: Only take one torrent per scene (first/best match for each scene)
+      const uniqueTorrents = new Map<string, any>();
+      for (const torrent of selectedTorrents) {
+        if (torrent.sceneId && !uniqueTorrents.has(torrent.sceneId)) {
+          uniqueTorrents.set(torrent.sceneId, torrent);
+        }
+      }
+
+      const torrentsToAdd = Array.from(uniqueTorrents.values()).slice(0, MAX_TORRENTS_PER_RUN);
+
+      this.logger.info(
+        `Deduplicated to ${torrentsToAdd.length} unique scenes (from ${selectedTorrents.length} torrents)`
+      );
 
       for (const torrent of torrentsToAdd) {
         if (torrent.sceneId) {
@@ -288,7 +303,19 @@ export class SubscriptionSearchJob extends BaseJob {
     const foundSceneIds = new Set<string>();
 
     if (subscription.autoDownload && selectedTorrents.length > 0) {
-      const torrentsToAdd = selectedTorrents.slice(0, MAX_TORRENTS_PER_RUN);
+      // Deduplicate: Only take one torrent per scene (first/best match for each scene)
+      const uniqueTorrents = new Map<string, any>();
+      for (const torrent of selectedTorrents) {
+        if (torrent.sceneId && !uniqueTorrents.has(torrent.sceneId)) {
+          uniqueTorrents.set(torrent.sceneId, torrent);
+        }
+      }
+
+      const torrentsToAdd = Array.from(uniqueTorrents.values()).slice(0, MAX_TORRENTS_PER_RUN);
+
+      this.logger.info(
+        `Deduplicated to ${torrentsToAdd.length} unique scenes (from ${selectedTorrents.length} torrents)`
+      );
 
       for (const torrent of torrentsToAdd) {
         if (torrent.sceneId) {
@@ -493,10 +520,12 @@ export class SubscriptionSearchJob extends BaseJob {
       }
     }
 
-    // Create scene folder
+    // Create scene folder and get the path
+    let sceneFolderPath: string | null = null;
     try {
-      await this.fileManager.setupSceneFilesSimplified(sceneId);
-      this.logger.info(`Created scene folder for ${torrent.title}`);
+      const result = await this.fileManager.setupSceneFilesSimplified(sceneId);
+      sceneFolderPath = result.folderPath;
+      this.logger.info(`Created scene folder for ${torrent.title}: ${sceneFolderPath}`);
     } catch (error) {
       this.logger.error(
         { error, sceneId },
@@ -511,11 +540,51 @@ export class SubscriptionSearchJob extends BaseJob {
     const torrentClient = this.getTorrentClient();
     if (torrentClient && subscription.autoDownload) {
       const settings = await this.settingsService.getSettings();
-      const qbittorrentConfig = settings.qbittorrent;
 
-      if (qbittorrentConfig.enabled && (torrent.downloadUrl || torrent.infoHash)) {
+      if (torrent.downloadUrl || torrent.infoHash) {
         try {
-          const downloadPath = settings.general.incompletePath || "/media/incomplete";
+          // Calculate incomplete path dynamically based on scene folder location
+          // Scene folder comes from settings.downloadPaths, e.g., /data/500gb/media/scenes/SceneName
+          // We extract the base path and construct incomplete path: /data/500gb/media/incomplete
+          let downloadPath: string;
+
+          if (sceneFolderPath) {
+            // Extract the base path by removing the scene name portion
+            // /data/500gb/media/scenes/SceneName -> /data/500gb/media
+            // /data/1tb/media/scenes/Studio/Scene -> /data/1tb/media
+            const scenesIndex = sceneFolderPath.indexOf('/scenes');
+            if (scenesIndex !== -1) {
+              const basePath = sceneFolderPath.substring(0, scenesIndex);
+              downloadPath = `${basePath}/incomplete`;
+              this.logger.info({
+                sceneFolder: sceneFolderPath,
+                incompletePath: downloadPath,
+                basePath
+              }, "Dynamically calculated incomplete path from scene folder");
+            } else {
+              // Fallback: Use scene folder parent as incomplete location
+              const lastSlash = sceneFolderPath.lastIndexOf('/');
+              downloadPath = lastSlash !== -1
+                ? sceneFolderPath.substring(0, lastSlash + 1) + 'incomplete'
+                : settings.general.incompletePath || '/incomplete';
+              this.logger.warn({
+                sceneFolder: sceneFolderPath,
+                incompletePath: downloadPath
+              }, "Could not find /scenes in path, using fallback");
+            }
+          } else {
+            // No scene folder specified - use first download path's incomplete
+            const firstPath = settings.downloadPaths?.paths?.[0]?.path;
+            if (firstPath) {
+              downloadPath = `${firstPath}/incomplete`;
+            } else {
+              downloadPath = settings.general.incompletePath || '/incomplete';
+            }
+            this.logger.info({
+              incompletePath: downloadPath,
+              firstPath
+            }, "No scene folder, using default incomplete path");
+          }
 
           let magnetLink: string | undefined;
           let torrentUrl: string | undefined;
@@ -528,9 +597,47 @@ export class SubscriptionSearchJob extends BaseJob {
           else if (torrent.downloadUrl?.startsWith("magnet:")) {
             magnetLink = torrent.downloadUrl;
           }
-          // Priority 3: Use downloadUrl as torrent URL (for .torrent files)
+          // Priority 3: Try to get magnet link from Prowlarr if no magnet available yet
           else if (torrent.downloadUrl) {
-            torrentUrl = torrent.downloadUrl;
+            // FALLBACK: Try to get magnet link from Prowlarr proxy
+            if (!magnetLink && !torrent.infoHash) {
+              try {
+                // Try to get Prowlarr indexer
+                const prowlarrIndexers = this.indexerRegistry.getAll().filter(
+                  i => i.id.includes('prowlarr') && i.provider.getMagnetLink
+                );
+
+                if (prowlarrIndexers.length > 0) {
+                  const prowlarr = prowlarrIndexers[0].provider;
+                  // Extract indexer ID from torrent.indexerId (format: "prowlarr-123")
+                  const indexerId = torrent.indexerId?.includes('prowlarr')
+                    ? parseInt(torrent.indexerId.replace('prowlarr-', '')) || undefined
+                    : undefined;
+
+                  this.logger.debug({
+                    title: torrent.title,
+                    downloadUrl: torrent.downloadUrl,
+                    indexerId,
+                  }, "Attempting to get magnet link from Prowlarr proxy");
+
+                  magnetLink = await prowlarr.getMagnetLink(torrent.downloadUrl, indexerId);
+
+                  if (magnetLink) {
+                    this.logger.info(
+                      { title: torrent.title },
+                      "Successfully got magnet link from Prowlarr proxy"
+                    );
+                  }
+                }
+              } catch (error) {
+                this.logger.warn({ error }, "Failed to get magnet link from Prowlarr proxy");
+              }
+            }
+
+            // If still no magnet link, use downloadUrl as-is (for .torrent files)
+            if (!magnetLink) {
+              torrentUrl = torrent.downloadUrl;
+            }
           }
 
           this.logger.info({
@@ -564,10 +671,10 @@ export class SubscriptionSearchJob extends BaseJob {
       } else {
         this.logger.warn({
           title: torrent.title,
-          qbittorrentEnabled: qbittorrentConfig.enabled,
+          hasTorrentClient: !!torrentClient,
           hasDownloadUrl: !!torrent.downloadUrl,
           hasInfoHash: !!torrent.infoHash,
-        }, "Skipping torrent client addition - qBittorrent disabled or no magnet/infoHash available");
+        }, "Skipping torrent client addition - no torrent client configured or no magnet/infoHash available");
       }
     }
 

@@ -151,7 +151,7 @@ ENV INCOMPLETE_PATH=/app/media/incomplete
 # Bu script root olarak çalışır, izinleri ayarlar ve sonra eros kullanıcısına geçer
 COPY <<'EOF' /usr/local/bin/docker-entrypoint.sh
 #!/bin/bash
-set -e
+# Remove -e flag to continue on errors, we'll handle them manually
 
 # PUID ve PGID değişkenlerini al (varsayılan 1000)
 PUID=${PUID:-1000}
@@ -160,19 +160,78 @@ PGID=${PGID:-1000}
 echo "Starting container with PUID: $PUID and PGID: $PGID"
 
 # Eros kullanıcısının ID'sini güncelle
-groupmod -o -g "$PGID" eros
-usermod -o -u "$PUID" eros
+groupmod -o -g "$PGID" eros || true
+usermod -o -u "$PUID" eros || true
 
 # Klasör izinlerini güncelle (Host'tan gelen mountlar dahil)
 echo "Fixing permissions for /data and /app/media..."
 
-# Create media subdirectories if they don't exist
-mkdir -p /app/media/scenes /app/media/incomplete
+# Create default media directories
+mkdir -p /app/media/scenes /app/media/incomplete || true
 
-chown -R eros:eros /data
-chown -R eros:eros /app/media
-chown -R eros:eros /app/apps/web/.next
-chown -R eros:eros /home/eros
+# Dynamically discover and setup all mounted disks under /app/
+echo "Setting up additional disk directories..."
+echo "Scanning for mounted disks under /app/..."
+
+# Internal container directories to skip (not volume mounts)
+SKIP_DIRS="media apps node_modules packages"
+
+# Find all directories directly under /app/
+for dir in /app/*/; do
+  # Remove trailing slash
+  dir="${dir%/}"
+
+  # Get directory name
+  dirname_val=$(basename "$dir")
+
+  # Skip internal container directories and hidden directories
+  skip_dir=0
+  for skip in $SKIP_DIRS; do
+    if [ "$dirname_val" = "$skip" ]; then
+      skip_dir=1
+      break
+    fi
+  done
+
+  if [ $skip_dir -eq 1 ] || [[ "$dirname_val" == .* ]]; then
+    continue
+  fi
+
+  if [ -d "$dir" ]; then
+    echo "Found disk: $dir"
+    # Create the media/scenes structure
+    mkdir -p "$dir/media/scenes" "$dir/media/incomplete" || true
+    # Fix permissions for the created directories only
+    # Use find to only change permissions for our created directories
+    find "$dir/media" -type d -exec chown eros:eros {} + 2>/dev/null || true
+    find "$dir/media" -type f -exec chown eros:eros {} + 2>/dev/null || true
+    echo "  Created: $dir/media/scenes"
+    echo "  Created: $dir/media/incomplete"
+  fi
+done
+
+# Also scan /mnt/ for any additional mounts
+if [ -d /mnt ]; then
+  for dir in /mnt/*/; do
+    dir="${dir%/}"
+    if [ -d "$dir" ]; then
+      echo "Found mnt disk: $dir"
+      mkdir -p "$dir/media/scenes" "$dir/media/incomplete" || true
+      find "$dir/media" -type d -exec chown eros:eros {} + 2>/dev/null || true
+      find "$dir/media" -type f -exec chown eros:eros {} + 2>/dev/null || true
+      echo "  Created: $dir/media/scenes"
+    fi
+  done
+fi
+
+# Fix permissions for all standard directories
+chown -R eros:eros /data 2>/dev/null || true
+chown -R eros:eros /app/media 2>/dev/null || true
+chown -R eros:eros /app/apps/web/.next 2>/dev/null || true
+chown -R eros:eros /home/eros 2>/dev/null || true
+
+echo "Directory setup complete!"
+echo "Permissions fixed successfully"
 
 # Root yetkisinden çık ve 'eros' kullanıcısı ile komutu çalıştır
 # gosu, Debian/Ubuntu sistemlerde su-exec yerine kullanılır

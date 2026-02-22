@@ -3,13 +3,14 @@
  * Presentational component for displaying a studio subscription
  */
 
-import type { SubscriptionDetail } from "@repo/shared-types";
+import type { SubscriptionDetail, Studio } from "@repo/shared-types";
 import Link from "next/link";
 import { Trash2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SubscriptionImage } from "@/components/subscriptions/SubscriptionImage";
+import { Star, Building2 } from "lucide-react";
 
 interface StudioCardProps {
   subscription: SubscriptionDetail;
@@ -18,6 +19,8 @@ interface StudioCardProps {
 }
 
 export function StudioCard({ subscription, onDelete, isDeletePending }: StudioCardProps) {
+  const studio = subscription.entity as Studio | null;
+
   // Helper to get the best image URL from entity data
   const getEntityImageUrl = (entity: any): string | null => {
     if (!entity) return null;
@@ -68,21 +71,26 @@ export function StudioCard({ subscription, onDelete, isDeletePending }: StudioCa
         </CardHeader>
         <CardContent className="space-y-2 pt-0">
           <div className="flex gap-1 flex-wrap text-xs">
-            <Badge
-              variant={subscription.autoDownload ? "default" : "outline"}
-              className="text-xs"
-            >
-              Auto: {subscription.autoDownload ? "On" : "Off"}
-            </Badge>
-            <Badge
-              variant={subscription.includeAliases ? "default" : "outline"}
-              className="text-xs"
-            >
-              Aliases
-            </Badge>
+            {subscription.includeAliases && (
+              <Badge variant="default" className="text-xs">
+                Aliases
+              </Badge>
+            )}
             {subscription.includeMetadataMissing && (
               <Badge variant="secondary" className="text-xs">
                 No Metadata
+              </Badge>
+            )}
+            {studio && studio.rating > 0 && (
+              <Badge variant="outline" className="text-xs gap-1">
+                <Star className="h-3 w-3" />
+                {studio.rating.toFixed(1)}
+              </Badge>
+            )}
+            {studio?.parentStudioId && (
+              <Badge variant="outline" className="text-xs gap-1">
+                <Building2 className="h-3 w-3" />
+                Network
               </Badge>
             )}
           </div>

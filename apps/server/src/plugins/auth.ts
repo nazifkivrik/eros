@@ -23,10 +23,13 @@ export default fp(async (app) => {
   await app.register(session, {
     secret,
     cookie: {
-      secure: process.env.NODE_ENV === "production",
+      // Only set secure=true in production with HTTPS
+      // For local network/Docker deployments without HTTPS, secure must be false
+      secure: process.env.NODE_ENV === "production" && process.env.PROTOCOL === "https",
       httpOnly: true,
       maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
       sameSite: "lax",
+      path: "/", // Ensure cookie is available for all paths
     },
     cookieName: process.env.SESSION_COOKIE_NAME || "eros-session",
     saveUninitialized: false,

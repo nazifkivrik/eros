@@ -18,6 +18,10 @@ import type { ProvidersConfig, MetadataProviderConfig, IndexerProviderConfig, To
 import type { CrossEncoderService } from "@/application/services/ai-matching/cross-encoder.service.js";
 import type { ExternalServicesManager } from "@/config/external-services.js";
 import { promises } from "fs";
+import { createTPDBAdapter } from "@/infrastructure/adapters/tpdb.adapter.js";
+import { createStashDBAdapter } from "@/infrastructure/adapters/stashdb.adapter.js";
+import { createProwlarrAdapter } from "@/infrastructure/adapters/prowlarr.adapter.js";
+import { createQBittorrentAdapter } from "@/infrastructure/adapters/qbittorrent.adapter.js";
 
 /**
  * Settings Controller
@@ -283,17 +287,29 @@ export class SettingsController {
       const total = stats.blocks * stats.frsize;
       const used = total - free;
 
+      // Avoid NaN values when total is 0
+      const freePercent = total > 0 ? (free / total) * 100 : 0;
+      const usedPercent = total > 0 ? (used / total) * 100 : 0;
+
       return {
         path,
         free,
         total,
         used,
-        freePercent: (free / total) * 100,
-        usedPercent: (used / total) * 100,
+        freePercent,
+        usedPercent,
       };
     } catch (error) {
       this.logger.error({ path, error }, "Failed to check path space");
-      throw new Error(`Failed to check disk space for path: ${path}`);
+      // Return zeros instead of throwing to allow UI to handle gracefully
+      return {
+        path,
+        free: 0,
+        total: 0,
+        used: 0,
+        freePercent: 0,
+        usedPercent: 0,
+      };
     }
   }
 
@@ -703,9 +719,16 @@ export class SettingsController {
           message: `Successfully connected to ${provider.name} (${provider.type})`,
         };
       } else {
+        // Provider-specific error messages
+        const errorMessages: Record<string, string> = {
+          tpdb: `Failed to connect to TPDB. Check API URL and API Key.`,
+          stashdb: `Failed to connect to StashDB. Check API URL and API Key.`,
+          prowlarr: `Failed to connect to Prowlarr. Check Base URL and API Key.`,
+          qbittorrent: `Failed to connect to qBittorrent. Check URL, username, and password.`,
+        };
         return {
           success: false,
-          message: `Failed to connect to ${provider.name}. Check your configuration.`,
+          message: errorMessages[provider.type] || `Failed to connect to ${provider.name}. Check your configuration.`,
         };
       }
     } catch (error) {

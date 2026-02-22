@@ -141,13 +141,28 @@ export class DashboardService {
         }
       }
 
-      // Always add root filesystem as fallback (will only be used if others fail)
-      pathsToCheck.push("/");
+      // Auto-detect the disk where the app stores media
+      // This ensures the main application disk is always shown
+      const scenesPath = process.env.SCENES_PATH || "/app/media";
+      if (!pathsToCheck.includes(scenesPath)) {
+        pathsToCheck.unshift(scenesPath); // Add at beginning as primary
+      }
 
       // Get disk stats for each unique path
       const uniquePaths = Array.from(new Set(pathsToCheck));
       const volumeStats: StorageVolume[] = [];
 
+      // Track filesystems by device to avoid duplicates
+      // Different paths on the same filesystem should be grouped
+      const filesystemMap = new Map<string, {
+        device: string;
+        total: number;
+        used: number;
+        available: number;
+        paths: Array<{ path: string; name: string }>;
+      }>();
+
+      // Aggregate totals across all filesystems
       let totalDiskSpace = 0;
       let usedDiskSpace = 0;
       let availableDiskSpace = 0;
@@ -170,33 +185,66 @@ export class DashboardService {
           const available = parseInt(data[3], 10);
           const usagePercentage = total > 0 ? (used / total) * 100 : 0;
 
+          // Get the filesystem device (first column after header)
+          // df output format: Filesystem 1K-blocks Used Available Use% Mounted on
+          const device = data[0];
+
           // Find the corresponding download path config for the name
-          const downloadPath = downloadPaths.find(p => p.path === path);
-          const name = downloadPath?.name || (path === "/" ? "Root Filesystem" : path);
+          const downloadPath = downloadPaths.find((p: any) => p.path === path);
+          let name = downloadPath?.name;
 
-          volumeStats.push({
-            path,
-            name,
-            total,
-            used,
-            available,
-            usagePercentage,
-          });
-
-          // For root filesystem, use its values directly
-          // For other paths, only add if they're on a different filesystem
-          // For simplicity, we'll just use the first successful result (usually the configured download paths)
-          if (volumeStats.length === 1 || path === "/") {
-            totalDiskSpace = total;
-            usedDiskSpace = used;
-            availableDiskSpace = available;
+          // Auto-detected scenes path gets special labeling
+          if (!name) {
+            if (path === scenesPath) {
+              name = "Application Storage (Auto-detected)";
+            } else if (path === "/") {
+              name = "Root Filesystem";
+            } else {
+              name = path;
+            }
           }
 
-          this.logger.info({ path, total, used, available }, "Successfully retrieved disk stats");
+          // Group by device (filesystem) to avoid showing same disk multiple times
+          if (!filesystemMap.has(device)) {
+            filesystemMap.set(device, {
+              device,
+              total,
+              used,
+              available,
+              paths: [{ path, name }],
+            });
+          } else {
+            // Add this path to the existing filesystem entry
+            const existing = filesystemMap.get(device)!;
+            existing.paths.push({ path, name });
+          }
+
+          this.logger.info({ path, device, total, used, available }, "Successfully retrieved disk stats");
 
         } catch (error) {
           this.logger.warn({ path, error }, `Failed to get disk stats for path`);
         }
+      }
+
+      // Convert filesystem map to volume stats, using the primary name for each
+      for (const [device, fs] of filesystemMap) {
+        // Use the first (primary) path's name for display
+        const primaryPath = fs.paths[0];
+        const usagePercentage = fs.total > 0 ? (fs.used / fs.total) * 100 : 0;
+
+        volumeStats.push({
+          path: primaryPath.path,
+          name: primaryPath.name,
+          total: fs.total,
+          used: fs.used,
+          available: fs.available,
+          usagePercentage,
+        });
+
+        // Accumulate totals across all filesystems
+        totalDiskSpace += fs.total;
+        usedDiskSpace += fs.used;
+        availableDiskSpace += fs.available;
       }
 
       // If no volumes were successfully retrieved, return zeros

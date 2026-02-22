@@ -194,6 +194,21 @@ export class TorrentCompletionHandlerService {
           error: errorStack || errorMessage,
         }
       );
+
+      // Update status to move_failed before re-throwing
+      try {
+        await this.repository.updateDownloadQueueStatus(queueItem.id, "move_failed");
+        logger.info(
+          { qbitHash, queueItemId: queueItem.id },
+          "[TorrentCompletionHandler] Updated queue status to move_failed"
+        );
+      } catch (statusError) {
+        logger.error(
+          { statusError, qbitHash },
+          "[TorrentCompletionHandler] Failed to update queue status to move_failed"
+        );
+      }
+
       throw error;
     }
   }

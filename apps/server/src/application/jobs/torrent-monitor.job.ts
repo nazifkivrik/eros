@@ -123,8 +123,31 @@ export class TorrentMonitorJob extends BaseJob {
         } catch (error) {
           this.logger.error(
             { error, torrentHash: torrent.hash },
-            "Failed to monitor torrent"
+            "Failed to process completed torrent"
           );
+
+          // Update status to move_failed when torrent processing fails
+          try {
+            await this.db
+              .update(downloadQueue)
+              .set({ status: "move_failed" })
+              .where(eq(downloadQueue.id, queueItem.id));
+
+            await this.logsService.error(
+              "torrent",
+              `Failed to process completed torrent: ${error instanceof Error ? error.message : String(error)}`,
+              {
+                torrentHash: torrent.hash,
+                sceneId: queueItem.sceneId,
+                queueItemId: queueItem.id,
+              }
+            );
+          } catch (updateError) {
+            this.logger.error(
+              { updateError, torrentHash: torrent.hash },
+              "Failed to update queue status to move_failed"
+            );
+          }
         }
       }
 

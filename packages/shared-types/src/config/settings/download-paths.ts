@@ -34,8 +34,8 @@ export const DEFAULT_DOWNLOAD_PATHS_SETTINGS: DownloadPathsSettings = {
   paths: [
     {
       id: "default",
-      name: "Default",
-      path: "/downloads",
+      name: "Application Media",
+      path: "/app/media",
       priority: 0,
       isDefault: true,
     },

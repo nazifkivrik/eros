@@ -3,13 +3,14 @@
  * Presentational component for displaying a performer subscription
  */
 
-import type { SubscriptionDetail } from "@repo/shared-types";
+import type { SubscriptionDetail, Performer } from "@repo/shared-types";
 import Link from "next/link";
 import { Trash2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SubscriptionImage } from "@/components/subscriptions/SubscriptionImage";
+import { Calendar, Globe } from "lucide-react";
 
 interface PerformerCardProps {
   subscription: SubscriptionDetail;
@@ -18,6 +19,8 @@ interface PerformerCardProps {
 }
 
 export function PerformerCard({ subscription, onDelete, isDeletePending }: PerformerCardProps) {
+  const performer = subscription.entity as Performer | null;
+
   // Helper to get the best image URL from entity data
   const getEntityImageUrl = (entity: any): string | null => {
     if (!entity) return null;
@@ -70,21 +73,26 @@ export function PerformerCard({ subscription, onDelete, isDeletePending }: Perfo
         </CardHeader>
         <CardContent className="space-y-2 pt-0">
           <div className="flex gap-1 flex-wrap text-xs">
-            <Badge
-              variant={subscription.autoDownload ? "default" : "outline"}
-              className="text-xs"
-            >
-              Auto: {subscription.autoDownload ? "On" : "Off"}
-            </Badge>
-            <Badge
-              variant={subscription.includeAliases ? "default" : "outline"}
-              className="text-xs"
-            >
-              Aliases
-            </Badge>
+            {subscription.includeAliases && (
+              <Badge variant="default" className="text-xs">
+                Aliases
+              </Badge>
+            )}
             {subscription.includeMetadataMissing && (
               <Badge variant="secondary" className="text-xs">
                 No Metadata
+              </Badge>
+            )}
+            {performer?.careerStartYear && (
+              <Badge variant="outline" className="text-xs gap-1">
+                <Calendar className="h-3 w-3" />
+                {performer.careerStartYear}
+              </Badge>
+            )}
+            {performer?.nationality && (
+              <Badge variant="outline" className="text-xs gap-1">
+                <Globe className="h-3 w-3" />
+                {performer.nationality}
               </Badge>
             )}
           </div>

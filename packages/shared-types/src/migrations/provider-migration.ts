@@ -14,12 +14,17 @@ import type { AppSettings } from "../config/settings/app-settings.js";
 /**
  * Migrates legacy single-instance settings to multi-provider format
  */
-export function migrateToMultiProviders(settings: Partial<AppSettings>): ProvidersConfig {
+export function migrateToMultiProviders(settings: Partial<AppSettings> | undefined): ProvidersConfig {
   const providers: ProvidersConfig = {
     metadata: [],
     indexers: [],
     torrentClients: [],
   };
+
+  // If no settings exist (fresh install), return empty providers
+  if (!settings) {
+    return providers;
+  }
 
   // Migrate TPDB
   if (settings.tpdb?.enabled) {
@@ -88,7 +93,12 @@ export function migrateToMultiProviders(settings: Partial<AppSettings>): Provide
 /**
  * Checks if migration is needed
  */
-export function needsProviderMigration(settings: Partial<AppSettings>): boolean {
+export function needsProviderMigration(settings: Partial<AppSettings> | undefined): boolean {
+  // If no settings exist (fresh install), no migration needed
+  if (!settings) {
+    return false;
+  }
+
   // If providers already exist and have items, no migration needed
   const providers = settings.providers;
   if (providers && (
