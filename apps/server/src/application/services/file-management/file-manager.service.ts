@@ -6,6 +6,7 @@ import { scenes, performers, studios, sceneFiles, sceneExclusions } from "@repo/
 import { constants } from "fs";
 import type { NFOMetadata } from "@repo/shared-types";
 import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
+import type { MetadataProviderRegistry } from "@/infrastructure/registries/provider-registry.js";
 import { createTorrentParserService } from "@/application/services/torrent-quality/parser.service.js";
 import { logger } from "@/utils/logger.js";
 import { exec } from "node:child_process";
@@ -20,6 +21,7 @@ export class FileManagerService {
   private scenesPath: string;
   private incompletePath: string;
   private settingsRepository: any; // SettingsRepository
+  private metadataRegistry: MetadataProviderRegistry | undefined;
 
   private db: Database;
 
@@ -28,16 +30,19 @@ export class FileManagerService {
     scenesPath,
     incompletePath,
     settingsRepository,
+    metadataRegistry,
   }: {
     db: Database;
     scenesPath: string;
     incompletePath: string;
     settingsRepository?: any;
+    metadataRegistry?: MetadataProviderRegistry;
   }) {
     this.db = db;
     this.scenesPath = scenesPath;
     this.incompletePath = incompletePath;
     this.settingsRepository = settingsRepository;
+    this.metadataRegistry = metadataRegistry;
   }
 
   /**
@@ -146,7 +151,28 @@ export class FileManagerService {
       }
 
       // Ensure the directory exists
-      await mkdir(finalPath, { recursive: true });
+      try {
+        await mkdir(finalPath, { recursive: true });
+      } catch (mkdirError: any) {
+        // If directory creation fails, try using the default scenesPath
+        if (mkdirError.code === 'EACCES' || mkdirError.code === 'EPERM') {
+          const containerUid = process.env.PUID || process.env.UID || '1000';
+          logger.error({
+            path: finalPath,
+            error: mkdirError.message,
+            code: mkdirError.code,
+            containerUid,
+            hint: `Make sure the directory is writable by the container user (UID: ${containerUid})`,
+            troubleshooting: [
+              "1. Check if the path is mounted in docker-compose.yml",
+              `2. On host machine, run: sudo chown -R ${containerUid}:${containerUid} ${finalPath.split('/media/')[0]}`,
+              `3. Or run: sudo chmod -R 777 ${finalPath.split('/media/')[0]} (less secure but works)`,
+            ],
+          }, "[FileManager] Permission denied creating directory, using default path");
+          return this.scenesPath;
+        }
+        throw mkdirError;
+      }
 
       logger.info({
         originalPath: selected.path,
@@ -242,7 +268,22 @@ export class FileManagerService {
     }
 
     // Create directory recursively
-    await mkdir(folderPath, { recursive: true });
+    try {
+      await mkdir(folderPath, { recursive: true });
+    } catch (mkdirError: any) {
+      if (mkdirError.code === 'EACCES' || mkdirError.code === 'EPERM') {
+        const containerUid = process.env.PUID || process.env.UID || '1000';
+        logger.error({
+          folderPath,
+          scenesPath,
+          error: mkdirError.message,
+          containerUid,
+          troubleshooting: `Run on host: sudo chown -R ${containerUid}:${containerUid} ${folderPath.split('/').slice(0, -1).join('/')} OR sudo chmod -R 755 ${folderPath.split('/').slice(0, -1).join('/')}`,
+        }, "[FileManager] Cannot create scene folder - permission denied");
+        throw new Error(`Cannot create scene folder at ${folderPath}: Permission denied. Check that the parent directory is writable by UID ${containerUid}`);
+      }
+      throw mkdirError;
+    }
 
     return folderPath;
   }
@@ -383,6 +424,43 @@ export class FileManagerService {
   }
 
   /**
+   * Fetch performer image from TPDB if not available in database
+   */
+  private async fetchPerformerImageFromTPDB(performer: any): Promise<string | null> {
+    if (!this.metadataRegistry) {
+      return null;
+    }
+
+    // Check if performer has TPDB external ID
+    const tpdbId = performer.externalIds?.find((e: any) => e.source === "tpdb")?.id;
+    if (!tpdbId) {
+      return null;
+    }
+
+    try {
+      const metadataProvider = this.metadataRegistry.getPrimary()?.provider;
+      if (!metadataProvider || typeof metadataProvider.getPerformerById !== 'function') {
+        return null;
+      }
+
+      const tpdbPerformer = await metadataProvider.getPerformerById(tpdbId);
+      if (!tpdbPerformer) {
+        return null;
+      }
+
+      // Return thumbnail or first image
+      const thumbnail = (tpdbPerformer as any).thumbnail || tpdbPerformer.images?.[0]?.url || null;
+      if (thumbnail) {
+        logger.debug({ performerId: performer.id, tpdbId }, "[FileManager] Fetched performer image from TPDB");
+      }
+      return thumbnail;
+    } catch (error) {
+      logger.warn({ error, performerId: performer.id, tpdbId }, "[FileManager] Failed to fetch performer image from TPDB");
+      return null;
+    }
+  }
+
+  /**
    * Get scene with full metadata (performers, studios)
    */
   private async getSceneWithMetadata(sceneId: string): Promise<NFOMetadata | null> {
@@ -401,11 +479,26 @@ export class FileManagerService {
 
     const performerIds = performerRecords.map((ps) => ps.performerId);
     const performersData = await Promise.all(
-      performerIds.map((id) =>
-        this.db.query.performers.findFirst({
+      performerIds.map(async (id) => {
+        const p = await this.db.query.performers.findFirst({
           where: eq(performers.id, id),
-        })
-      )
+        });
+        if (!p) return null;
+
+        // Fetch performer image from TPDB if not available in database
+        let thumbnail = p.thumbnail || null;
+        if (!thumbnail && p.externalIds?.some((e: any) => e.source === "tpdb")) {
+          const tpdbThumbnail = await this.fetchPerformerImageFromTPDB(p);
+          if (tpdbThumbnail) {
+            thumbnail = tpdbThumbnail;
+          }
+        }
+
+        return {
+          ...p,
+          thumbnail,
+        };
+      })
     );
 
     // Get studio for this scene from siteId
@@ -423,6 +516,19 @@ export class FileManagerService {
     const tags: string[] = ["Adult Content"];
     if (scene.contentType) {
       tags.push(scene.contentType === "jav" ? "JAV" : scene.contentType.toUpperCase());
+    }
+
+    // Add tags from scene metadata (if stored in JSON fields)
+    // Check if scene has tags stored in any JSON field
+    const sceneAny = scene as any;
+    if (sceneAny.tags && Array.isArray(sceneAny.tags)) {
+      for (const tag of sceneAny.tags) {
+        if (typeof tag === 'string' && !tags.includes(tag)) {
+          tags.push(tag);
+        } else if (tag.name && !tags.includes(tag.name)) {
+          tags.push(tag.name);
+        }
+      }
     }
 
     return {
@@ -457,7 +563,7 @@ export class FileManagerService {
           name: s!.name,
         })),
       tags,
-      director: null, // Could be added from scene metadata if available
+      director: sceneAny.director || null,
     };
   }
 
@@ -563,6 +669,7 @@ export class FileManagerService {
   ${scene.description ? `<plot>${this.escapeXML(scene.description)}</plot>` : ""}
   ${scene.code ? `<id>${this.escapeXML(scene.code)}</id>` : ""}
   ${studio ? `<studio>${this.escapeXML(studio)}</studio>` : ""}
+  ${scene.director ? `<director>${this.escapeXML(scene.director)}</director>` : ""}
   ${scene.duration ? `<runtime>${Math.floor(scene.duration / 60)}</runtime>` : ""}
   ${scene.rating && scene.rating > 0 ? `<rating>${scene.rating}</rating>` : ""}${trailerTag}${artTag}
   ${stashdbId ? `<uniqueid type="stashdb" default="true">${stashdbId}</uniqueid>` : ""}
@@ -874,31 +981,56 @@ ${performers}
         return null;
       }
 
-      // Sort by free space descending and pick the best
+      // Sort by free space descending
       pathSpaceInfos.sort((a, b) => b.freeBytes - a.freeBytes);
 
-      const selected = pathSpaceInfos[0];
+      // Try each path until we find one that works
+      for (const selected of pathSpaceInfos) {
+        // Ensure the path has /media/scenes structure
+        let finalPath = selected.path;
+        if (!finalPath.includes('/media')) {
+          finalPath = join(finalPath, 'media', 'scenes');
+        } else if (!finalPath.includes('/scenes')) {
+          finalPath = join(finalPath, 'scenes');
+        }
 
-      // Ensure the path has /media/scenes structure
-      let finalPath = selected.path;
-      if (!finalPath.includes('/media')) {
-        finalPath = join(finalPath, 'media', 'scenes');
-      } else if (!finalPath.includes('/scenes')) {
-        finalPath = join(finalPath, 'scenes');
+        // Ensure the directory exists
+        try {
+          await mkdir(finalPath, { recursive: true });
+
+          logger.info({
+            originalPath: selected.path,
+            finalPath,
+            selectedName: selected.name,
+            freeGB: (selected.freeBytes / 1024 / 1024 / 1024).toFixed(2),
+            requiredGB: (requiredBytes / 1024 / 1024 / 1024).toFixed(2),
+          }, "[FileManager] Selected alternative disk");
+
+          return finalPath;
+        } catch (mkdirError: any) {
+          // If directory creation fails due to permissions, try next path
+          if (mkdirError.code === 'EACCES' || mkdirError.code === 'EPERM') {
+            const containerUid = process.env.PUID || process.env.UID || '1000';
+            logger.warn({
+              path: finalPath,
+              error: mkdirError.message,
+              code: mkdirError.code,
+              troubleshooting: `Run on host: sudo chown -R ${containerUid}:${containerUid} ${finalPath.split('/media/')[0]} OR sudo chmod -R 777 ${finalPath.split('/media/')[0]}`,
+            }, "[FileManager] Permission denied, trying next path");
+            continue; // Try next path
+          }
+          // For other errors, throw
+          throw mkdirError;
+        }
       }
 
-      // Ensure the directory exists
-      await mkdir(finalPath, { recursive: true });
-
-      logger.info({
-        originalPath: selected.path,
-        finalPath,
-        selectedName: selected.name,
-        freeGB: (selected.freeBytes / 1024 / 1024 / 1024).toFixed(2),
-        requiredGB: (requiredBytes / 1024 / 1024 / 1024).toFixed(2),
-      }, "[FileManager] Selected alternative disk");
-
-      return finalPath;
+      // No writable path found
+      const containerUid = process.env.PUID || process.env.UID || '1000';
+      logger.error({
+        allPathsTried: pathSpaceInfos.map(p => ({ path: p.path, name: p.name })),
+        containerUid,
+      }, "[FileManager] No writable path found - all paths have permission issues");
+      throw new Error(`No writable path found. Check permissions on configured download paths. Run: sudo chown -R ${containerUid}:${containerUid} /your/media/path`);
     } catch (error) {
       logger.error({ error }, "[FileManager] Error finding alternative disk");
       return null;
@@ -910,8 +1042,15 @@ ${performers}
    */
   private async moveFolderToAlternativeDisk(sourcePath: string, targetPath: string): Promise<void> {
     try {
-      // Create target directory
-      await mkdir(targetPath, { recursive: true });
+      // Create target directory with error handling
+      try {
+        await mkdir(targetPath, { recursive: true });
+      } catch (mkdirError: any) {
+        if (mkdirError.code === 'EACCES' || mkdirError.code === 'EPERM') {
+          throw new Error(`Cannot create target directory ${targetPath}: Permission denied. Check directory permissions.`);
+        }
+        throw mkdirError;
+      }
 
       // Copy all files from source to target
       const entries = await readdir(sourcePath, { withFileTypes: true });
@@ -1393,7 +1532,20 @@ ${performers}
       sanitizedTitle
     );
 
-    await mkdir(folderPath, { recursive: true });
+    // Create directory with error handling
+    try {
+      await mkdir(folderPath, { recursive: true });
+    } catch (mkdirError: any) {
+      if (mkdirError.code === 'EACCES' || mkdirError.code === 'EPERM') {
+        logger.error({
+          folderPath,
+          scenesPath,
+          error: mkdirError.message,
+        }, "[FileManager] Cannot create simplified scene folder - permission denied");
+        throw new Error(`Cannot create scene folder at ${folderPath}: Permission denied`);
+      }
+      throw mkdirError;
+    }
 
     // Generate NFO content using the same logic as buildNFOContent
     // Build actors list with thumbnails

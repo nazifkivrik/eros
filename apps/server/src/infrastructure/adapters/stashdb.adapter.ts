@@ -262,7 +262,8 @@ export class StashDBAdapter implements IMetadataProvider {
   async searchScenes(
     query: string,
     limit: number = 20,
-    _page: number = 1
+    _page: number = 1,
+    _contentType?: "scene" | "jav" | "movie"
   ): Promise<MetadataScene[]> {
     const searchQuery = `
       query SearchScenes($term: String!, $limit: Int!) {
@@ -314,7 +315,7 @@ export class StashDBAdapter implements IMetadataProvider {
     return data.searchScene.map((s) => this.mapSceneToInterface(s));
   }
 
-  async getSceneById(id: string): Promise<MetadataScene | null> {
+  async getSceneById(id: string, _contentType?: "scene" | "jav" | "movie"): Promise<MetadataScene | null> {
     try {
       const sceneQuery = `
         query FindScene($id: ID!) {

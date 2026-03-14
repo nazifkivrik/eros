@@ -121,20 +121,26 @@ export interface IMetadataProvider {
    * @param query - Search query string
    * @param limit - Maximum number of results to return
    * @param page - Page number for pagination
+   * @param contentType - Content type to search (scene, jav, movie)
    * @returns Array of scenes matching the query
    */
   searchScenes(
     query: string,
     limit?: number,
-    page?: number
+    page?: number,
+    contentType?: "scene" | "jav" | "movie"
   ): Promise<MetadataScene[]>;
 
   /**
    * Get scene by ID
    * @param id - Scene ID
+   * @param contentType - Content type (scene, jav, movie)
    * @returns Scene details or null if not found
    */
-  getSceneById(id: string): Promise<MetadataScene | null>;
+  getSceneById(
+    id: string,
+    contentType?: "scene" | "jav" | "movie"
+  ): Promise<MetadataScene | null>;
 
   /**
    * Get scenes for a performer (optional, not all providers support this)

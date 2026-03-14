@@ -2,7 +2,8 @@ import type { Config } from "drizzle-kit";
 import { resolve } from "path";
 
 export default {
-  schema: "./src/schema.ts",
+  // In production, schema is in ./dist/schema.ts, in development it's ./src/schema.ts
+  schema: process.env.NODE_ENV === "production" ? "./dist/schema.ts" : "./src/schema.ts",
   out: "./src/migrations",
   dialect: "sqlite",
   dbCredentials: {

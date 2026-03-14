@@ -106,20 +106,25 @@ export class TPDBAdapter implements IMetadataProvider {
   async searchScenes(
     query: string,
     limit: number = 20,
-    page: number = 1
+    page: number = 1,
+    contentType: TPDBContentType = "scene"
   ): Promise<MetadataScene[]> {
-    const contentType = "scene";
-    const endpoint = `/${contentType}s?q=${encodeURIComponent(query)}&per_page=${limit}&page=${page}`;
+    const path = this.getContentTypePath(contentType);
+    const endpoint = `/${path}?q=${encodeURIComponent(query)}&per_page=${limit}&page=${page}`;
     const response = await this.request<TPDBPaginatedResponse<TPDBScene>>(endpoint);
 
-    this.logger.debug({ count: response.data.length, query, page }, "TPDB scene search completed");
+    this.logger.debug({ count: response.data.length, query, page, contentType }, "TPDB scene search completed");
 
     return response.data.map((s) => this.mapSceneToInterface(s));
   }
 
-  async getSceneById(id: string): Promise<MetadataScene | null> {
+  async getSceneById(
+    id: string,
+    contentType: TPDBContentType = "scene"
+  ): Promise<MetadataScene | null> {
     try {
-      const endpoint = `/scenes/${id}`;
+      const path = this.getContentTypePath(contentType);
+      const endpoint = `/${path}/${id}`;
       const response = await this.request<TPDBSingleResponse<TPDBScene>>(endpoint);
       return this.mapSceneToInterface(response.data);
     } catch (error) {
@@ -135,7 +140,8 @@ export class TPDBAdapter implements IMetadataProvider {
     // Try all content types
     for (const contentType of ["scene", "jav", "movie"] as TPDBContentType[]) {
       try {
-        const endpoint = `/${contentType}s/hash/${hash}`;
+        const path = this.getContentTypePath(contentType);
+        const endpoint = `/${path}/hash/${hash}`;
         const response = await this.request<TPDBSingleResponse<TPDBScene>>(endpoint);
         if (response.data) {
           this.logger.debug({ hash, hashType, contentType }, "TPDB hash lookup successful");
@@ -148,6 +154,15 @@ export class TPDBAdapter implements IMetadataProvider {
     }
     this.logger.debug({ hash, hashType }, "TPDB hash lookup failed - not found");
     return null;
+  }
+
+  /**
+   * Get the correct API endpoint path for a content type
+   * TPDB uses irregular naming: /scenes, /jav (not /javs), /movies
+   */
+  private getContentTypePath(contentType: TPDBContentType): string {
+    // JAV uses singular form, others use plural
+    return contentType === "jav" ? "jav" : `${contentType}s`;
   }
 
   async testConnection(): Promise<boolean> {
@@ -197,6 +212,7 @@ export class TPDBAdapter implements IMetadataProvider {
 
   /**
    * Get scenes for a specific performer (TPDB-specific method)
+   * Fixed: Uses correct TPDB API endpoint format with numeric performer_id and type filter
    */
   async getPerformerScenes(
     performerId: string,
@@ -211,7 +227,38 @@ export class TPDBAdapter implements IMetadataProvider {
     };
   }> {
     const perPage = 25;
-    const endpoint = `/performers/${performerId}/${contentType}s?page=${page}&per_page=${perPage}`;
+
+    // First, fetch the performer to get the numeric _id (TPDB uses numeric IDs for filtering)
+    // The performerId passed in is a UUID, but TPDB API requires numeric _id for performer_id filter
+    let numericPerformerId: number | null = null;
+
+    try {
+      const performer = await this.getPerformerById(performerId);
+      if (!performer) {
+        this.logger.warn(`[TPDB] Performer ${performerId} not found, cannot fetch scenes`);
+        return { scenes: [] };
+      }
+
+      // Extract the numeric _id from the raw TPDB response
+      // We need to make a raw request to get the _id since getPerformerById returns mapped data
+      const performerEndpoint = `/performers/${performerId}`;
+      const performerResponse = await this.request<TPDBSingleResponse<TPDBPerformer>>(performerEndpoint);
+      numericPerformerId = performerResponse.data._id;
+
+      if (!numericPerformerId) {
+        this.logger.warn(`[TPDB] Performer ${performerId} has no numeric _id`);
+        return { scenes: [] };
+      }
+
+      this.logger.debug(`[TPDB] Using numeric performer_id ${numericPerformerId} for UUID ${performerId}`);
+    } catch (error) {
+      this.logger.error({ error, performerId }, `[TPDB] Failed to fetch performer for scene lookup`);
+      return { scenes: [] };
+    }
+
+    // Use correct TPDB API endpoint: /scenes with performer_id and type filters
+    const path = this.getContentTypePath(contentType);
+    const endpoint = `/${path}?performer_id=${numericPerformerId}&page=${page}&per_page=${perPage}`;
 
     try {
       const response = await this.request<TPDBPaginatedResponse<TPDBScene>>(endpoint);
@@ -234,7 +281,7 @@ export class TPDBAdapter implements IMetadataProvider {
       return { scenes, pagination };
     } catch (error) {
       if (error instanceof Error && error.message.includes("404")) {
-        this.logger.info(`[TPDB] No ${contentType}s found for performer ${performerId}`);
+        this.logger.info(`[TPDB] No ${contentType}s found for performer ${performerId} (numeric_id: ${numericPerformerId})`);
         return { scenes: [] };
       }
       throw error;

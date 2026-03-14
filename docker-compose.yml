@@ -6,7 +6,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: eros:latest 
+    image: eros:latest
     container_name: eros-app
     ports:
       - "9697:3000"
@@ -14,6 +14,8 @@ services:
       - NODE_ENV=production
       - SESSION_SECRET=${SESSION_SECRET:-change-this-secret-in-production}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - MEDIA_PATH_1=${MEDIA_PATH_1}
+      - MEDIA_PATH_2=${MEDIA_PATH_2}
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
     volumes:

@@ -1,6 +1,10 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
+// Cache provider status to reduce connection checks
+let cachedProviderStatus: { data: any; timestamp: number } | null = null;
+const PROVIDER_STATUS_CACHE_TTL_MS = 15000; // 15 seconds - providers can change state
+
 const dashboardRoutes: FastifyPluginAsyncZod = async (app) => {
   const { dashboardController } = app.container;
 
@@ -57,6 +61,7 @@ const dashboardRoutes: FastifyPluginAsyncZod = async (app) => {
     }
   );
 
+  // Get provider status with caching to reduce connection checks
   app.get(
     "/providers/status",
     {
@@ -92,9 +97,29 @@ const dashboardRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async () => {
-      return await dashboardController.getProviderStatus();
+      // Check cache first
+      const now = Date.now();
+      if (cachedProviderStatus && (now - cachedProviderStatus.timestamp) < PROVIDER_STATUS_CACHE_TTL_MS) {
+        return cachedProviderStatus.data;
+      }
+
+      // Cache miss or expired - fetch from controller
+      const data = await dashboardController.getProviderStatus();
+
+      // Update cache
+      cachedProviderStatus = { data, timestamp: now };
+
+      return data;
     }
   );
 };
+
+/**
+ * Invalidate provider status cache
+ * Call this when provider settings are updated
+ */
+export function invalidateProviderStatusCache() {
+  cachedProviderStatus = null;
+}
 
 export default dashboardRoutes;

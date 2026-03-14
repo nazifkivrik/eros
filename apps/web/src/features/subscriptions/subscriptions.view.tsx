@@ -32,6 +32,9 @@ function SubscriptionsContent() {
     setIncludeMetaless,
     setShowInactive,
     toggleTag,
+    togglePerformer,
+    setPerformers,
+    setDownloadStatus,
     clearAllFilters,
   } = useSubscriptionFilters({ defaultView: "table", defaultTab: "performers" });
 
@@ -62,6 +65,30 @@ function SubscriptionsContent() {
     return Array.from(tagSet).sort();
   }, [subscriptions]);
 
+  // Get all unique performers from scenes
+  const availablePerformers = useMemo(() => {
+    const scenes = subscriptions?.data?.filter((s) => s.entityType === "scene") || [];
+    const performerMap = new Map<string, { id: string; name: string }>();
+
+    scenes.forEach((sub) => {
+      const scene = sub.entity as any;
+      if (scene?.performers) {
+        scene.performers.forEach((performer: any) => {
+          if (!performerMap.has(performer.id)) {
+            performerMap.set(performer.id, {
+              id: performer.id,
+              name: performer.name
+            });
+          }
+        });
+      }
+    });
+
+    return Array.from(performerMap.values()).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+  }, [subscriptions]);
+
   // Filter subscriptions based on URL state
   const filteredSubscriptions = useMemo(() => {
     let filtered = subscriptions?.data || [];
@@ -82,6 +109,38 @@ function SubscriptionsContent() {
         const scene = s.entity as any;
         const sceneTags = scene?.tags?.map((t: any) => t.name) || [];
         return filters.tags!.some((tag) => sceneTags.includes(tag));
+      });
+    }
+
+    // Performer filtering (for scenes only, client-side)
+    if (filters.tab === "scenes" && filters.performers && filters.performers.length > 0) {
+      filtered = filtered.filter((s) => {
+        const scene = s.entity as any;
+        const scenePerformerIds = scene?.performers?.map((p: any) => p.id) || [];
+        return filters.performers!.some((performerId) =>
+          scenePerformerIds.includes(performerId)
+        );
+      });
+    }
+
+    // Download status filtering (for scenes only, client-side)
+    if (filters.tab === "scenes" && filters.downloadStatus && filters.downloadStatus !== 'all') {
+      filtered = filtered.filter((s) => {
+        const scene = s.entity as any;
+        const status = scene?.downloadStatus;
+
+        switch (filters.downloadStatus) {
+          case 'downloaded':
+            return status?.downloaded === true || status?.hasFiles === true;
+          case 'downloading':
+            return status?.inQueue === true;
+          case 'not_downloaded':
+            return status?.downloaded !== true &&
+                   status?.hasFiles !== true &&
+                   status?.inQueue !== true;
+          default:
+            return true;
+        }
       });
     }
 
@@ -158,6 +217,14 @@ function SubscriptionsContent() {
         onClearTags={clearAllFilters}
         availableTags={availableTags}
         showTagFilter={filters.tab === "scenes"}
+        availablePerformers={availablePerformers}
+        selectedPerformers={filters.performers}
+        onPerformerToggle={togglePerformer}
+        onClearPerformers={() => setPerformers([])}
+        showPerformerFilter={filters.tab === "scenes"}
+        downloadStatus={filters.downloadStatus}
+        onDownloadStatusChange={setDownloadStatus}
+        showDownloadStatusFilter={filters.tab === "scenes"}
       />
 
       {/* Tabs with content */}

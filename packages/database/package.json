@@ -27,12 +27,12 @@
   "dependencies": {
     "@repo/shared-types": "workspace:*",
     "better-sqlite3": "^11.7.0",
+    "drizzle-kit": "^0.29.1",
     "drizzle-orm": "^0.37.0"
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
     "@types/better-sqlite3": "^7.6.12",
-    "drizzle-kit": "^0.29.1",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2"
   }

@@ -80,7 +80,7 @@ export async function createDatabase(path: string) {
     columnsAbsent?: Record<string, string[]>; // Columns that should NOT exist after migration
   }> = {
     "0000_supreme_marrow": {
-      tables: ["scenes", "performers", "studios", "tags", "scene_files", "subscriptions", "download_queue", "settings"],
+      tables: ["scenes", "performers", "studios", "tags", "scene_files", "subscriptions", "download_queue", "app_settings"],
     },
     "0001_silent_excalibur": {
       tables: ["ai_match_scores"],
@@ -202,90 +202,89 @@ export async function createDatabase(path: string) {
   for (const file of migrationFiles) {
     const migrationName = file.replace('.sql', '');
 
-    // Skip initial schema if database already exists and has been migrated
-    if (migrationName === "0000_supreme_marrow" && !isEmptyDatabase) {
+    // Skip if already executed
+    if (executedMigrations.includes(migrationName)) {
       continue;
     }
 
-    if (!executedMigrations.includes(migrationName)) {
-      console.log(`🔄 Running migration: ${migrationName}`);
+    // Run the migration
+    console.log(`🔄 Running migration: ${migrationName}`);
 
-      const migrationSQL = readFileSync(join(actualMigrationsFolder, file), 'utf-8');
-      const statements = migrationSQL.split('--> statement-breakpoint');
+    const migrationSQL = readFileSync(join(actualMigrationsFolder, file), 'utf-8');
+    const statements = migrationSQL.split('--> statement-breakpoint');
 
-      // Special handling for migration 0003: check if status column exists before UPDATE
-      if (migrationName === "0003_refine_subscription_status") {
-        const firstStatement = statements[0]?.trim();
-        if (firstStatement && firstStatement.toUpperCase().startsWith("UPDATE subscriptions SET status")) {
-          if (!columnExists("subscriptions", "status")) {
-            console.log(`  ⚠️  Skipping UPDATE statement (status column doesn't exist)`);
-            statements.shift(); // Remove first statement
+    // Special handling for migration 0003: check if status column exists before UPDATE
+    if (migrationName === "0003_refine_subscription_status") {
+      const firstStatement = statements[0]?.trim();
+      if (firstStatement && firstStatement.toUpperCase().startsWith("UPDATE subscriptions SET status")) {
+        if (!columnExists("subscriptions", "status")) {
+          console.log(`  ⚠️  Skipping UPDATE statement (status column doesn't exist)`);
+          statements.shift(); // Remove first statement
+        }
+      }
+    }
+
+    try {
+      let executedAnyStatement = false;
+      let failedStatements = 0;
+
+      for (const statement of statements) {
+        const trimmed = statement.trim();
+        if (!trimmed) continue;
+
+        try {
+          sqlite.exec(trimmed);
+          executedAnyStatement = true;
+        } catch (stmtError: any) {
+          const stmtErrorMessage = stmtError?.message || String(stmtError);
+
+          // If statement fails due to missing column/table/duplicate, skip it
+          // This handles databases in intermediate states
+          if (
+            stmtErrorMessage.includes("no such column") ||
+            stmtErrorMessage.includes("no such table") ||
+            stmtErrorMessage.includes("duplicate column") ||
+            stmtErrorMessage.includes("table ") && stmtErrorMessage.includes(" already exists")
+          ) {
+            console.log(`  ⚠️  Skipping statement (${stmtErrorMessage.split(':')[0]}): ${trimmed.substring(0, 50)}...`);
+            failedStatements++;
+            continue; // Skip this statement, continue with next
           }
+
+          // Re-throw other errors
+          throw stmtError;
         }
       }
 
-      try {
-        let executedAnyStatement = false;
-        let failedStatements = 0;
-
-        for (const statement of statements) {
-          const trimmed = statement.trim();
-          if (!trimmed) continue;
-
-          try {
-            sqlite.exec(trimmed);
-            executedAnyStatement = true;
-          } catch (stmtError: any) {
-            const stmtErrorMessage = stmtError?.message || String(stmtError);
-
-            // If statement fails due to missing column/table/duplicate, skip it
-            // This handles databases in intermediate states
-            if (
-              stmtErrorMessage.includes("no such column") ||
-              stmtErrorMessage.includes("no such table") ||
-              stmtErrorMessage.includes("duplicate column") ||
-              stmtErrorMessage.includes("table ") && stmtErrorMessage.includes(" already exists")
-            ) {
-              console.log(`  ⚠️  Skipping statement (${stmtErrorMessage.split(':')[0]}): ${trimmed.substring(0, 50)}...`);
-              failedStatements++;
-              continue; // Skip this statement, continue with next
-            }
-
-            // Re-throw other errors
-            throw stmtError;
-          }
-        }
-
-        // Record migration as executed (if we ran at least one statement or all were skipped due to being applied)
-        if (executedAnyStatement || failedStatements === statements.length) {
-          sqlite.prepare("INSERT OR IGNORE INTO _eros_migrations (name) VALUES (?)").run(migrationName);
-          console.log(`✅ Migration completed: ${migrationName}`);
-        } else if (statements.length === 0) {
-          // All statements were skipped (like 0003 with status check)
-          sqlite.prepare("INSERT OR IGNORE INTO _eros_migrations (name) VALUES (?)").run(migrationName);
-          console.log(`✅ Migration completed: ${migrationName}`);
-        }
-
-      } catch (error: any) {
-        const errorMessage = error?.message || String(error);
-
-        // If migration fails with other types of errors, log and mark as applied if appropriate
-        console.error(`❌ Migration failed: ${migrationName}`, error);
-
-        // For certain errors, we might want to mark as applied anyway
-        // This is a safety net for databases in unknown states
-        if (
-          errorMessage.includes("no such column") ||
-          errorMessage.includes("no such table")
-        ) {
-          console.log(`⚠️  Marking ${migrationName} as applied due to schema mismatch (database may be in intermediate state)`);
-          sqlite.prepare("INSERT OR IGNORE INTO _eros_migrations (name) VALUES (?)").run(migrationName);
-          console.log(`✅ Migration marked as applied: ${migrationName}`);
-          continue;
-        }
-
-        throw error;
+      // Record migration as executed (if we ran at least one statement or all were skipped due to being applied)
+      if (executedAnyStatement || failedStatements === statements.length) {
+        sqlite.prepare("INSERT OR IGNORE INTO _eros_migrations (name) VALUES (?)").run(migrationName);
+        console.log(`✅ Migration completed: ${migrationName}`);
+      } else if (statements.length === 0) {
+        // All statements were skipped (like 0003 with status check)
+        sqlite.prepare("INSERT OR IGNORE INTO _eros_migrations (name) VALUES (?)").run(migrationName);
+        console.log(`✅ Migration completed: ${migrationName}`);
       }
+
+    } catch (error: any) {
+      const errorMessage = error?.message || String(error);
+
+      // If migration fails with other types of errors, log and mark as applied if appropriate
+      console.error(`❌ Migration failed: ${migrationName}`, error);
+
+      // For certain errors, we might want to mark as applied anyway
+      // This is a safety net for databases in unknown states
+      if (
+        errorMessage.includes("no such column") ||
+        errorMessage.includes("no such table")
+      ) {
+        console.log(`⚠️  Marking ${migrationName} as applied due to schema mismatch (database may be in intermediate state)`);
+        sqlite.prepare("INSERT OR IGNORE INTO _eros_migrations (name) VALUES (?)").run(migrationName);
+        console.log(`✅ Migration marked as applied: ${migrationName}`);
+        continue;
+      }
+
+      throw error;
     }
   }
 

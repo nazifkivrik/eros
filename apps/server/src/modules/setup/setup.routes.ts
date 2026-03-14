@@ -1,6 +1,10 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { SetupDataSchema, SetupStatusResponseSchema } from "./setup.schema.js";
 
+// Cache setup status permanently - once setup is completed, it never changes
+// This eliminates unnecessary database queries after setup
+let cachedStatus: { setupCompleted: boolean; hasAdmin: boolean } | null = null;
+
 /**
  * Setup Routes
  * Pure HTTP routing - delegates to controller
@@ -10,7 +14,7 @@ const setupRoutes: FastifyPluginAsyncZod = async (app) => {
   // Get controller from DI container
   const { setupController } = app.container;
 
-  // Get setup status
+  // Get setup status (with permanent caching after setup completes)
   app.get(
     "/status",
     {
@@ -24,11 +28,23 @@ const setupRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async () => {
-      return await setupController.getStatus();
+      // If setup is already completed, return cached result immediately
+      // Once setup is done, it will never change back to not completed
+      if (cachedStatus?.setupCompleted) {
+        return cachedStatus;
+      }
+
+      // Setup not completed yet (or first check), fetch from controller
+      const data = await setupController.getStatus();
+
+      // Cache the result permanently
+      cachedStatus = data;
+
+      return data;
     }
   );
 
-  // Complete setup
+  // Complete setup (updates cache after completion)
   app.post(
     "/",
     {
@@ -43,9 +59,22 @@ const setupRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request) => {
-      return await setupController.completeSetup(request.body);
+      const result = await setupController.completeSetup(request.body);
+
+      // Update cache to reflect completed setup
+      // This cache will now be permanent since setup never reverts
+      cachedStatus = result;
+
+      return result;
     }
   );
 };
+
+/**
+ * Get cached setup status (useful for other parts of the app)
+ */
+export function getCachedSetupStatus() {
+  return cachedStatus;
+}
 
 export default setupRoutes;

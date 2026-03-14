@@ -62,6 +62,42 @@ The easiest way to run Eros is using Docker.
     - Username: `admin`
     - Password: `admin` (Change this immediately in settings!)
 
+## Troubleshooting
+
+### Permission Denied Errors
+
+If you see errors like `EACCES: permission denied` when creating directories:
+
+**Run on the HOST machine** (where docker-compose runs):
+
+```bash
+# Fix permissions for your media directory
+sudo chown -R 1000:1000 /path/to/your/media/directory
+
+# Or use more permissive permissions (less secure)
+sudo chmod -R 777 /path/to/your/media/directory
+```
+
+**For common paths:**
+```bash
+# If using /mnt paths
+sudo chown -R 1000:1000 /mnt/pve/DATA500
+
+# If using /data paths
+sudo chown -R 1000:1000 /data/your-media-folder
+```
+
+The container runs as UID:1000 (user `eros`). Make sure your media directories are writable by this user.
+
+### Database Migration Errors
+
+If you see migration errors on startup:
+
+```bash
+# Rebuild the container (will run migrations on startup)
+docker-compose build
+docker-compose up -d --force-recreate
+```
 
 
 ## Contributing

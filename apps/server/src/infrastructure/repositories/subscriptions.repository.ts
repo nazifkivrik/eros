@@ -238,15 +238,66 @@ export class SubscriptionsRepository {
 
   /**
    * Batch fetch scenes for subscriptions
+   * Includes performers and tags relations for filtering
    */
   async batchFetchScenes(ids: string[]) {
     if (ids.length === 0) return new Map();
 
     const scenesList = await this._db.query.scenes.findMany({
       where: (scenes, { inArray }) => inArray(scenes.id, ids),
+      with: {
+        performersScenes: {
+          with: {
+            performer: true,
+          },
+        },
+        scenesTags: {
+          with: {
+            tag: true,
+          },
+        },
+        sceneFiles: true,
+      },
     });
 
-    return new Map(scenesList.map((s) => [s.id, s]));
+    // Batch fetch download queue entries for all scenes
+    const downloadQueueEntries = await this._db.query.downloadQueue.findMany({
+      where: (downloadQueue, { inArray }) => inArray(downloadQueue.sceneId, ids),
+    });
+
+    // Create a map of sceneId -> downloadQueue entry
+    const downloadQueueMap = new Map(
+      downloadQueueEntries.map((dq) => [dq.sceneId, dq])
+    );
+
+    // Transform relations to match expected format for frontend
+    // Transform: performersScenes[] -> performers[{ id, name }]
+    // Transform: scenesTags[] -> tags[{ name }]
+    const transformedScenes = scenesList.map((scene) => {
+      const downloadQueue = downloadQueueMap.get(scene.id);
+      const hasFiles = scene.sceneFiles && scene.sceneFiles.length > 0;
+
+      return {
+        ...scene,
+        performers: scene.performersScenes?.map((ps) => ({
+          id: ps.performer.id,
+          name: ps.performer.name,
+        })) || [],
+        tags: scene.scenesTags?.map((st) => ({
+          name: st.tag.name,
+        })) || [],
+        // Add download status for filtering
+        hasFiles,
+        fileCount: scene.sceneFiles?.length || 0,
+        downloadStatus: {
+          downloaded: hasFiles,
+          hasFiles,
+          inQueue: !!downloadQueue,
+        },
+      };
+    });
+
+    return new Map(transformedScenes.map((s) => [s.id, s]));
   }
 
   /**
@@ -271,8 +322,46 @@ export class SubscriptionsRepository {
     } else if (subscription.entityType === "scene") {
       const result = await this._db.query.scenes.findFirst({
         where: eq(scenes.id, subscription.entityId),
+        with: {
+          performersScenes: {
+            with: {
+              performer: true,
+            },
+          },
+          scenesTags: {
+            with: {
+              tag: true,
+            },
+          },
+          sceneFiles: true,
+        },
       });
-      entity = result ?? null;
+
+      // Transform relations for scene entity
+      if (result) {
+        const hasFiles = result.sceneFiles && result.sceneFiles.length > 0;
+        const downloadQueue = await this._db.query.downloadQueue.findFirst({
+          where: (dq, { eq }) => eq(dq.sceneId, result.id),
+        });
+
+        entity = {
+          ...result,
+          performers: result.performersScenes?.map((ps) => ({
+            id: ps.performer.id,
+            name: ps.performer.name,
+          })) || [],
+          tags: result.scenesTags?.map((st) => ({
+            name: st.tag.name,
+          })) || [],
+          hasFiles,
+          fileCount: result.sceneFiles?.length || 0,
+          downloadStatus: {
+            downloaded: hasFiles,
+            hasFiles,
+            inQueue: !!downloadQueue,
+          },
+        };
+      }
     }
 
     // Fetch quality profile

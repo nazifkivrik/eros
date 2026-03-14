@@ -87,8 +87,11 @@ export class TorrentMonitorJob extends BaseJob {
       this.logger.info(`Found ${torrents.length} torrents in qBittorrent`);
 
       // Get all download queue items with scene info for title matching
+      // Include move_failed and add_failed statuses to handle torrents that need processing:
+      // - move_failed: torrents that completed but failed to move
+      // - add_failed: torrents that were added to qBittorrent but hash lookup timed out
       const downloadingItems = await this.db.query.downloadQueue.findMany({
-        where: inArray(downloadQueue.status, ["downloading", "queued", "completed"]),
+        where: inArray(downloadQueue.status, ["downloading", "queued", "completed", "move_failed", "add_failed"]),
         with: {
           scene: {
             columns: {
@@ -120,88 +123,84 @@ export class TorrentMonitorJob extends BaseJob {
       );
 
       let processedCount = 0;
+
+      // First pass: Match by hash (exact) - primary method
       for (const torrent of torrents) {
         let queueItem = hashToQueueItem.get(torrent.hash);
 
-        // Fallback: If no hash match, try to match by title
-        if (!queueItem) {
-          const torrentName = (torrent.name as string)?.toLowerCase() || '';
-          queueItem = downloadingItems.find(item => {
-            // Skip if already matched by hash
-            if (matchedItemIds.has(item.id)) return false;
-
-            const itemTitle = (item.scene?.title || item.title)?.toLowerCase() || '';
-            // Try title matching
-            return torrentName === itemTitle ||
-                   torrentName.includes(itemTitle) ||
-                   itemTitle.includes(torrentName);
-          });
-
-          // If found by title, update qbitHash in database for future matches
-          if (queueItem && torrent.hash) {
-            this.logger.info(
-              {
-                itemId: queueItem.id,
-                torrentName: torrent.name,
-                torrentHash: torrent.hash,
-                itemTitle: queueItem.title
-              },
-              "Found torrent by title match, updating qbitHash"
+        if (queueItem) {
+          matchedItemIds.add(queueItem.id);
+          try {
+            processedCount++;
+            await this.processTorrent(torrent, queueItem, processedCount, torrents.length);
+          } catch (error) {
+            this.logger.error(
+              { error, torrentHash: torrent.hash },
+              "Failed to process torrent"
             );
             try {
               await this.db
                 .update(downloadQueue)
-                .set({ qbitHash: torrent.hash })
+                .set({ status: "move_failed" })
                 .where(eq(downloadQueue.id, queueItem.id));
-            } catch (error) {
-              this.logger.error(
-                { error, itemId: queueItem.id },
-                "Failed to update qbitHash after title match"
-              );
+            } catch (updateError) {
+              this.logger.error({ updateError }, "Failed to update status to move_failed");
             }
           }
         }
+      }
 
-        if (!queueItem) {
-          this.logger.debug(
-            { torrentHash: torrent.hash, torrentName: torrent.name },
-            "Torrent not found in queue map (no hash or title match)"
+      // Second pass: Match unmatched items by title (simple substring matching)
+      // This handles cases where addTorrentAndGetHash failed but torrent was added
+      for (const torrent of torrents) {
+        // Skip if already matched by hash
+        if (hashToQueueItem.has(torrent.hash)) continue;
+
+        const torrentName = (torrent.name as string)?.toLowerCase() || '';
+
+        let queueItem = downloadingItems.find(item => {
+          // Skip if already matched
+          if (matchedItemIds.has(item.id)) return false;
+
+          const itemTitle = (item.scene?.title || item.title)?.toLowerCase() || '';
+          // Simple substring matching - should work well since differential approach
+          // in addTorrentAndGetHash should have handled most cases
+          return torrentName.includes(itemTitle) || itemTitle.includes(torrentName);
+        });
+
+        if (queueItem && torrent.hash) {
+          this.logger.info(
+            {
+              itemId: queueItem.id,
+              torrentName: torrent.name,
+              torrentHash: torrent.hash,
+              itemTitle: queueItem.title,
+              currentStatus: queueItem.status,
+            },
+            "Found torrent by title match (fallback), updating qbitHash and status"
           );
-          continue;
-        }
 
-        // Track matched item to avoid duplicate processing
-        matchedItemIds.add(queueItem.id);
-
-        try {
-          processedCount++;
-          await this.processTorrent(torrent, queueItem, processedCount, torrents.length);
-        } catch (error) {
-          this.logger.error(
-            { error, torrentHash: torrent.hash },
-            "Failed to process completed torrent"
-          );
-
-          // Update status to move_failed when torrent processing fails
           try {
+            // Update qbitHash and status
+            const newStatus = queueItem.status === "add_failed" ? "downloading" : queueItem.status;
             await this.db
               .update(downloadQueue)
-              .set({ status: "move_failed" })
+              .set({
+                qbitHash: torrent.hash,
+                status: newStatus,
+                addToClientError: null, // Clear error message on successful match
+              })
               .where(eq(downloadQueue.id, queueItem.id));
 
-            await this.logsService.error(
-              "torrent",
-              `Failed to process completed torrent: ${error instanceof Error ? error.message : String(error)}`,
-              {
-                torrentHash: torrent.hash,
-                sceneId: queueItem.sceneId,
-                queueItemId: queueItem.id,
-              }
-            );
-          } catch (updateError) {
+            matchedItemIds.add(queueItem.id);
+
+            // Process the newly matched torrent
+            processedCount++;
+            await this.processTorrent(torrent, queueItem, processedCount, torrents.length);
+          } catch (error) {
             this.logger.error(
-              { updateError, torrentHash: torrent.hash },
-              "Failed to update queue status to move_failed"
+              { error, itemId: queueItem.id },
+              "Failed to update/process matched torrent"
             );
           }
         }
@@ -278,9 +277,16 @@ export class TorrentMonitorJob extends BaseJob {
       }
     } else if (torrent.progress >= 1.0 && queueItem.status !== "completed") {
       // Torrent completed
+      let statusMessage = "Torrent completed, processing...";
+      if (queueItem.status === "add_failed") {
+        statusMessage = "Torrent was in qBittorrent but hash was not linked - now processing!";
+      } else if (queueItem.status === "move_failed") {
+        statusMessage = "Retrying previously failed torrent completion...";
+      }
+
       this.logger.info(
         { torrentHash: torrent.hash, name: torrent.name, currentStatus: queueItem.status },
-        "Torrent completed, processing..."
+        statusMessage
       );
 
       this.emitProgress(
@@ -311,8 +317,10 @@ export class TorrentMonitorJob extends BaseJob {
         { torrentHash: torrent.hash, sceneId: queueItem.sceneId },
         "handleTorrentCompleted finished successfully"
       );
-    } else if (queueItem.status === "queued" && torrent.state !== "pausedDL") {
+    } else if ((queueItem.status === "queued" || queueItem.status === "add_failed") && torrent.state !== "pausedDL") {
       // Torrent is actively downloading, update status
+      // For add_failed: the torrent was actually added to qBittorrent but we didn't get the hash
+      // Now that we've matched it by title, update the status to reflect it's downloading
       await this.db
         .update(downloadQueue)
         .set({ status: "downloading" })
@@ -322,20 +330,35 @@ export class TorrentMonitorJob extends BaseJob {
 
   private checkIfStalled(torrent: any): boolean {
     // Consider stalled if:
-    // 1. No seeders available
+
+    // 1. Torrent is in stalledDL state (qBittorrent reports no activity)
+    // This state means the download is stalled - should pause immediately
+    if (torrent.state === "stalledDL") {
+      this.logger.debug(
+        { hash: torrent.hash, name: torrent.name, state: torrent.state },
+        "Torrent is in stalledDL state, will pause"
+      );
+      return true;
+    }
+
+    // 2. No seeders available
     if (torrent.num_seeds === 0) {
       return true;
     }
 
-    // 2. Download speed is 0 for active torrents
+    // 3. Download speed is 0 for active torrents
     if (torrent.state === "downloading" && torrent.dlspeed === 0 && torrent.progress < 1.0) {
       return true;
     }
 
-    // 3. Very low seeders (< 2) and very low speed (< 10 KB/s)
+    // 4. Very low seeders (< 2) and very low speed (< 10 KB/s)
     if (torrent.num_seeds < 2 && torrent.dlspeed < 10240) {
       return true;
     }
+
+    // Note: metaDL (downloading metadata), checkingDL (checking data),
+    // and allocating (allocating disk space) states are handled by
+    // torrentManagementService.checkMetadataStuck() with proper timeout checks
 
     return false;
   }

@@ -139,6 +139,24 @@ export const SceneSchema = z.object({
   siteId: z.string().nullable(),
   directorIds: z.array(z.string()).default([]),
 
+  // Nested relations (for filtering)
+  performers: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+  })).optional(),
+  tags: z.array(z.object({
+    name: z.string(),
+  })).optional(),
+
+  // Download status (for filtering)
+  downloadStatus: z.object({
+    downloaded: z.boolean().optional(),
+    hasFiles: z.boolean().optional(),
+    inQueue: z.boolean().optional(),
+  }).optional(),
+  hasFiles: z.boolean().optional(),
+  fileCount: z.number().optional(),
+
   // External links
   links: z.union([
     z.array(z.object({ url: z.string(), platform: z.string() })),

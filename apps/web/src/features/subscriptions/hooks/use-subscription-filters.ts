@@ -18,6 +18,9 @@ interface SubscriptionFilters {
   activeOnly?: boolean;
   showMetadataLess?: boolean;
   showInactive?: boolean;
+  // New advanced filters
+  performers?: string[];
+  downloadStatus?: 'all' | 'downloaded' | 'downloading' | 'not_downloaded';
 }
 
 interface UseSubscriptionFiltersOptions {
@@ -38,6 +41,10 @@ interface UseSubscriptionFiltersReturn {
   setActiveOnly: (value: boolean) => void;
   setShowMetadataLess: (value: boolean) => void;
   setShowInactive: (value: boolean) => void;
+  // New advanced filter setters
+  setPerformers: (performers: string[]) => void;
+  togglePerformer: (performerId: string) => void;
+  setDownloadStatus: (status: 'all' | 'downloaded' | 'downloading' | 'not_downloaded') => void;
   clearAllFilters: () => void;
 }
 
@@ -65,6 +72,9 @@ export function useSubscriptionFilters(
     showInactive: isDetailPage
       ? searchParams.get("showInactive") !== "false"  // default true unless explicitly false
       : searchParams.get("showInactive") === "true",  // default false, must be explicitly true
+    // New advanced filters
+    performers: searchParams.get("performers")?.split(",").filter(Boolean) || [],
+    downloadStatus: (searchParams.get("downloadStatus") as 'all' | 'downloaded' | 'downloading' | 'not_downloaded') || 'all',
   };
 
   // Update URL params
@@ -158,6 +168,31 @@ export function useSubscriptionFilters(
     [updateUrl]
   );
 
+  // New advanced filter setters
+  const setPerformers = useCallback(
+    (performers: string[]) => {
+      updateUrl({ performers });
+    },
+    [updateUrl]
+  );
+
+  const togglePerformer = useCallback(
+    (performerId: string) => {
+      const newPerformers = filters.performers?.includes(performerId)
+        ? filters.performers.filter((p) => p !== performerId)
+        : [...(filters.performers || []), performerId];
+      updateUrl({ performers: newPerformers });
+    },
+    [filters.performers, updateUrl]
+  );
+
+  const setDownloadStatus = useCallback(
+    (status: 'all' | 'downloaded' | 'downloading' | 'not_downloaded') => {
+      updateUrl({ downloadStatus: status === 'all' ? undefined : status });
+    },
+    [updateUrl]
+  );
+
   const clearAllFilters = useCallback(() => {
     const params = new URLSearchParams(searchParams);
     // Clear filter-related params, but keep view
@@ -167,6 +202,8 @@ export function useSubscriptionFilters(
     params.delete("activeOnly");
     params.delete("showMetadataLess");
     params.delete("showInactive");
+    params.delete("performers");
+    params.delete("downloadStatus");
 
     const newUrl = params.toString() ? `?${params.toString()}` : "";
     router.replace(newUrl, { scroll: false });
@@ -183,6 +220,9 @@ export function useSubscriptionFilters(
     setActiveOnly,
     setShowMetadataLess,
     setShowInactive,
+    setPerformers,
+    togglePerformer,
+    setDownloadStatus,
     clearAllFilters,
   };
 }

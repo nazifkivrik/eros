@@ -108,6 +108,9 @@ export function SubscriptionDetailView({ id }: SubscriptionDetailProps) {
     setShowMetadataLess,
     setShowInactive,
     toggleTag,
+    togglePerformer,
+    setPerformers,
+    setDownloadStatus,
     clearAllFilters,
   } = useSubscriptionFilters({
     defaultView: "card",
@@ -144,6 +147,28 @@ export function SubscriptionDetailView({ id }: SubscriptionDetailProps) {
     return Array.from(tagSet).sort();
   }, [allScenes]);
 
+  // Get all unique performers from scenes
+  const availablePerformers = useMemo(() => {
+    const performerMap = new Map<string, { id: string; name: string }>();
+
+    allScenes.forEach((scene: any) => {
+      if (scene?.performers) {
+        scene.performers.forEach((performer: any) => {
+          if (!performerMap.has(performer.id)) {
+            performerMap.set(performer.id, {
+              id: performer.id,
+              name: performer.name
+            });
+          }
+        });
+      }
+    });
+
+    return Array.from(performerMap.values()).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+  }, [allScenes]);
+
   // Filter scenes based on URL state
   const filteredScenes = useMemo(() => {
     let filtered = allScenes;
@@ -159,6 +184,36 @@ export function SubscriptionDetailView({ id }: SubscriptionDetailProps) {
       filtered = filtered.filter((s: any) => {
         const sceneTags = s?.tags?.map((t: any) => t.name) || [];
         return filters.tags!.some((tag) => sceneTags.includes(tag));
+      });
+    }
+
+    // Performer filtering
+    if (filters.performers && filters.performers.length > 0) {
+      filtered = filtered.filter((s: any) => {
+        const scenePerformerIds = s?.performers?.map((p: any) => p.id) || [];
+        return filters.performers!.some((performerId) =>
+          scenePerformerIds.includes(performerId)
+        );
+      });
+    }
+
+    // Download status filtering
+    if (filters.downloadStatus && filters.downloadStatus !== 'all') {
+      filtered = filtered.filter((s: any) => {
+        const status = s?.downloadStatus;
+
+        switch (filters.downloadStatus) {
+          case 'downloaded':
+            return status?.downloaded === true || status?.hasFiles === true;
+          case 'downloading':
+            return status?.inQueue === true;
+          case 'not_downloaded':
+            return status?.downloaded !== true &&
+                   status?.hasFiles !== true &&
+                   status?.inQueue !== true;
+          default:
+            return true;
+        }
       });
     }
 
@@ -926,6 +981,14 @@ export function SubscriptionDetailView({ id }: SubscriptionDetailProps) {
                 onClearTags={clearAllFilters}
                 availableTags={availableTags}
                 showTagFilter={true}
+                availablePerformers={availablePerformers}
+                selectedPerformers={filters.performers}
+                onPerformerToggle={togglePerformer}
+                onClearPerformers={() => setPerformers([])}
+                showPerformerFilter={true}
+                downloadStatus={filters.downloadStatus}
+                onDownloadStatusChange={setDownloadStatus}
+                showDownloadStatusFilter={true}
               />
             </div>
           </CardHeader>

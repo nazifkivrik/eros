@@ -280,68 +280,152 @@ export class QBittorrentAdapter implements ITorrentClient {
 
   /**
    * Add a torrent and wait for it to appear in qBittorrent, then return its hash
+   * Uses incremental differential tracking:
+   * - Takes snapshot BEFORE adding
+   * - Takes snapshot AFTER adding
+   * - Finds the difference (new hash)
+   * - This works correctly for batch operations where torrents are added sequentially
    */
   async addTorrentAndGetHash(
     options: AddTorrentOptions & {
       matchInfoHash?: string;
       matchTitle?: string;
     },
-    timeout: number = 10000
+    timeout: number = 15000
   ): Promise<string | null> {
-    // First add the torrent
+    // STEP 1: Get snapshot BEFORE adding (capture current state)
+    const beforeTorrents = await this.getTorrents();
+    const beforeHashes = new Set(beforeTorrents.map((t) => t.hash.toLowerCase()));
+
+    this.logger.debug({
+      beforeCount: beforeTorrents.length,
+      matchTitle: options.matchTitle,
+      category: options.category,
+    }, "addTorrentAndGetHash: captured BEFORE state");
+
+    // STEP 2: Add the torrent
     const success = await this.addTorrent(options);
     if (!success) {
+      this.logger.error({ matchTitle: options.matchTitle }, "addTorrentAndGetHash: addTorrent failed");
       return null;
     }
 
     const startTime = Date.now();
-    const checkInterval = 500; // Check every 500ms
+    const checkInterval = 300; // Check every 300ms
 
+    // STEP 3: Poll for new torrent by comparing BEFORE vs AFTER snapshots
     while (Date.now() - startTime < timeout) {
       await new Promise((resolve) => setTimeout(resolve, checkInterval));
 
-      // Get torrents from qBittorrent
-      const torrents = await this.getTorrents();
+      // Get snapshot AFTER adding (this becomes the new baseline for next call)
+      const afterTorrents = await this.getTorrents();
+      const afterHashes = new Set(afterTorrents.map((t) => t.hash.toLowerCase()));
+      const elapsed = Date.now() - startTime;
 
-      // Try to match by infoHash (fastest and most reliable)
-      if (options.matchInfoHash) {
-        const normalizedInfoHash = options.matchInfoHash.toLowerCase();
-        const found = torrents.find((t) => t.hash.toLowerCase() === normalizedInfoHash);
-        if (found) {
-          return found.hash;
+      // Find the difference: hashes in AFTER but not in BEFORE
+      const newHashes: string[] = [];
+      for (const torrent of afterTorrents) {
+        const hash = torrent.hash.toLowerCase();
+        // This hash exists in AFTER but not in BEFORE = newly added
+        if (!beforeHashes.has(hash)) {
+          newHashes.push(torrent.hash);
+
+          this.logger.info({
+            newHash: torrent.hash,
+            newTorrentName: torrent.name,
+            category: torrent.category,
+            beforeCount: beforeHashes.size,
+            afterCount: afterHashes.size,
+            elapsed,
+          }, "addTorrentAndGetHash: detected new torrent (differential)");
         }
       }
 
-      // Try to match by title (slower, but works if infoHash isn't available)
-      if (options.matchTitle) {
-        const found = torrents.find((t) => t.name === options.matchTitle);
-        if (found) {
-          return found.hash;
+      // Try to identify which new hash is ours
+      for (const newHash of newHashes) {
+        const newTorrent = afterTorrents.find((t) => t.hash === newHash);
+        if (!newTorrent) continue;
+
+        // Priority 1: Exact infoHash match (most reliable)
+        if (options.matchInfoHash) {
+          const normalizedInfoHash = options.matchInfoHash.toLowerCase();
+          if (newHash.toLowerCase() === normalizedInfoHash) {
+            this.logger.info({
+              matchInfoHash: options.matchInfoHash,
+              foundHash: newTorrent.hash,
+              elapsed,
+            }, "addTorrentAndGetHash: matched by infoHash");
+            return newTorrent.hash;
+          }
+        }
+
+        // Priority 2: Category match (if specified)
+        if (options.category && newTorrent.category === options.category) {
+          this.logger.info({
+            matchTitle: options.matchTitle,
+            foundHash: newTorrent.hash,
+            foundName: newTorrent.name,
+            category: newTorrent.category,
+            elapsed,
+            reason: "new torrent in target category",
+          }, "addTorrentAndGetHash: matched by category");
+          return newTorrent.hash;
+        }
+
+        // Priority 3: Only one new torrent appeared
+        if (newHashes.length === 1) {
+          this.logger.info({
+            matchTitle: options.matchTitle,
+            foundHash: newTorrent.hash,
+            foundName: newTorrent.name,
+            elapsed,
+            reason: "sole new torrent",
+          }, "addTorrentAndGetHash: matched (single new torrent)");
+          return newTorrent.hash;
         }
       }
 
-      // If we have both infoHash and title, also try to match by recently added
-      // with matching title and category
-      if (options.category) {
-        const now = Math.floor(Date.now() / 1000);
-        const recentlyAdded = torrents.filter(
-          (t) =>
-            t.category === options.category &&
-            (now - t.addedOn) < 30 // Added within last 30 seconds
-        );
+      // Priority 4: Multiple new torrents, try title matching
+      if (newHashes.length > 1 && options.matchTitle) {
+        const matchTitleLower = options.matchTitle.toLowerCase();
 
-        if (recentlyAdded.length === 1 && options.matchTitle) {
-          // Only one recent torrent in this category, assume it's ours
-          const found = recentlyAdded.find((t) => t.name === options.matchTitle);
-          if (found) {
-            return found.hash;
+        for (const newHash of newHashes) {
+          const newTorrent = afterTorrents.find((t) => t.hash === newHash);
+          if (newTorrent) {
+            const torrentNameLower = newTorrent.name.toLowerCase();
+
+            if (torrentNameLower.includes(matchTitleLower) || matchTitleLower.includes(torrentNameLower)) {
+              this.logger.info({
+                matchTitle: options.matchTitle,
+                foundHash: newTorrent.hash,
+                foundName: newTorrent.name,
+                elapsed,
+                reason: "title match among new torrents",
+              }, "addTorrentAndGetHash: matched by title");
+              return newTorrent.hash;
+            }
           }
         }
       }
+
+      this.logger.debug({
+        elapsed,
+        beforeCount: beforeHashes.size,
+        afterCount: afterHashes.size,
+        newHashesCount: newHashes.length,
+        matchTitle: options.matchTitle,
+      }, "addTorrentAndGetHash: waiting for new torrent");
     }
 
     // Timeout reached
-    this.logger.warn({ matchTitle: options.matchTitle }, "Torrent hash lookup timed out");
+    this.logger.warn({
+      matchTitle: options.matchTitle,
+      matchInfoHash: options.matchInfoHash,
+      category: options.category,
+      timeout,
+      elapsed: Date.now() - startTime,
+      beforeCount: beforeHashes.size,
+    }, "addTorrentAndGetHash: hash lookup timed out");
     return null;
   }
 

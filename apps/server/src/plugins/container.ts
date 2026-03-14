@@ -51,6 +51,7 @@ export default fp(async (app: FastifyInstance) => {
     scenesPath: settings.general.scenesPath || "/app/media/scenes",
     incompletePath: settings.general.incompletePath || "/app/media/incomplete",
     settingsRepository: container.cradle.settingsRepository,
+    metadataRegistry: container.cradle.metadataRegistry,
   });
 
   container.register({
