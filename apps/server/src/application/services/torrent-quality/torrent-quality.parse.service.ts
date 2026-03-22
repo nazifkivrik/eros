@@ -17,31 +17,34 @@ export class TorrentQualityParseService {
    * Parse quality from torrent title
    */
   parseQuality(title: string): { quality: string; source: string } {
-    const titleLower = title.toLowerCase();
+    // Remove "vertical" keyword as it's just orientation, not quality
+    const titleLower = title.toLowerCase().replace(/\bvertical\b/g, "");
 
-    // Detect quality
+    // Detect quality (more comprehensive patterns)
     let quality = "any";
-    if (/2160p|4k|uhd/.test(titleLower)) {
+    if (/2160p|4k|uhd|\.4k\.|4k\.|x264\-2160|x265\-2160|\b2K\b/i.test(titleLower)) {
       quality = "2160p";
-    } else if (/1080p/.test(titleLower)) {
+    } else if (/1080p|\.1080\.|1080\.|x264\-1080|x265\-1080|\b1080\b|#\s*full\s*hd|full\s*hd|fhd/i.test(titleLower)) {
       quality = "1080p";
-    } else if (/720p/.test(titleLower)) {
+    } else if (/720p|\.720\.|720\.|x264\-720|x265\-720|\b720\b|hd(?:\s|\.)/i.test(titleLower)) {
       quality = "720p";
-    } else if (/480p/.test(titleLower)) {
+    } else if (/480p|\.480\.|480\.|x264\-480|x265\-480|\b480\b|sd(?:\s|\.)/i.test(titleLower)) {
       quality = "480p";
+    } else if (/360p|\.360\.|360\.|x264\-360|x265\-360|\b360\b/i.test(titleLower)) {
+      quality = "360p";
     }
 
-    // Detect source
+    // Detect source (more comprehensive patterns)
     let source = "any";
-    if (/bluray|blu-ray|bdrip|brrip/.test(titleLower)) {
+    if (/bluray|blu-?ray|blu\.ray|bdrip|brrip|bd\-|bd\s/i.test(titleLower)) {
       source = "bluray";
-    } else if (/web-?dl/.test(titleLower)) {
+    } else if (/web-?dl(\s?rip)?|webdl|\.web\./i.test(titleLower)) {
       source = "webdl";
-    } else if (/webrip|web-?rip/.test(titleLower)) {
+    } else if (/webrip|web-?rip|web\.rip/i.test(titleLower)) {
       source = "webrip";
-    } else if (/hdtv/.test(titleLower)) {
+    } else if (/hdtv|\.hdtv\.|tv\-rip|tvrip/i.test(titleLower)) {
       source = "hdtv";
-    } else if (/dvd|dvdrip/.test(titleLower)) {
+    } else if (/dvd|dvdrip|\.dvd\.|dvd\-|dvd\s/i.test(titleLower)) {
       source = "dvd";
     }
 

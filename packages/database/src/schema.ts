@@ -1,5 +1,12 @@
 import { sql, relations } from "drizzle-orm";
-import { sqliteTable, text, integer, real, primaryKey, index } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  real,
+  primaryKey,
+  index,
+} from "drizzle-orm/sqlite-core";
 
 // Helper function for timestamps
 const timestamps = {
@@ -18,13 +25,16 @@ export const performers = sqliteTable("performers", {
     .$type<Array<{ source: string; id: string }>>()
     .notNull()
     .default(sql`'[]'`),
-  slug: text("slug").notNull(),
+  slug: text("slug").notNull().unique(),
   name: text("name").notNull(),
   fullName: text("full_name").notNull(),
   disambiguation: text("disambiguation"),
   bio: text("bio"),
   rating: real("rating").notNull().default(0),
-  aliases: text("aliases", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
+  aliases: text("aliases", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'`),
 
   // Physical attributes
   gender: text("gender"),
@@ -47,12 +57,16 @@ export const performers = sqliteTable("performers", {
   hips: text("hips"),
   tattoos: text("tattoos"),
   piercings: text("piercings"),
-  fakeBoobs: integer("fake_boobs", { mode: "boolean" }).notNull().default(false),
+  fakeBoobs: integer("fake_boobs", { mode: "boolean" })
+    .notNull()
+    .default(false),
 
   // Career
   careerStartYear: integer("career_start_year"),
   careerEndYear: integer("career_end_year"),
-  sameSexOnly: integer("same_sex_only", { mode: "boolean" }).notNull().default(false),
+  sameSexOnly: integer("same_sex_only", { mode: "boolean" })
+    .notNull()
+    .default(false),
 
   // Media
   images: text("images", { mode: "json" })
@@ -63,7 +77,9 @@ export const performers = sqliteTable("performers", {
   poster: text("poster"),
 
   // External links
-  links: text("links", { mode: "json" }).$type<Array<{ url: string; platform: string }>>(),
+  links: text("links", { mode: "json" }).$type<
+    Array<{ url: string; platform: string }>
+  >(),
 
   ...timestamps,
 });
@@ -77,7 +93,7 @@ export const studios = sqliteTable("studios", {
     .default(sql`'[]'`),
   name: text("name").notNull(),
   shortName: text("short_name"),
-  slug: text("slug"),
+  slug: text("slug").unique(),
   url: text("url"),
   description: text("description"),
   rating: real("rating").notNull().default(0),
@@ -96,7 +112,9 @@ export const studios = sqliteTable("studios", {
   poster: text("poster"),
 
   // External links
-  links: text("links", { mode: "json" }).$type<Array<{ url: string; platform: string }>>(),
+  links: text("links", { mode: "json" }).$type<
+    Array<{ url: string; platform: string }>
+  >(),
 
   ...timestamps,
 });
@@ -108,13 +126,16 @@ export const scenes = sqliteTable("scenes", {
     .$type<Array<{ source: string; id: string }>>()
     .notNull()
     .default(sql`'[]'`),
-  slug: text("slug").notNull(),
+  slug: text("slug").notNull().unique(),
   title: text("title").notNull(),
   description: text("description"),
   date: text("date"),
 
   // Content type
-  contentType: text("content_type").$type<"scene" | "jav" | "movie">().notNull().default("scene"),
+  contentType: text("content_type")
+    .$type<"scene" | "jav" | "movie">()
+    .notNull()
+    .default("scene"),
 
   // Media info
   duration: integer("duration"),
@@ -135,28 +156,37 @@ export const scenes = sqliteTable("scenes", {
   backImage: text("back_image"),
   thumbnail: text("thumbnail"),
   trailer: text("trailer"),
-  background: text("background", { mode: "json" })
-    .$type<{
-      full: string | null;
-      large: string | null;
-      medium: string | null;
-      small: string | null;
-    }>(),
+  background: text("background", { mode: "json" }).$type<{
+    full: string | null;
+    large: string | null;
+    medium: string | null;
+    small: string | null;
+  }>(),
 
   // Metadata
   rating: real("rating").notNull().default(0),
 
   // Relations
-  siteId: text("site_id").references(() => studios.id, { onDelete: "set null" }),
+  siteId: text("site_id").references(() => studios.id, {
+    onDelete: "set null",
+  }),
 
   // External links
-  links: text("links", { mode: "json" }).$type<Array<{ url: string; platform: string }>>(),
+  links: text("links", { mode: "json" }).$type<
+    Array<{ url: string; platform: string }>
+  >(),
 
   // System
-  hasMetadata: integer("has_metadata", { mode: "boolean" }).notNull().default(true),
-  inferredFromIndexers: integer("inferred_from_indexers", { mode: "boolean" }).notNull().default(false),
-  isSubscribed: integer("is_subscribed", { mode: "boolean" }).notNull().default(true),  // Soft delete for scenes - false means unsubscribed but kept for re-subscription
-  discoveryGroupId: text("discovery_group_id"),  // Links to torrent group if discovered from indexers
+  hasMetadata: integer("has_metadata", { mode: "boolean" })
+    .notNull()
+    .default(true),
+  inferredFromIndexers: integer("inferred_from_indexers", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  isSubscribed: integer("is_subscribed", { mode: "boolean" })
+    .notNull()
+    .default(true), // Soft delete for scenes - false means unsubscribed but kept for re-subscription
+  discoveryGroupId: text("discovery_group_id"), // Links to torrent group if discovered from indexers
 
   ...timestamps,
 });
@@ -169,7 +199,7 @@ export const directors = sqliteTable("directors", {
     .notNull()
     .default(sql`'[]'`),
   name: text("name").notNull(),
-  slug: text("slug").notNull(),
+  slug: text("slug").notNull().unique(),
   ...timestamps,
 });
 
@@ -186,18 +216,22 @@ export const sceneMarkers = sqliteTable("scene_markers", {
 });
 
 // Scene Hashes Table
-export const sceneHashes = sqliteTable("scene_hashes", {
-  id: text("id").primaryKey(),
-  sceneId: text("scene_id")
-    .notNull()
-    .references(() => scenes.id, { onDelete: "cascade" }),
-  hash: text("hash").notNull(),
-  type: text("type").$type<"oshash" | "md5" | "phash">().notNull(),
-  duration: integer("duration"),
-}, (table) => ({
-  hashIdx: index("scene_hashes_hash_idx").on(table.hash),
-  typeHashIdx: index("scene_hashes_type_hash_idx").on(table.type, table.hash),
-}));
+export const sceneHashes = sqliteTable(
+  "scene_hashes",
+  {
+    id: text("id").primaryKey(),
+    sceneId: text("scene_id")
+      .notNull()
+      .references(() => scenes.id, { onDelete: "cascade" }),
+    hash: text("hash").notNull(),
+    type: text("type").$type<"oshash" | "md5" | "phash">().notNull(),
+    duration: integer("duration"),
+  },
+  (table) => ({
+    hashIdx: index("scene_hashes_hash_idx").on(table.hash),
+    typeHashIdx: index("scene_hashes_type_hash_idx").on(table.type, table.hash),
+  })
+);
 
 // Performers-Scenes Junction Table
 export const performersScenes = sqliteTable(
@@ -249,24 +283,41 @@ export const qualityProfiles = sqliteTable("quality_profiles", {
 });
 
 // Subscriptions Table
-export const subscriptions = sqliteTable("subscriptions", {
-  id: text("id").primaryKey(),
-  entityType: text("entity_type").$type<"performer" | "studio" | "scene">().notNull(),
-  entityId: text("entity_id").notNull(),
-  qualityProfileId: text("quality_profile_id")
-    .notNull()
-    .references(() => qualityProfiles.id),
-  autoDownload: integer("auto_download", { mode: "boolean" }).notNull().default(true),
-  includeMetadataMissing: integer("include_metadata_missing", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  includeAliases: integer("include_aliases", { mode: "boolean" }).notNull().default(false),
-  isSubscribed: integer("is_subscribed", { mode: "boolean" }).notNull().default(true),
-  searchCutoffDate: text("search_cutoff_date"),
-  ...timestamps,
-}, (table) => ({
-  entityIdx: index("subscription_entity_idx").on(table.entityType, table.entityId),
-}));
+export const subscriptions = sqliteTable(
+  "subscriptions",
+  {
+    id: text("id").primaryKey(),
+    entityType: text("entity_type")
+      .$type<"performer" | "studio" | "scene">()
+      .notNull(),
+    entityId: text("entity_id").notNull(),
+    qualityProfileId: text("quality_profile_id")
+      .notNull()
+      .references(() => qualityProfiles.id),
+    autoDownload: integer("auto_download", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    includeMetadataMissing: integer("include_metadata_missing", {
+      mode: "boolean",
+    })
+      .notNull()
+      .default(false),
+    includeAliases: integer("include_aliases", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    isSubscribed: integer("is_subscribed", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    searchCutoffDate: text("search_cutoff_date"),
+    ...timestamps,
+  },
+  (table) => ({
+    entityIdx: index("subscription_entity_idx").on(
+      table.entityType,
+      table.entityId
+    ),
+  })
+);
 
 // Meta Sources Table
 export const metaSources = sqliteTable("meta_sources", {
@@ -283,45 +334,48 @@ export const metaSources = sqliteTable("meta_sources", {
 });
 
 // Download Queue Table
-export const downloadQueue = sqliteTable("download_queue", {
-  id: text("id").primaryKey(),
-  sceneId: text("scene_id")
-    .notNull()
-    .references(() => scenes.id, { onDelete: "cascade" }),
-  torrentHash: text("torrent_hash"),
-  qbitHash: text("qbit_hash"),
-  title: text("title").notNull(),
-  size: integer("size").notNull(),
-  seeders: integer("seeders").notNull(),
-  quality: text("quality").notNull(),
-  status: text("status").notNull().default("queued"),
-  addedAt: text("added_at")
-    .notNull()
-    .default(sql`(datetime('now'))`),
-  completedAt: text("completed_at"),
-  // Retry tracking for torrents that failed to add to qBittorrent
-  addToClientAttempts: integer("add_to_client_attempts")
-    .notNull()
-    .default(0),
-  addToClientLastAttempt: text("add_to_client_last_attempt"),
-  addToClientError: text("add_to_client_error"),
-  // Auto-management tracking
-  autoManagementPaused: integer("auto_management_paused", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  autoPauseReason: text("auto_pause_reason"), // 'stalled' | 'metadata' | 'slow' | 'no_activity'
-  autoPauseCount: integer("auto_pause_count")
-    .notNull()
-    .default(0),
-  lastAutoPauseAt: text("last_auto_pause_at"),
-  lastActivityAt: text("last_activity_at"),
-}, (table) => ({
-  statusAddedIdx: index("download_queue_status_added_idx").on(table.status, table.addedAt),
-  autoMgmtIdx: index("download_queue_auto_mgmt_idx").on(
-    table.autoManagementPaused,
-    table.status
-  ),
-}));
+export const downloadQueue = sqliteTable(
+  "download_queue",
+  {
+    id: text("id").primaryKey(),
+    sceneId: text("scene_id")
+      .notNull()
+      .references(() => scenes.id, { onDelete: "cascade" }),
+    torrentHash: text("torrent_hash"),
+    qbitHash: text("qbit_hash"),
+    title: text("title").notNull(),
+    size: integer("size").notNull(),
+    seeders: integer("seeders").notNull(),
+    quality: text("quality").notNull(),
+    status: text("status").notNull().default("queued"),
+    addedAt: text("added_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    completedAt: text("completed_at"),
+    // Retry tracking for torrents that failed to add to qBittorrent
+    addToClientAttempts: integer("add_to_client_attempts").notNull().default(0),
+    addToClientLastAttempt: text("add_to_client_last_attempt"),
+    addToClientError: text("add_to_client_error"),
+    // Auto-management tracking
+    autoManagementPaused: integer("auto_management_paused", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    autoPauseReason: text("auto_pause_reason"), // 'stalled' | 'metadata' | 'slow' | 'no_activity'
+    autoPauseCount: integer("auto_pause_count").notNull().default(0),
+    lastAutoPauseAt: text("last_auto_pause_at"),
+    lastActivityAt: text("last_activity_at"),
+  },
+  (table) => ({
+    statusAddedIdx: index("download_queue_status_added_idx").on(
+      table.status,
+      table.addedAt
+    ),
+    autoMgmtIdx: index("download_queue_auto_mgmt_idx").on(
+      table.autoManagementPaused,
+      table.status
+    ),
+  })
+);
 
 // Scene Files Table
 export const sceneFiles = sqliteTable("scene_files", {
@@ -341,70 +395,110 @@ export const sceneFiles = sqliteTable("scene_files", {
 });
 
 // File Hashes Table
-export const fileHashes = sqliteTable("file_hashes", {
-  id: text("id").primaryKey(),
-  sceneFileId: text("scene_file_id")
-    .notNull()
-    .references(() => sceneFiles.id, { onDelete: "cascade" }),
-  oshash: text("oshash"),
-  phash: text("phash"),
-  md5: text("md5"),
-  calculatedAt: text("calculated_at").notNull().default(sql`(datetime('now'))`),
-  ...timestamps,
-}, (table) => ({
-  oshashIdx: index("file_hashes_oshash_idx").on(table.oshash),
-  phashIdx: index("file_hashes_phash_idx").on(table.phash),
-  sceneFileIdx: index("file_hashes_scene_file_idx").on(table.sceneFileId),
-}));
+export const fileHashes = sqliteTable(
+  "file_hashes",
+  {
+    id: text("id").primaryKey(),
+    sceneFileId: text("scene_file_id")
+      .notNull()
+      .references(() => sceneFiles.id, { onDelete: "cascade" }),
+    oshash: text("oshash"),
+    phash: text("phash"),
+    md5: text("md5"),
+    calculatedAt: text("calculated_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    ...timestamps,
+  },
+  (table) => ({
+    oshashIdx: index("file_hashes_oshash_idx").on(table.oshash),
+    phashIdx: index("file_hashes_phash_idx").on(table.phash),
+    sceneFileIdx: index("file_hashes_scene_file_idx").on(table.sceneFileId),
+  })
+);
 
 // AI Match Scores Table - tracks AI matching decisions for debugging/audit
-export const aiMatchScores = sqliteTable("ai_match_scores", {
-  id: text("id").primaryKey(),
-  sceneId: text("scene_id").references(() => scenes.id, { onDelete: "cascade" }),
-  torrentTitle: text("torrent_title").notNull(),
-  score: real("score").notNull(), // 0.0 - 1.0
-  method: text("method").$type<"cross-encoder" | "bi-encoder" | "levenshtein">().notNull(),
-  model: text("model"), // e.g., "ms-marco-MiniLM-L-6-v2"
-  threshold: real("threshold").notNull(),
-  matched: integer("matched", { mode: "boolean" }).notNull(),
-  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
-}, (table) => ({
-  sceneIdx: index("ai_match_scores_scene_idx").on(table.sceneId),
-  createdAtIdx: index("ai_match_scores_created_at_idx").on(table.createdAt),
-}));
+export const aiMatchScores = sqliteTable(
+  "ai_match_scores",
+  {
+    id: text("id").primaryKey(),
+    sceneId: text("scene_id").references(() => scenes.id, {
+      onDelete: "cascade",
+    }),
+    torrentTitle: text("torrent_title").notNull(),
+    score: real("score").notNull(), // 0.0 - 1.0
+    method: text("method")
+      .$type<"cross-encoder" | "bi-encoder" | "levenshtein">()
+      .notNull(),
+    model: text("model"), // e.g., "ms-marco-MiniLM-L-6-v2"
+    threshold: real("threshold").notNull(),
+    matched: integer("matched", { mode: "boolean" }).notNull(),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    sceneIdx: index("ai_match_scores_scene_idx").on(table.sceneId),
+    createdAtIdx: index("ai_match_scores_created_at_idx").on(table.createdAt),
+  })
+);
 
 // Torrent Groups Table - tracks grouped torrents for discovery logic
-export const torrentGroups = sqliteTable("torrent_groups", {
-  id: text("id").primaryKey(),
-  groupTitle: text("group_title").notNull(), // Cleaned/normalized title
-  rawTitles: text("raw_titles", { mode: "json" }).$type<string[]>().notNull(), // Original torrent titles
-  sceneId: text("scene_id").references(() => scenes.id, { onDelete: "set null" }),
-  torrentCount: integer("torrent_count").notNull(),
-  indexerCount: integer("indexer_count").notNull(), // Unique indexers
-  status: text("status").$type<"matched" | "unknown" | "ignored">().notNull(),
-  aiScore: real("ai_score"), // Best match score if matched
-  searchPhase: text("search_phase").$type<"performer" | "studio" | "targeted">(), // Which phase found it
-  ...timestamps,
-}, (table) => ({
-  sceneIdx: index("torrent_groups_scene_idx").on(table.sceneId),
-  statusIdx: index("torrent_groups_status_idx").on(table.status),
-}));
+export const torrentGroups = sqliteTable(
+  "torrent_groups",
+  {
+    id: text("id").primaryKey(),
+    groupTitle: text("group_title").notNull(), // Cleaned/normalized title
+    rawTitles: text("raw_titles", { mode: "json" }).$type<string[]>().notNull(), // Original torrent titles
+    sceneId: text("scene_id").references(() => scenes.id, {
+      onDelete: "set null",
+    }),
+    torrentCount: integer("torrent_count").notNull(),
+    indexerCount: integer("indexer_count").notNull(), // Unique indexers
+    status: text("status").$type<"matched" | "unknown" | "ignored">().notNull(),
+    aiScore: real("ai_score"), // Best match score if matched
+    searchPhase: text("search_phase").$type<
+      "performer" | "studio" | "targeted"
+    >(), // Which phase found it
+    ...timestamps,
+  },
+  (table) => ({
+    sceneIdx: index("torrent_groups_scene_idx").on(table.sceneId),
+    statusIdx: index("torrent_groups_status_idx").on(table.status),
+  })
+);
 
 // Entity Meta Sources Table
-export const entityMetaSources = sqliteTable("entity_meta_sources", {
-  id: text("id").primaryKey(),
-  entityType: text("entity_type").$type<"performer" | "studio" | "scene">().notNull(),
-  entityId: text("entity_id").notNull(),
-  sourceType: text("source_type").$type<"tpdb" | "manual">().notNull(),
-  sourceId: text("source_id").notNull(),
-  isPrimary: integer("is_primary", { mode: "boolean" }).notNull().default(false),
-  lastSyncedAt: text("last_synced_at").notNull(),
-  metadata: text("metadata", { mode: "json" }).$type<Record<string, unknown>>(),
-  ...timestamps,
-}, (table) => ({
-  entityIdx: index("entity_meta_sources_entity_idx").on(table.entityType, table.entityId),
-  sourceIdx: index("entity_meta_sources_source_idx").on(table.sourceType, table.sourceId),
-}));
+export const entityMetaSources = sqliteTable(
+  "entity_meta_sources",
+  {
+    id: text("id").primaryKey(),
+    entityType: text("entity_type")
+      .$type<"performer" | "studio" | "scene">()
+      .notNull(),
+    entityId: text("entity_id").notNull(),
+    sourceType: text("source_type").$type<"tpdb" | "manual">().notNull(),
+    sourceId: text("source_id").notNull(),
+    isPrimary: integer("is_primary", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    lastSyncedAt: text("last_synced_at").notNull(),
+    metadata: text("metadata", { mode: "json" }).$type<
+      Record<string, unknown>
+    >(),
+    ...timestamps,
+  },
+  (table) => ({
+    entityIdx: index("entity_meta_sources_entity_idx").on(
+      table.entityType,
+      table.entityId
+    ),
+    sourceIdx: index("entity_meta_sources_source_idx").on(
+      table.sourceType,
+      table.sourceId
+    ),
+  })
+);
 
 // Tags Table
 export const tags = sqliteTable("tags", {
@@ -414,7 +508,7 @@ export const tags = sqliteTable("tags", {
     .notNull()
     .default(sql`'[]'`),
   name: text("name").notNull().unique(),
-  slug: text("slug").notNull(),
+  slug: text("slug").notNull().unique(),
 });
 
 // Scenes-Tags Junction Table
@@ -475,36 +569,64 @@ export const appSettings = sqliteTable("app_settings", {
 });
 
 // Logs Table
-export const logs = sqliteTable("logs", {
-  id: text("id").primaryKey(),
-  level: text("level").$type<"error" | "warning" | "info" | "debug">().notNull(),
-  eventType: text("event_type").$type<"torrent" | "subscription" | "download" | "metadata" | "system" | "torrent-search">().notNull(),
-  message: text("message").notNull(),
-  details: text("details", { mode: "json" }).$type<Record<string, unknown>>(),
-  sceneId: text("scene_id").references(() => scenes.id, { onDelete: "set null" }),
-  performerId: text("performer_id").references(() => performers.id, { onDelete: "set null" }),
-  studioId: text("studio_id").references(() => studios.id, { onDelete: "set null" }),
-  createdAt: text("created_at")
-    .notNull()
-    .default(sql`(datetime('now'))`),
-}, (table) => ({
-  createdAtIdx: index("logs_created_at_idx").on(table.createdAt),
-  levelCreatedAtIdx: index("logs_level_created_at_idx").on(table.level, table.createdAt),
-}));
+export const logs = sqliteTable(
+  "logs",
+  {
+    id: text("id").primaryKey(),
+    level: text("level")
+      .$type<"error" | "warning" | "info" | "debug">()
+      .notNull(),
+    eventType: text("event_type")
+      .$type<
+        | "torrent"
+        | "subscription"
+        | "download"
+        | "metadata"
+        | "system"
+        | "torrent-search"
+      >()
+      .notNull(),
+    message: text("message").notNull(),
+    details: text("details", { mode: "json" }).$type<Record<string, unknown>>(),
+    sceneId: text("scene_id").references(() => scenes.id, {
+      onDelete: "set null",
+    }),
+    performerId: text("performer_id").references(() => performers.id, {
+      onDelete: "set null",
+    }),
+    studioId: text("studio_id").references(() => studios.id, {
+      onDelete: "set null",
+    }),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    createdAtIdx: index("logs_created_at_idx").on(table.createdAt),
+    levelCreatedAtIdx: index("logs_level_created_at_idx").on(
+      table.level,
+      table.createdAt
+    ),
+  })
+);
 
 // Scene Exclusions Table
-export const sceneExclusions = sqliteTable("scene_exclusions", {
-  id: text("id").primaryKey(),
-  sceneId: text("scene_id")
-    .notNull()
-    .references(() => scenes.id, { onDelete: "cascade" }),
-  reason: text("reason").notNull(),
-  excludedAt: text("excluded_at")
-    .notNull()
-    .default(sql`(datetime('now'))`),
-}, (table) => ({
-  sceneIdIdx: index("scene_exclusions_scene_id_idx").on(table.sceneId),
-}));
+export const sceneExclusions = sqliteTable(
+  "scene_exclusions",
+  {
+    id: text("id").primaryKey(),
+    sceneId: text("scene_id")
+      .notNull()
+      .references(() => scenes.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    excludedAt: text("excluded_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    sceneIdIdx: index("scene_exclusions_scene_id_idx").on(table.sceneId),
+  })
+);
 
 // ============================================
 // Relations Definitions
@@ -556,31 +678,40 @@ export const sceneHashesRelations = relations(sceneHashes, ({ one }) => ({
   }),
 }));
 
-export const performersScenesRelations = relations(performersScenes, ({ one }) => ({
-  performer: one(performers, {
-    fields: [performersScenes.performerId],
-    references: [performers.id],
-  }),
-  scene: one(scenes, {
-    fields: [performersScenes.sceneId],
-    references: [scenes.id],
-  }),
-}));
+export const performersScenesRelations = relations(
+  performersScenes,
+  ({ one }) => ({
+    performer: one(performers, {
+      fields: [performersScenes.performerId],
+      references: [performers.id],
+    }),
+    scene: one(scenes, {
+      fields: [performersScenes.sceneId],
+      references: [scenes.id],
+    }),
+  })
+);
 
-export const directorsScenesRelations = relations(directorsScenes, ({ one }) => ({
-  director: one(directors, {
-    fields: [directorsScenes.directorId],
-    references: [directors.id],
-  }),
-  scene: one(scenes, {
-    fields: [directorsScenes.sceneId],
-    references: [scenes.id],
-  }),
-}));
+export const directorsScenesRelations = relations(
+  directorsScenes,
+  ({ one }) => ({
+    director: one(directors, {
+      fields: [directorsScenes.directorId],
+      references: [directors.id],
+    }),
+    scene: one(scenes, {
+      fields: [directorsScenes.sceneId],
+      references: [scenes.id],
+    }),
+  })
+);
 
-export const qualityProfilesRelations = relations(qualityProfiles, ({ many }) => ({
-  subscriptions: many(subscriptions),
-}));
+export const qualityProfilesRelations = relations(
+  qualityProfiles,
+  ({ many }) => ({
+    subscriptions: many(subscriptions),
+  })
+);
 
 export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
   qualityProfile: one(qualityProfiles, {
@@ -626,12 +757,15 @@ export const scenesTagsRelations = relations(scenesTags, ({ one }) => ({
   }),
 }));
 
-export const sceneExclusionsRelations = relations(sceneExclusions, ({ one }) => ({
-  scene: one(scenes, {
-    fields: [sceneExclusions.sceneId],
-    references: [scenes.id],
-  }),
-}));
+export const sceneExclusionsRelations = relations(
+  sceneExclusions,
+  ({ one }) => ({
+    scene: one(scenes, {
+      fields: [sceneExclusions.sceneId],
+      references: [scenes.id],
+    }),
+  })
+);
 
 export const aiMatchScoresRelations = relations(aiMatchScores, ({ one }) => ({
   scene: one(scenes, {

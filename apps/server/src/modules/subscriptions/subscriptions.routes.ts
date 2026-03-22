@@ -1,7 +1,5 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { Database } from "@repo/database";
 import {
   ErrorResponseSchema,
   SuccessResponseSchema,
@@ -20,6 +18,10 @@ import {
   SubscriptionsByTypeResponseSchema,
   CheckSubscriptionResponseSchema,
 } from "./subscriptions.schema.js";
+import {
+  NotFoundError,
+  BusinessLogicError,
+} from "@/errors/application-errors.js";
 
 /**
  * Subscriptions Routes
@@ -27,10 +29,9 @@ import {
  * Clean Architecture: Route → Controller → Service → Repository
  */
 const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
-  const appWithDb = app as FastifyInstance & { db: Database; tpdb?: any };
-
   // Get controller from DI container
-  const { subscriptionsController } = app.container;
+  const { subscriptionsController, scenesFilesService, settingsRepository } =
+    app.container;
 
   // Get all subscriptions
   app.get(
@@ -39,7 +40,8 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["subscriptions"],
         summary: "List subscriptions",
-        description: "Get all subscriptions with detailed entity information (performers, studios, scenes)",
+        description:
+          "Get all subscriptions with detailed entity information (performers, studios, scenes)",
         querystring: SubscriptionListQuerySchema,
         response: {
           200: SubscriptionListResponseSchema,
@@ -58,7 +60,8 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["subscriptions"],
         summary: "Get subscriptions by type",
-        description: "Filter subscriptions by entity type (performer, studio, or scene)",
+        description:
+          "Filter subscriptions by entity type (performer, studio, or scene)",
         params: EntityTypeParamsSchema,
         response: {
           200: SubscriptionsByTypeResponseSchema,
@@ -77,7 +80,8 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["subscriptions"],
         summary: "Get subscription details",
-        description: "Retrieve detailed information about a specific subscription including entity details and quality profile",
+        description:
+          "Retrieve detailed information about a specific subscription including entity details and quality profile",
         params: SubscriptionParamsSchema,
         response: {
           200: SubscriptionDetailResponseSchema,
@@ -87,11 +91,13 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       try {
-        const subscription = await subscriptionsController.getById(request.params);
+        const subscription = await subscriptionsController.getById(
+          request.params
+        );
         return subscription as z.infer<typeof SubscriptionDetailResponseSchema>;
       } catch (error) {
-        if (error instanceof Error && error.message === "Subscription not found") {
-          return reply.code(404).send({ error: "Subscription not found" });
+        if (error instanceof NotFoundError) {
+          return reply.code(404).send({ error: error.message });
         }
         throw error;
       }
@@ -105,11 +111,11 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["subscriptions"],
         summary: "Create subscription",
-        description: "Subscribe to a performer, studio, or scene to automatically monitor and download new content",
+        description:
+          "Subscribe to a performer, studio, or scene to automatically monitor and download new content",
         body: CreateSubscriptionSchema,
         response: {
           201: SubscriptionSchema,
-          400: ErrorResponseSchema,
         },
       },
     },
@@ -118,9 +124,7 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
         const subscription = await subscriptionsController.create(request.body);
         return reply.code(201).send(subscription);
       } catch (error) {
-        return reply.code(400).send({
-          error: error instanceof Error ? error.message : "Unknown error",
-        });
+        throw error; // Custom errors will be handled by global error handler
       }
     }
   );
@@ -132,26 +136,29 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["subscriptions"],
         summary: "Update subscription",
-        description: "Update subscription settings such as quality profile, monitoring status, or active status",
+        description:
+          "Update subscription settings such as quality profile, monitoring status, or active status",
         params: SubscriptionParamsSchema,
         body: UpdateSubscriptionSchema,
         response: {
           200: SubscriptionSchema,
+          400: ErrorResponseSchema,
           404: ErrorResponseSchema,
         },
       },
     },
     async (request, reply) => {
       try {
-        const subscription = await subscriptionsController.update(request.params, request.body);
+        const subscription = await subscriptionsController.update(
+          request.params,
+          request.body
+        );
         return subscription;
       } catch (error) {
-        if (error instanceof Error && error.message === "Subscription not found") {
-          return reply.code(404).send({ error: "Subscription not found" });
+        if (error instanceof NotFoundError) {
+          return reply.code(404).send({ error: error.message });
         }
-        return reply.code(404).send({
-          error: error instanceof Error ? error.message : "Unknown error",
-        });
+        throw error; // Custom errors will be handled by global error handler
       }
     }
   );
@@ -163,7 +170,8 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["subscriptions"],
         summary: "Delete subscription",
-        description: "Delete a subscription and optionally remove associated scenes and their files from disk",
+        description:
+          "Delete a subscription and optionally remove associated scenes and their files from disk",
         params: SubscriptionParamsSchema,
         querystring: DeleteSubscriptionQuerySchema,
         response: {
@@ -172,7 +180,10 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request) => {
-      return await subscriptionsController.delete(request.params, request.query);
+      return await subscriptionsController.delete(
+        request.params,
+        request.query
+      );
     }
   );
 
@@ -183,7 +194,8 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["subscriptions"],
         summary: "Toggle status",
-        description: "Activate or deactivate a subscription (inactive subscriptions are not monitored)",
+        description:
+          "Activate or deactivate a subscription (inactive subscriptions are not monitored)",
         params: SubscriptionParamsSchema,
         response: {
           200: SubscriptionSchema,
@@ -202,7 +214,8 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["subscriptions"],
         summary: "Check subscription status",
-        description: "Check if a specific entity (performer, studio, or scene) has an active subscription",
+        description:
+          "Check if a specific entity (performer, studio, or scene) has an active subscription",
         params: CheckSubscriptionParamsSchema,
         response: {
           200: CheckSubscriptionResponseSchema,
@@ -221,7 +234,8 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["subscriptions"],
         summary: "Get subscription scenes",
-        description: "Get all scenes for a performer or studio subscription with download status and file information (not available for scene subscriptions)",
+        description:
+          "Get all scenes for a performer or studio subscription with download status and file information (not available for scene subscriptions)",
         params: SubscriptionParamsSchema,
         response: {
           200: z.object({
@@ -233,12 +247,14 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       try {
-        return await subscriptionsController.getSubscriptionScenes(request.params);
+        return await subscriptionsController.getSubscriptionScenes(
+          request.params
+        );
       } catch (error) {
-        if (error instanceof Error && error.message === "Subscription not found") {
-          return reply.code(404).send({ error: "Subscription not found" });
+        if (error instanceof NotFoundError) {
+          return reply.code(404).send({ error: error.message });
         }
-        if (error instanceof Error && error.message.includes("only for performer/studio")) {
+        if (error instanceof BusinessLogicError) {
           return reply.code(404).send({ error: error.message });
         }
         throw error;
@@ -253,7 +269,8 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["subscriptions"],
         summary: "Get subscription files",
-        description: "Get scene files, download queue status, and folder contents (NFO, posters, videos) for a scene subscription (only available for scene subscriptions)",
+        description:
+          "Get scene files, download queue status, and folder contents (NFO, posters, videos) for a scene subscription (only available for scene subscriptions)",
         params: SubscriptionParamsSchema,
         response: {
           200: z.object({
@@ -272,60 +289,58 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       try {
-        const result = await subscriptionsController.getSubscriptionFiles(request.params);
+        const result = await subscriptionsController.getSubscriptionFiles(
+          request.params
+        );
 
-        // Filesystem scanning logic (kept in route for now)
-        const { SettingsRepository } = await import("../../infrastructure/repositories/settings.repository.js");
-        const settingsRepository = new SettingsRepository({ db: appWithDb.db });
-        const settingRecord = await settingsRepository.findByKey("app-settings");
+        // Get settings for scenes path
+        const settingRecord =
+          await settingsRepository.findByKey("app-settings");
 
-        // Use default settings if none found
+        // Import DEFAULT_SETTINGS from shared-types
         const { DEFAULT_SETTINGS } = await import("@repo/shared-types");
         const settings = settingRecord
           ? (settingRecord.value as any)
           : DEFAULT_SETTINGS;
-        const { join } = await import("path");
 
-        const subscription = await appWithDb.container.subscriptionsService.getById(request.params.id);
-        const scene = await appWithDb.db.query.scenes.findFirst({
-          where: (scenes: any, { eq }: any) => eq(scenes.id, subscription.entityId),
-        });
+        // Get subscription and scene
+        const subscription = await app.container.subscriptionsService.getById(
+          request.params.id
+        );
 
-        const sceneFolder = scene?.title
-          ? join(settings.general.scenesPath, scene.title.replace(/[/\\?%*:|"<>]/g, '_'))
-          : null;
+        if (!subscription) {
+          throw new NotFoundError("Subscription", request.params.id);
+        }
 
-        let folderContents: { nfoFiles: string[]; posterFiles: string[]; videoFiles: string[] } = {
+        // Use scenesRepository instead of direct DB access
+        const scene = await app.container.scenesRepository.findById(
+          subscription.entityId
+        );
+
+        if (!scene) {
+          throw new NotFoundError("Scene", subscription.entityId);
+        }
+
+        // Generate scene folder path
+        const sceneFolder = scenesFilesService.generateSceneFolderPath(
+          settings.general.scenesPath,
+          scene.title
+        );
+
+        // Scan scene folder using service
+        let folderContents: {
+          nfoFiles: string[];
+          posterFiles: string[];
+          videoFiles: string[];
+        } = {
           nfoFiles: [],
           posterFiles: [],
-          videoFiles: []
+          videoFiles: [],
         };
 
         if (sceneFolder) {
-          try {
-            const { readdir, stat } = await import("fs/promises");
-            const { extname } = await import("path");
-
-            const dirExists = await stat(sceneFolder).then(() => true).catch(() => false);
-
-            if (dirExists) {
-              const filesInFolder = await readdir(sceneFolder);
-
-              for (const file of filesInFolder) {
-                const ext = extname(file).toLowerCase();
-
-                if (ext === '.nfo') {
-                  folderContents.nfoFiles.push(file);
-                } else if (['.jpg', '.jpeg', '.png', '.webp'].includes(ext) && file.toLowerCase().includes('poster')) {
-                  folderContents.posterFiles.push(file);
-                } else if (['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.m4v', '.webm'].includes(ext)) {
-                  folderContents.videoFiles.push(file);
-                }
-              }
-            }
-          } catch (error) {
-            app.log.warn({ error, sceneFolder }, "Failed to scan scene folder");
-          }
+          folderContents =
+            await scenesFilesService.scanSceneFolder(sceneFolder);
         }
 
         return {
@@ -334,10 +349,10 @@ const subscriptionsRoutes: FastifyPluginAsyncZod = async (app) => {
           folderContents,
         };
       } catch (error) {
-        if (error instanceof Error && error.message === "Subscription not found") {
-          return reply.code(404).send({ error: "Subscription not found" });
+        if (error instanceof NotFoundError) {
+          return reply.code(404).send({ error: error.message });
         }
-        if (error instanceof Error && error.message.includes("only for scene")) {
+        if (error instanceof BusinessLogicError) {
           return reply.code(404).send({ error: error.message });
         }
         throw error;

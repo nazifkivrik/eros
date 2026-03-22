@@ -15,6 +15,7 @@ import {
   SubscriptionDetailResponseSchema,
   CheckSubscriptionResponseSchema,
 } from "@/modules/subscriptions/subscriptions.schema.js";
+import { NotFoundError, ValidationError } from "@/errors/application-errors.js";
 
 /**
  * Subscriptions Controller
@@ -43,13 +44,17 @@ export class SubscriptionsController {
   /**
    * List all subscriptions with details
    */
-  async list(query?: unknown): Promise<z.infer<typeof SubscriptionListResponseSchema>> {
+  async list(
+    query?: unknown
+  ): Promise<z.infer<typeof SubscriptionListResponseSchema>> {
     // Parse and validate query parameters using Zod schema
-    const parsedQuery = query ? SubscriptionListQuerySchema.parse(query) : {
-      search: undefined,
-      includeMetaless: undefined,
-      showInactive: undefined,
-    };
+    const parsedQuery = query
+      ? SubscriptionListQuerySchema.parse(query)
+      : {
+          search: undefined,
+          includeMetaless: undefined,
+          showInactive: undefined,
+        };
 
     // Only include filters that have actual values
     const filters = {
@@ -58,26 +63,22 @@ export class SubscriptionsController {
       showInactive: parsedQuery.showInactive || undefined,
     };
 
-    const subscriptions = await this.subscriptionsService.getAllWithDetails(filters);
+    const subscriptions =
+      await this.subscriptionsService.getAllWithDetails(filters);
     return { data: subscriptions };
   }
 
   /**
    * Get subscriptions by type
    */
-  async getByType(params: unknown): Promise<z.infer<typeof SubscriptionsByTypeResponseSchema>> {
+  async getByType(
+    params: unknown
+  ): Promise<z.infer<typeof SubscriptionsByTypeResponseSchema>> {
     const validated = EntityTypeParamsSchema.parse(params);
-    const subscriptions = await this.subscriptionsService.getByType(validated.entityType);
+    const subscriptions = await this.subscriptionsService.getByType(
+      validated.entityType
+    );
     return { data: subscriptions };
-  }
-
-  /**
-   * Get subscription by ID with details
-   */
-  async getById(params: unknown): Promise<z.infer<typeof SubscriptionDetailResponseSchema>> {
-    const validated = SubscriptionParamsSchema.parse(params);
-    const subscription = await this.subscriptionsService.getByIdWithDetails(validated.id);
-    return subscription as z.infer<typeof SubscriptionDetailResponseSchema>;
   }
 
   /**
@@ -136,14 +137,36 @@ export class SubscriptionsController {
    */
   async toggleStatus(params: unknown): Promise<Subscription> {
     const validated = SubscriptionParamsSchema.parse(params);
-    const subscription = await this.subscriptionsService.toggleStatus(validated.id);
+    const subscription = await this.subscriptionsService.toggleStatus(
+      validated.id
+    );
     return subscription as Subscription;
+  }
+
+  /**
+   * Get subscription by ID with details
+   */
+  async getById(
+    params: unknown
+  ): Promise<z.infer<typeof SubscriptionDetailResponseSchema>> {
+    const validated = SubscriptionParamsSchema.parse(params);
+    const subscription = await this.subscriptionsService.getByIdWithDetails(
+      validated.id
+    );
+
+    if (!subscription) {
+      throw new NotFoundError("Subscription", validated.id);
+    }
+
+    return subscription as z.infer<typeof SubscriptionDetailResponseSchema>;
   }
 
   /**
    * Check subscription status by entity
    */
-  async checkSubscription(params: unknown): Promise<z.infer<typeof CheckSubscriptionResponseSchema>> {
+  async checkSubscription(
+    params: unknown
+  ): Promise<z.infer<typeof CheckSubscriptionResponseSchema>> {
     const validated = CheckSubscriptionParamsSchema.parse(params);
 
     const result = await this.subscriptionsService.checkSubscriptionByEntity(
@@ -159,7 +182,9 @@ export class SubscriptionsController {
    */
   async getSubscriptionScenes(params: unknown): Promise<{ data: unknown[] }> {
     const validated = SubscriptionParamsSchema.parse(params);
-    const scenes = await this.subscriptionsService.getSubscriptionScenes(validated.id);
+    const scenes = await this.subscriptionsService.getSubscriptionScenes(
+      validated.id
+    );
     return { data: scenes };
   }
 
@@ -177,13 +202,15 @@ export class SubscriptionsController {
     };
   }> {
     const validated = SubscriptionParamsSchema.parse(params);
-    const result = await this.subscriptionsService.getSubscriptionFiles(validated.id);
+    const result = await this.subscriptionsService.getSubscriptionFiles(
+      validated.id
+    );
     // Return base result, route will add sceneFolder and folderContents
     return {
       files: (result as any).files || [],
       downloadQueue: (result as any).downloadQueue || null,
       sceneFolder: null,
-      folderContents: { nfoFiles: [], posterFiles: [], videoFiles: [] }
+      folderContents: { nfoFiles: [], posterFiles: [], videoFiles: [] },
     };
   }
 }

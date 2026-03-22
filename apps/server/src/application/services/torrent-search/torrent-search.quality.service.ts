@@ -68,30 +68,23 @@ export class TorrentSearchQualityService {
     const hasAnyQuality = profileItems.some((item) => item.quality === "any");
     const hasAnySource = profileItems.some((item) => item.source === "any");
 
-    // Extract preferred qualities and sources from items (excluding "any")
-    const preferredQualities = profileItems
-      .map((item) => item.quality)
-      .filter((q) => q && q !== "any") || [];
-
-    const preferredSources = profileItems
-      .map((item) => item.source)
-      .filter((s) => s && s !== "any") || [];
-
-    // Filter by quality preferences
+    // Filter by quality preferences - keep torrents that match ANY profile item
     let candidates = torrents;
 
     // Only filter by quality if NOT using "any"
-    if (!hasAnyQuality && preferredQualities.length > 0) {
-      candidates = candidates.filter((t) =>
-        preferredQualities.includes(t.quality)
-      );
+    if (!hasAnyQuality) {
+      const allowedQualities = new Set(profileItems.map((item) => item.quality).filter((q) => q && q !== "any"));
+      if (allowedQualities.size > 0) {
+        candidates = candidates.filter((t) => allowedQualities.has(t.quality));
+      }
     }
 
     // Only filter by source if NOT using "any"
-    if (!hasAnySource && preferredSources.length > 0) {
-      candidates = candidates.filter((t) =>
-        preferredSources.includes(t.source)
-      );
+    if (!hasAnySource) {
+      const allowedSources = new Set(profileItems.map((item) => item.source).filter((s) => s && s !== "any"));
+      if (allowedSources.size > 0) {
+        candidates = candidates.filter((t) => allowedSources.has(t.source));
+      }
     }
 
     // Apply filters from quality profile items
@@ -122,52 +115,43 @@ export class TorrentSearchQualityService {
           qualityProfileId,
           profileName: qualityProfile.name,
           totalTorrents: torrents.length,
-          preferredQualities,
-          preferredSources,
+          profileItems: profileItems.map((item) => `${item.quality}/${item.source}`),
         }
       );
       return null; // STRICT: Don't fallback to first torrent
     }
 
-    // Sort candidates by priority:
-    // 1. Quality preference order
-    // 2. Source preference order
-    // 3. Seeder count (descending)
-    // 4. Indexer count (descending) - more indexers = more reliable
+    // Sort candidates by exact (quality, source) combination priority from profile items
+    // This preserves the user's preference order for each combination
     const sortedCandidates = candidates.sort((a, b) => {
-      // Sort by quality preference
-      const aQualityIndex = preferredQualities.indexOf(a.quality);
-      const bQualityIndex = preferredQualities.indexOf(b.quality);
+      // Find the exact (quality, source) combination in profile items
+      const aProfileIndex = profileItems.findIndex((item) =>
+        (item.quality === "any" || item.quality === a.quality) &&
+        (item.source === "any" || item.source === a.source)
+      );
 
-      if (
-        aQualityIndex !== -1 &&
-        bQualityIndex !== -1 &&
-        aQualityIndex !== bQualityIndex
-      ) {
-        return aQualityIndex - bQualityIndex;
+      const bProfileIndex = profileItems.findIndex((item) =>
+        (item.quality === "any" || item.quality === b.quality) &&
+        (item.source === "any" || item.source === b.source)
+      );
+
+      // Lower index = higher priority (user's preference order)
+      if (aProfileIndex !== bProfileIndex) {
+        // If both found, sort by index (lower index = higher priority)
+        // If one not found, put it at the end
+        const aPriority = aProfileIndex === -1 ? 9999 : aProfileIndex;
+        const bPriority = bProfileIndex === -1 ? 9999 : bProfileIndex;
+        return aPriority - bPriority;
       }
 
-      // Sort by source preference
-      const aSourceIndex = preferredSources.indexOf(a.source);
-      const bSourceIndex = preferredSources.indexOf(b.source);
-
-      if (
-        aSourceIndex !== -1 &&
-        bSourceIndex !== -1 &&
-        aSourceIndex !== bSourceIndex
-      ) {
-        return aSourceIndex - bSourceIndex;
-      }
-
-      // Sort by seeders
+      // Same priority level? Prefer higher seeders
       if (a.seeders !== b.seeders) {
         return b.seeders - a.seeders;
       }
 
-      // Sort by indexer count (more indexers = more reliable)
+      // Same seeders? Prefer higher indexer count (more indexers = more reliable)
       const aIndexerCount = a.indexerCount || 1;
       const bIndexerCount = b.indexerCount || 1;
-
       return bIndexerCount - aIndexerCount;
     });
 

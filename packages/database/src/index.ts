@@ -31,7 +31,9 @@ export async function createDatabase(path: string) {
   const migrationsFolderDist = join(__dirname, "..", "dist", "migrations");
 
   // Find the migrations folder (src or dist)
-  const actualMigrationsFolder = existsSync(migrationsFolder) ? migrationsFolder : migrationsFolderDist;
+  const actualMigrationsFolder = existsSync(migrationsFolder)
+    ? migrationsFolder
+    : migrationsFolderDist;
 
   if (!existsSync(actualMigrationsFolder)) {
     console.log("⚠️  No migrations folder found, skipping migrations");
@@ -40,12 +42,14 @@ export async function createDatabase(path: string) {
 
   // Get all migration files sorted by name
   const migrationFiles = readdirSync(actualMigrationsFolder)
-    .filter(f => f.endsWith('.sql'))
+    .filter((f) => f.endsWith(".sql"))
     .sort();
 
   // Check if database is empty (no tables except migrations)
   const tables = sqlite
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '_eros_%'")
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '_eros_%'"
+    )
     .all() as any[];
   const isEmptyDatabase = tables.length === 0;
 
@@ -72,15 +76,36 @@ export async function createDatabase(path: string) {
     return result.some((col: any) => col.name === columnName);
   };
 
+  // Helper function to check if an index exists
+  const indexExists = (indexName: string): boolean => {
+    const result = sqlite
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name=?")
+      .get(indexName) as any;
+    return !!result;
+  };
+
   // Migration signature mapping - what each migration creates
   // Used to detect already-applied migrations
-  const migrationSignatures: Record<string, {
-    tables?: string[];
-    columns?: Record<string, string[]>;
-    columnsAbsent?: Record<string, string[]>; // Columns that should NOT exist after migration
-  }> = {
+  const migrationSignatures: Record<
+    string,
+    {
+      tables?: string[];
+      columns?: Record<string, string[]>;
+      columnsAbsent?: Record<string, string[]>; // Columns that should NOT exist after migration
+      indexes?: string[]; // Indexes created by this migration
+    }
+  > = {
     "0000_supreme_marrow": {
-      tables: ["scenes", "performers", "studios", "tags", "scene_files", "subscriptions", "download_queue", "app_settings"],
+      tables: [
+        "scenes",
+        "performers",
+        "studios",
+        "tags",
+        "scene_files",
+        "subscriptions",
+        "download_queue",
+        "app_settings",
+      ],
     },
     "0001_silent_excalibur": {
       tables: ["ai_match_scores"],
@@ -108,28 +133,51 @@ export async function createDatabase(path: string) {
     },
     "0005_add_torrent_retry_fields": {
       columns: {
-        download_queue: ["add_to_client_attempts", "add_to_client_last_attempt", "add_to_client_error"],
+        download_queue: [
+          "add_to_client_attempts",
+          "add_to_client_last_attempt",
+          "add_to_client_error",
+        ],
       },
     },
     "0006_purple_scrambler": {
       columns: {
-        scenes: ["is_subscribed"],  // Correct - matches actual SQL: ALTER TABLE `scenes` ADD `is_subscribed`
+        scenes: ["is_subscribed"], // Correct - matches actual SQL: ALTER TABLE `scenes` ADD `is_subscribed`
       },
     },
     "0007_fast_lifeguard": {
       columns: {
-        download_queue: ["auto_management_paused", "auto_pause_reason", "auto_pause_count", "last_auto_pause_at", "last_activity_at"],
+        download_queue: [
+          "auto_management_paused",
+          "auto_pause_reason",
+          "auto_pause_count",
+          "last_auto_pause_at",
+          "last_activity_at",
+        ],
       },
+    },
+    "0008_schema_improvements": {
+      indexes: [
+        "performers_slug_idx",
+        "studios_slug_idx",
+        "scenes_slug_idx",
+        "directors_slug_idx",
+        "tags_slug_idx",
+        "scenes_is_subscribed_idx",
+        "scenes_discovery_group_id_idx",
+      ],
     },
   };
 
   // Detect already-applied migrations for existing databases
   // Run for ALL non-empty databases, not just when executedMigrations.length === 0
   if (!isEmptyDatabase) {
-    console.log("📋 Detecting already-applied migrations for existing database...");
+    console.log(
+      "📋 Detecting already-applied migrations for existing database..."
+    );
 
     for (const file of migrationFiles) {
-      const migrationName = file.replace('.sql', '');
+      const migrationName = file.replace(".sql", "");
       const signature = migrationSignatures[migrationName];
 
       // Skip if already tracked as executed
@@ -139,7 +187,9 @@ export async function createDatabase(path: string) {
 
       // Skip if no signature defined (unknown migration)
       if (!signature) {
-        console.log(`  ⚠️  No signature defined for ${migrationName}, skipping detection`);
+        console.log(
+          `  ⚠️  No signature defined for ${migrationName}, skipping detection`
+        );
         continue;
       }
 
@@ -147,7 +197,7 @@ export async function createDatabase(path: string) {
 
       // Check if tables exist
       if (signature.tables) {
-        const allTablesExist = signature.tables.every(t => tableExists(t));
+        const allTablesExist = signature.tables.every((t) => tableExists(t));
         if (allTablesExist) {
           alreadyApplied = true;
         }
@@ -172,7 +222,9 @@ export async function createDatabase(path: string) {
       // Check if columns that should be absent are actually absent
       if (signature.columnsAbsent) {
         let allColumnsAbsent = true;
-        for (const [table, columns] of Object.entries(signature.columnsAbsent)) {
+        for (const [table, columns] of Object.entries(
+          signature.columnsAbsent
+        )) {
           for (const col of columns) {
             if (columnExists(table, col)) {
               allColumnsAbsent = false;
@@ -181,7 +233,7 @@ export async function createDatabase(path: string) {
           }
         }
 
-        // If this migration only has columnsAbsent (no other conditions), use that as the only check
+        // If this migration only has columnsAbsent (no other conditions), use that as only check
         if (!signature.tables && !signature.columns && allColumnsAbsent) {
           alreadyApplied = true;
         } else if (alreadyApplied && !allColumnsAbsent) {
@@ -190,17 +242,31 @@ export async function createDatabase(path: string) {
         }
       }
 
+      // Check if indexes exist
+      if (signature.indexes && !alreadyApplied) {
+        const allIndexesExist = signature.indexes.every((idx) =>
+          indexExists(idx)
+        );
+        if (allIndexesExist) {
+          alreadyApplied = true;
+        }
+      }
+
       if (alreadyApplied) {
-        sqlite.prepare("INSERT OR IGNORE INTO _eros_migrations (name) VALUES (?)").run(migrationName);
+        sqlite
+          .prepare("INSERT OR IGNORE INTO _eros_migrations (name) VALUES (?)")
+          .run(migrationName);
         executedMigrations.push(migrationName);
-        console.log(`✓ Detected and tracked existing migration: ${migrationName}`);
+        console.log(
+          `✓ Detected and tracked existing migration: ${migrationName}`
+        );
       }
     }
   }
 
   // Run pending migrations
   for (const file of migrationFiles) {
-    const migrationName = file.replace('.sql', '');
+    const migrationName = file.replace(".sql", "");
 
     // Skip if already executed
     if (executedMigrations.includes(migrationName)) {
@@ -210,15 +276,25 @@ export async function createDatabase(path: string) {
     // Run the migration
     console.log(`🔄 Running migration: ${migrationName}`);
 
-    const migrationSQL = readFileSync(join(actualMigrationsFolder, file), 'utf-8');
-    const statements = migrationSQL.split('--> statement-breakpoint');
+    const migrationSQL = readFileSync(
+      join(actualMigrationsFolder, file),
+      "utf-8"
+    );
+    const statements = migrationSQL.split("--> statement-breakpoint");
 
     // Special handling for migration 0003: check if status column exists before UPDATE
     if (migrationName === "0003_refine_subscription_status") {
       const firstStatement = statements[0]?.trim();
-      if (firstStatement && firstStatement.toUpperCase().startsWith("UPDATE subscriptions SET status")) {
+      if (
+        firstStatement &&
+        firstStatement
+          .toUpperCase()
+          .startsWith("UPDATE subscriptions SET status")
+      ) {
         if (!columnExists("subscriptions", "status")) {
-          console.log(`  ⚠️  Skipping UPDATE statement (status column doesn't exist)`);
+          console.log(
+            `  ⚠️  Skipping UPDATE statement (status column doesn't exist)`
+          );
           statements.shift(); // Remove first statement
         }
       }
@@ -244,9 +320,12 @@ export async function createDatabase(path: string) {
             stmtErrorMessage.includes("no such column") ||
             stmtErrorMessage.includes("no such table") ||
             stmtErrorMessage.includes("duplicate column") ||
-            stmtErrorMessage.includes("table ") && stmtErrorMessage.includes(" already exists")
+            (stmtErrorMessage.includes("table ") &&
+              stmtErrorMessage.includes(" already exists"))
           ) {
-            console.log(`  ⚠️  Skipping statement (${stmtErrorMessage.split(':')[0]}): ${trimmed.substring(0, 50)}...`);
+            console.log(
+              `  ⚠️  Skipping statement (${stmtErrorMessage.split(":")[0]}): ${trimmed.substring(0, 50)}...`
+            );
             failedStatements++;
             continue; // Skip this statement, continue with next
           }
@@ -258,14 +337,17 @@ export async function createDatabase(path: string) {
 
       // Record migration as executed (if we ran at least one statement or all were skipped due to being applied)
       if (executedAnyStatement || failedStatements === statements.length) {
-        sqlite.prepare("INSERT OR IGNORE INTO _eros_migrations (name) VALUES (?)").run(migrationName);
+        sqlite
+          .prepare("INSERT OR IGNORE INTO _eros_migrations (name) VALUES (?)")
+          .run(migrationName);
         console.log(`✅ Migration completed: ${migrationName}`);
       } else if (statements.length === 0) {
         // All statements were skipped (like 0003 with status check)
-        sqlite.prepare("INSERT OR IGNORE INTO _eros_migrations (name) VALUES (?)").run(migrationName);
+        sqlite
+          .prepare("INSERT OR IGNORE INTO _eros_migrations (name) VALUES (?)")
+          .run(migrationName);
         console.log(`✅ Migration completed: ${migrationName}`);
       }
-
     } catch (error: any) {
       const errorMessage = error?.message || String(error);
 
@@ -278,8 +360,12 @@ export async function createDatabase(path: string) {
         errorMessage.includes("no such column") ||
         errorMessage.includes("no such table")
       ) {
-        console.log(`⚠️  Marking ${migrationName} as applied due to schema mismatch (database may be in intermediate state)`);
-        sqlite.prepare("INSERT OR IGNORE INTO _eros_migrations (name) VALUES (?)").run(migrationName);
+        console.log(
+          `⚠️  Marking ${migrationName} as applied due to schema mismatch (database may be in intermediate state)`
+        );
+        sqlite
+          .prepare("INSERT OR IGNORE INTO _eros_migrations (name) VALUES (?)")
+          .run(migrationName);
         console.log(`✅ Migration marked as applied: ${migrationName}`);
         continue;
       }

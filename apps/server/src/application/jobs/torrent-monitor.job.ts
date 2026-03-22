@@ -69,7 +69,9 @@ export class TorrentMonitorJob extends BaseJob {
 
     const torrentClient = this.getTorrentClient();
     if (!torrentClient) {
-      this.logger.warn("qBittorrent not configured, skipping torrent monitor job");
+      this.logger.warn(
+        "qBittorrent not configured, skipping torrent monitor job"
+      );
       this.emitCompleted("Skipped: qBittorrent not configured");
       return;
     }
@@ -91,7 +93,13 @@ export class TorrentMonitorJob extends BaseJob {
       // - move_failed: torrents that completed but failed to move
       // - add_failed: torrents that were added to qBittorrent but hash lookup timed out
       const downloadingItems = await this.db.query.downloadQueue.findMany({
-        where: inArray(downloadQueue.status, ["downloading", "queued", "completed", "move_failed", "add_failed"]),
+        where: inArray(downloadQueue.status, [
+          "downloading",
+          "queued",
+          "completed",
+          "move_failed",
+          "add_failed",
+        ]),
         with: {
           scene: {
             columns: {
@@ -132,7 +140,12 @@ export class TorrentMonitorJob extends BaseJob {
           matchedItemIds.add(queueItem.id);
           try {
             processedCount++;
-            await this.processTorrent(torrent, queueItem, processedCount, torrents.length);
+            await this.processTorrent(
+              torrent,
+              queueItem,
+              processedCount,
+              torrents.length
+            );
           } catch (error) {
             this.logger.error(
               { error, torrentHash: torrent.hash },
@@ -144,7 +157,10 @@ export class TorrentMonitorJob extends BaseJob {
                 .set({ status: "move_failed" })
                 .where(eq(downloadQueue.id, queueItem.id));
             } catch (updateError) {
-              this.logger.error({ updateError }, "Failed to update status to move_failed");
+              this.logger.error(
+                { updateError },
+                "Failed to update status to move_failed"
+              );
             }
           }
         }
@@ -156,16 +172,19 @@ export class TorrentMonitorJob extends BaseJob {
         // Skip if already matched by hash
         if (hashToQueueItem.has(torrent.hash)) continue;
 
-        const torrentName = (torrent.name as string)?.toLowerCase() || '';
+        const torrentName = (torrent.name as string)?.toLowerCase() || "";
 
-        let queueItem = downloadingItems.find(item => {
+        let queueItem = downloadingItems.find((item) => {
           // Skip if already matched
           if (matchedItemIds.has(item.id)) return false;
 
-          const itemTitle = (item.scene?.title || item.title)?.toLowerCase() || '';
+          const itemTitle =
+            (item.scene?.title || item.title)?.toLowerCase() || "";
           // Simple substring matching - should work well since differential approach
           // in addTorrentAndGetHash should have handled most cases
-          return torrentName.includes(itemTitle) || itemTitle.includes(torrentName);
+          return (
+            torrentName.includes(itemTitle) || itemTitle.includes(torrentName)
+          );
         });
 
         if (queueItem && torrent.hash) {
@@ -182,7 +201,10 @@ export class TorrentMonitorJob extends BaseJob {
 
           try {
             // Update qbitHash and status
-            const newStatus = queueItem.status === "add_failed" ? "downloading" : queueItem.status;
+            const newStatus =
+              queueItem.status === "add_failed"
+                ? "downloading"
+                : queueItem.status;
             await this.db
               .update(downloadQueue)
               .set({
@@ -196,7 +218,12 @@ export class TorrentMonitorJob extends BaseJob {
 
             // Process the newly matched torrent
             processedCount++;
-            await this.processTorrent(torrent, queueItem, processedCount, torrents.length);
+            await this.processTorrent(
+              torrent,
+              queueItem,
+              processedCount,
+              torrents.length
+            );
           } catch (error) {
             this.logger.error(
               { error, itemId: queueItem.id },
@@ -219,10 +246,10 @@ export class TorrentMonitorJob extends BaseJob {
       // This is for torrents that failed to add to qBittorrent, NOT indexer searches
       await this.retryFailedTorrents();
 
-      this.emitCompleted(
-        `Completed: Processed ${processedCount} torrents`,
-        { processedCount, totalTorrents: torrents.length }
-      );
+      this.emitCompleted(`Completed: Processed ${processedCount} torrents`, {
+        processedCount,
+        totalTorrents: torrents.length,
+      });
 
       this.logger.info("Torrent monitor job completed");
     } catch (error) {
@@ -275,17 +302,26 @@ export class TorrentMonitorJob extends BaseJob {
           .set({ status: "paused" })
           .where(eq(downloadQueue.id, queueItem.id));
       }
+      // IMPORTANT: Don't auto-resume queued/stalled torrents here!
+      // qBittorrent manages its own queue with "Max active downloads" limit.
+      // We let qBittorrent handle queue management naturally.
+      // Torrent Management Service will pause stalled torrents and retry them when queue is empty.
     } else if (torrent.progress >= 1.0 && queueItem.status !== "completed") {
       // Torrent completed
       let statusMessage = "Torrent completed, processing...";
       if (queueItem.status === "add_failed") {
-        statusMessage = "Torrent was in qBittorrent but hash was not linked - now processing!";
+        statusMessage =
+          "Torrent was in qBittorrent but hash was not linked - now processing!";
       } else if (queueItem.status === "move_failed") {
         statusMessage = "Retrying previously failed torrent completion...";
       }
 
       this.logger.info(
-        { torrentHash: torrent.hash, name: torrent.name, currentStatus: queueItem.status },
+        {
+          torrentHash: torrent.hash,
+          name: torrent.name,
+          currentStatus: queueItem.status,
+        },
         statusMessage
       );
 
@@ -298,7 +334,10 @@ export class TorrentMonitorJob extends BaseJob {
 
       // Store qbitHash if not already stored
       if (!queueItem.qbitHash) {
-        this.logger.info({ torrentHash: torrent.hash }, "Storing qBittorrent hash");
+        this.logger.info(
+          { torrentHash: torrent.hash },
+          "Storing qBittorrent hash"
+        );
         await this.db
           .update(downloadQueue)
           .set({ qbitHash: torrent.hash })
@@ -317,7 +356,10 @@ export class TorrentMonitorJob extends BaseJob {
         { torrentHash: torrent.hash, sceneId: queueItem.sceneId },
         "handleTorrentCompleted finished successfully"
       );
-    } else if ((queueItem.status === "queued" || queueItem.status === "add_failed") && torrent.state !== "pausedDL") {
+    } else if (
+      (queueItem.status === "queued" || queueItem.status === "add_failed") &&
+      torrent.state !== "pausedDL"
+    ) {
       // Torrent is actively downloading, update status
       // For add_failed: the torrent was actually added to qBittorrent but we didn't get the hash
       // Now that we've matched it by title, update the status to reflect it's downloading
@@ -347,7 +389,11 @@ export class TorrentMonitorJob extends BaseJob {
     }
 
     // 3. Download speed is 0 for active torrents
-    if (torrent.state === "downloading" && torrent.dlspeed === 0 && torrent.progress < 1.0) {
+    if (
+      torrent.state === "downloading" &&
+      torrent.dlspeed === 0 &&
+      torrent.progress < 1.0
+    ) {
       return true;
     }
 
@@ -418,7 +464,9 @@ export class TorrentMonitorJob extends BaseJob {
       return;
     }
 
-    this.logger.info(`Found ${oldItems.length} old completed torrents to remove`);
+    this.logger.info(
+      `Found ${oldItems.length} old completed torrents to remove`
+    );
 
     let removedFromQbit = 0;
     let removedFromQueue = 0;
@@ -485,9 +533,12 @@ export class TorrentMonitorJob extends BaseJob {
     try {
       // Update settings from current app settings
       const settings = await this.settingsService.getSettings();
-      this.torrentManagementService.updateSettings(settings.torrentAutoManagement);
+      this.torrentManagementService.updateSettings(
+        settings.torrentAutoManagement
+      );
 
-      const pauseResult = await this.torrentManagementService.checkAndPauseTorrents();
+      const pauseResult =
+        await this.torrentManagementService.checkAndPauseTorrents();
 
       this.logger.info(
         {
@@ -501,7 +552,8 @@ export class TorrentMonitorJob extends BaseJob {
       await this.updateActivityTracking();
 
       // Try retrying paused torrents
-      const retryResult = await this.torrentManagementService.retryPausedTorrents();
+      const retryResult =
+        await this.torrentManagementService.retryPausedTorrents();
 
       this.logger.info(
         {
@@ -525,7 +577,7 @@ export class TorrentMonitorJob extends BaseJob {
 
     const torrents = await torrentClient.getTorrents();
     const activeTorrents = torrents.filter(
-      (t) => t.dlspeed > 0 && t.state !== "pausedDL"
+      (t) => t.downloadSpeed > 0 && t.state !== "pausedDL"
     );
 
     for (const torrent of activeTorrents) {

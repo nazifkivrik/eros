@@ -1,4 +1,10 @@
-import { createContainer, asClass, asValue, asFunction, InjectionMode } from "awilix";
+import {
+  createContainer,
+  asClass,
+  asValue,
+  asFunction,
+  InjectionMode,
+} from "awilix";
 import type { Database } from "@repo/database";
 import type { Logger } from "pino";
 import type { ServiceContainer } from "./types.js";
@@ -14,7 +20,11 @@ import { EntityResolverService } from "../application/services/entity-resolver/e
 import { SceneMatcher } from "../application/services/matching/scene-matcher.service.js";
 import { AIMatchingService } from "../application/services/ai-matching/ai-matching.service.js";
 import { CrossEncoderService } from "../application/services/ai-matching/cross-encoder.service.js";
-import { SpeedProfileService, createSpeedProfileService } from "../application/services/speed-profile.service.js";
+import {
+  SpeedProfileService,
+  createSpeedProfileService,
+} from "../application/services/speed-profile.service.js";
+import { ScenesFilesService } from "../application/services/scenes/scenes-files.service.js";
 
 // Adapters (now self-contained, no longer wrap old services)
 import { createProwlarrAdapter } from "../infrastructure/adapters/prowlarr.adapter.js";
@@ -133,9 +143,15 @@ export function buildContainer(config: ContainerConfig) {
     ...(config.externalServicesManager
       ? {
           externalServicesManager: asValue(config.externalServicesManager),
-          metadataRegistry: asValue(config.externalServicesManager.getMetadataRegistry()),
-          indexerRegistry: asValue(config.externalServicesManager.getIndexerRegistry()),
-          torrentClientRegistry: asValue(config.externalServicesManager.getTorrentClientRegistry()),
+          metadataRegistry: asValue(
+            config.externalServicesManager.getMetadataRegistry()
+          ),
+          indexerRegistry: asValue(
+            config.externalServicesManager.getIndexerRegistry()
+          ),
+          torrentClientRegistry: asValue(
+            config.externalServicesManager.getTorrentClientRegistry()
+          ),
         }
       : {}),
   });
@@ -154,6 +170,7 @@ export function buildContainer(config: ContainerConfig) {
     aiMatchingService: asClass(AIMatchingService).scoped(),
     crossEncoderService: asClass(CrossEncoderService).scoped(),
     speedProfileService: asValue(createSpeedProfileService()),
+    scenesFilesService: asClass(ScenesFilesService).scoped(),
   });
 
   // === Clean Architecture Layers ===
@@ -184,8 +201,12 @@ export function buildContainer(config: ContainerConfig) {
     subscriptionsService: asClass(SubscriptionsService).scoped(),
     subscriptionsCoreService: asClass(SubscriptionsCoreService).scoped(),
     subscriptionsScenesService: asClass(SubscriptionsScenesService).scoped(),
-    subscriptionsDiscoveryService: asClass(SubscriptionsDiscoveryService).scoped(),
-    subscriptionsManagementService: asClass(SubscriptionsManagementService).scoped(),
+    subscriptionsDiscoveryService: asClass(
+      SubscriptionsDiscoveryService
+    ).scoped(),
+    subscriptionsManagementService: asClass(
+      SubscriptionsManagementService
+    ).scoped(),
     subscriptionsTorrentService: asClass(SubscriptionsTorrentService).scoped(),
     qualityProfilesService: asClass(QualityProfilesService).scoped(),
     setupService: asClass(SetupService).scoped(),
@@ -198,7 +219,8 @@ export function buildContainer(config: ContainerConfig) {
     jobsService: asClass(JobsService).scoped(),
     schedulerService: asClass(SchedulerService).scoped(),
     torrentCompletionService: asClass(TorrentCompletionHandlerService).scoped(),
-    dashboardService: asClass(DashboardService).scoped()
+    dashboardService: asClass(DashboardService)
+      .scoped()
       .inject((container) => ({
         settingsService: container.cradle.settingsService,
       })),

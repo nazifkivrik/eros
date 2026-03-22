@@ -8,7 +8,10 @@
  * - Raw result transformation
  */
 
-import type { IIndexer, TorrentSearchResult } from "@/infrastructure/adapters/interfaces/indexer.interface.js";
+import type {
+  IIndexer,
+  TorrentSearchResult,
+} from "@/infrastructure/adapters/interfaces/indexer.interface.js";
 import type { IndexerRegistry } from "@/infrastructure/registries/provider-registry.js";
 import type { LogsService } from "@/application/services/logs.service.js";
 import type { TorrentResult } from "@/application/services/torrent-search/index.js";
@@ -20,7 +23,10 @@ export class TorrentSearchIndexerService {
   private indexerRegistry: IndexerRegistry;
   private logsService: LogsService;
 
-  constructor(deps: { indexerRegistry: IndexerRegistry; logsService: LogsService }) {
+  constructor(deps: {
+    indexerRegistry: IndexerRegistry;
+    logsService: LogsService;
+  }) {
     this.indexerRegistry = deps.indexerRegistry;
     this.logsService = deps.logsService;
   }
@@ -71,6 +77,20 @@ export class TorrentSearchIndexerService {
         for (const result of indexerResults) {
           // Convert indexerId to our database format: prowlarr-{id}
           const dbIndexerId = `prowlarr-${result.indexerId}`;
+
+          // FIX: Log when infoHash is missing but downloadUrl is available
+          // This indicates Prowlarr didn't return a magnet link
+          if (!result.infoHash && result.downloadUrl) {
+            await this.logsService.warning(
+              "torrent",
+              `Torrent has no infoHash but has downloadURL - magnet link generation needed: ${result.title.substring(0, 60)}`,
+              {
+                title: result.title.substring(0, 100),
+                indexerId: result.indexerId,
+                downloadUrl: result.downloadUrl.substring(0, 100),
+              }
+            );
+          }
 
           results.push({
             title: result.title,
@@ -133,10 +153,7 @@ export class TorrentSearchIndexerService {
     if (titleLower.includes("web-dl") || titleLower.includes("webdl"))
       return "WEB-DL";
     if (titleLower.includes("webrip")) return "WEBRip";
-    if (
-      titleLower.includes("bluray") ||
-      titleLower.includes("blu-ray")
-    )
+    if (titleLower.includes("bluray") || titleLower.includes("blu-ray"))
       return "BluRay";
     if (titleLower.includes("hdtv")) return "HDTV";
     return "Unknown";

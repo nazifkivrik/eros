@@ -140,7 +140,9 @@ export class TorrentManagementService {
     }
 
     // Get queue item to check how long it's been in metadata state
-    const queueItem = await this.downloadQueueRepository.findByQbitHash(torrent.hash);
+    const queueItem = await this.downloadQueueRepository.findByQbitHash(
+      torrent.hash
+    );
 
     if (queueItem?.lastAutoPauseAt) {
       const pauseTime = new Date(queueItem.lastAutoPauseAt).getTime();
@@ -163,7 +165,9 @@ export class TorrentManagementService {
     }
 
     // Need to track how long it's been slow - check database
-    const queueItem = await this.downloadQueueRepository.findByQbitHash(torrent.hash);
+    const queueItem = await this.downloadQueueRepository.findByQbitHash(
+      torrent.hash
+    );
 
     if (queueItem?.lastActivityAt) {
       const lastActivity = new Date(queueItem.lastActivityAt).getTime();
@@ -175,7 +179,9 @@ export class TorrentManagementService {
   }
 
   private async checkNoActivity(torrent: any): Promise<boolean> {
-    const queueItem = await this.downloadQueueRepository.findByQbitHash(torrent.hash);
+    const queueItem = await this.downloadQueueRepository.findByQbitHash(
+      torrent.hash
+    );
 
     if (!queueItem?.lastActivityAt) {
       return false;
@@ -202,14 +208,19 @@ export class TorrentManagementService {
       await torrentClient.setTorrentPriority(torrent.hash, "bottom");
 
       // Update database
-      const queueItem = await this.downloadQueueRepository.findByQbitHash(torrent.hash);
+      const queueItem = await this.downloadQueueRepository.findByQbitHash(
+        torrent.hash
+      );
       if (queueItem) {
-        await this.downloadQueueRepository.updateAutoManagementTracking(queueItem.id, {
-          autoManagementPaused: true,
-          autoPauseReason: reason,
-          autoPauseCount: (queueItem.autoPauseCount || 0) + 1,
-          lastAutoPauseAt: new Date().toISOString(),
-        });
+        await this.downloadQueueRepository.updateAutoManagementTracking(
+          queueItem.id,
+          {
+            autoManagementPaused: true,
+            autoPauseReason: reason,
+            autoPauseCount: (queueItem.autoPauseCount || 0) + 1,
+            lastAutoPauseAt: new Date().toISOString(),
+          }
+        );
       }
 
       this.logger.info(
@@ -221,7 +232,10 @@ export class TorrentManagementService {
         "Auto-paused torrent"
       );
     } catch (error) {
-      this.logger.error({ error, hash: torrent.hash }, "Failed to auto-pause torrent");
+      this.logger.error(
+        { error, hash: torrent.hash },
+        "Failed to auto-pause torrent"
+      );
     }
   }
 
@@ -252,9 +266,10 @@ export class TorrentManagementService {
     }
 
     // Get torrents to retry (auto-paused, under max retries)
-    const candidates = await this.downloadQueueRepository.findAutoPausedForRetry(
-      this.settings.maxRetries
-    );
+    const candidates =
+      await this.downloadQueueRepository.findAutoPausedForRetry(
+        this.settings.maxRetries
+      );
 
     let retried = 0;
     let skipped = 0;
@@ -265,7 +280,16 @@ export class TorrentManagementService {
       : candidates;
 
     for (const item of toRetry) {
-      if (!item.qbitHash) continue;
+      // FIX: If no qbitHash but status is add_failed, skip (can't retry without hash)
+      // These torrents need manual intervention or need to be re-added with proper magnet link
+      if (!item.qbitHash) {
+        this.logger.debug(
+          { id: item.id, status: item.status },
+          "Skipping torrent retry - no qbitHash available"
+        );
+        skipped++;
+        continue;
+      }
 
       const shouldRetry = (item.autoPauseCount || 0) < this.settings.maxRetries;
 
@@ -278,13 +302,19 @@ export class TorrentManagementService {
         await torrentClient.resumeTorrent(item.qbitHash);
 
         // Update database
-        await this.downloadQueueRepository.updateAutoManagementTracking(item.id, {
-          autoManagementPaused: false,
-          autoPauseReason: null,
-          lastAutoPauseAt: new Date().toISOString(),
-        });
+        await this.downloadQueueRepository.updateAutoManagementTracking(
+          item.id,
+          {
+            autoManagementPaused: false,
+            autoPauseReason: null,
+            lastAutoPauseAt: new Date().toISOString(),
+          }
+        );
 
-        this.logger.info({ id: item.id, hash: item.qbitHash }, "Retried auto-paused torrent");
+        this.logger.info(
+          { id: item.id, hash: item.qbitHash },
+          "Retried auto-paused torrent"
+        );
         retried++;
       } catch (error) {
         this.logger.error({ error, id: item.id }, "Failed to retry torrent");
@@ -305,8 +335,10 @@ export class TorrentManagementService {
     return [...items].sort((a, b) => {
       // Priority = fewer retries = higher priority (lower number)
       // We use retry count as a penalty
-      const aPriority = (a.autoPauseCount || 0) * this.settings.retryCountWeight;
-      const bPriority = (b.autoPauseCount || 0) * this.settings.retryCountWeight;
+      const aPriority =
+        (a.autoPauseCount || 0) * this.settings.retryCountWeight;
+      const bPriority =
+        (b.autoPauseCount || 0) * this.settings.retryCountWeight;
 
       return aPriority - bPriority;
     });

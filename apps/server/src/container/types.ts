@@ -10,9 +10,14 @@ import type { SceneMatcher } from "../application/services/matching/scene-matche
 import type { AIMatchingService } from "../application/services/ai-matching/ai-matching.service.js";
 import type { CrossEncoderService } from "../application/services/ai-matching/cross-encoder.service.js";
 import type { SpeedProfileService } from "../application/services/speed-profile.service.js";
+import type { ScenesFilesService } from "../application/services/scenes/scenes-files.service.js";
 
 // Provider Registries
-import type { MetadataProviderRegistry, IndexerRegistry, TorrentClientRegistry } from "../infrastructure/registries/provider-registry.js";
+import type {
+  MetadataProviderRegistry,
+  IndexerRegistry,
+  TorrentClientRegistry,
+} from "../infrastructure/registries/provider-registry.js";
 
 // Adapters (self-contained, no longer wrap old services)
 import type { IIndexer } from "../infrastructure/adapters/interfaces/indexer.interface.js";
@@ -102,6 +107,7 @@ export interface ServiceContainer {
   aiMatchingService: AIMatchingService;
   crossEncoderService: CrossEncoderService;
   speedProfileService: SpeedProfileService;
+  scenesFilesService: ScenesFilesService;
 
   // External service registries (multi-provider architecture)
   metadataRegistry: MetadataProviderRegistry;
