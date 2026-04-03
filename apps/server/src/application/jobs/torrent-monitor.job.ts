@@ -168,24 +168,40 @@ export class TorrentMonitorJob extends BaseJob {
 
       // Second pass: Match unmatched items by title (simple substring matching)
       // This handles cases where addTorrentAndGetHash failed but torrent was added
+
+      // Pre-build title-to-item map for O(1) title matching
+      const titleToItemMap = new Map<
+        string,
+        (typeof downloadingItems)[number]
+      >();
+      for (const item of downloadingItems) {
+        if (matchedItemIds.has(item.id)) continue;
+        const title = (item.scene?.title || item.title)?.toLowerCase() || "";
+        if (title) titleToItemMap.set(title, item);
+      }
+
       for (const torrent of torrents) {
         // Skip if already matched by hash
         if (hashToQueueItem.has(torrent.hash)) continue;
 
         const torrentName = (torrent.name as string)?.toLowerCase() || "";
 
-        let queueItem = downloadingItems.find((item) => {
-          // Skip if already matched
-          if (matchedItemIds.has(item.id)) return false;
+        // Try exact title match first (O(1) lookup)
+        let queueItem = titleToItemMap.get(torrentName);
 
-          const itemTitle =
-            (item.scene?.title || item.title)?.toLowerCase() || "";
-          // Simple substring matching - should work well since differential approach
-          // in addTorrentAndGetHash should have handled most cases
-          return (
-            torrentName.includes(itemTitle) || itemTitle.includes(torrentName)
-          );
-        });
+        // If no exact match, try partial matching (limited scan)
+        if (!queueItem) {
+          for (const [titleKey, item] of titleToItemMap) {
+            if (
+              titleKey === torrentName ||
+              titleKey.includes(torrentName) ||
+              torrentName.includes(titleKey)
+            ) {
+              queueItem = item;
+              break;
+            }
+          }
+        }
 
         if (queueItem && torrent.hash) {
           this.logger.info(
@@ -236,8 +252,8 @@ export class TorrentMonitorJob extends BaseJob {
       // Apply speed profiles
       await this.applySpeedProfiles();
 
-      // Run auto-management
-      await this.runAutoManagement();
+      // Run auto-management (pass torrent list to avoid redundant API call)
+      await this.runAutoManagement(torrents);
 
       // Remove old completed torrents
       await this.removeOldCompletedTorrents();
@@ -267,46 +283,7 @@ export class TorrentMonitorJob extends BaseJob {
     current: number,
     total: number
   ): Promise<void> {
-    // Check if torrent is stalled
-    const isStalled = this.checkIfStalled(torrent);
-
-    if (isStalled) {
-      this.logger.warn(
-        {
-          torrentHash: torrent.hash,
-          name: torrent.name,
-          seeders: torrent.num_seeds,
-          downloadSpeed: torrent.dlspeed,
-        },
-        "Torrent is stalled, pausing and moving to bottom of queue"
-      );
-
-      // Move to bottom of queue
-      const torrentClient = this.getTorrentClient();
-      if (torrentClient) {
-        await torrentClient.setTorrentPriority(torrent.hash, "bottom");
-        // Pause stalled torrent
-        await torrentClient.pauseTorrent(torrent.hash);
-      }
-
-      // Update status in database
-      await this.db
-        .update(downloadQueue)
-        .set({ status: "paused" })
-        .where(eq(downloadQueue.id, queueItem.id));
-    } else if (torrent.state === "pausedDL") {
-      // Torrent is paused in qBittorrent but not in our DB
-      if (queueItem.status === "downloading") {
-        await this.db
-          .update(downloadQueue)
-          .set({ status: "paused" })
-          .where(eq(downloadQueue.id, queueItem.id));
-      }
-      // IMPORTANT: Don't auto-resume queued/stalled torrents here!
-      // qBittorrent manages its own queue with "Max active downloads" limit.
-      // We let qBittorrent handle queue management naturally.
-      // Torrent Management Service will pause stalled torrents and retry them when queue is empty.
-    } else if (torrent.progress >= 1.0 && queueItem.status !== "completed") {
+    if (torrent.progress >= 1.0 && queueItem.status !== "completed") {
       // Torrent completed
       let statusMessage = "Torrent completed, processing...";
       if (queueItem.status === "add_failed") {
@@ -356,57 +333,27 @@ export class TorrentMonitorJob extends BaseJob {
         { torrentHash: torrent.hash, sceneId: queueItem.sceneId },
         "handleTorrentCompleted finished successfully"
       );
+    } else if (torrent.state === "pausedDL") {
+      // Sync DB status with qBittorrent paused state
+      if (queueItem.status === "downloading" || queueItem.status === "queued") {
+        await this.db
+          .update(downloadQueue)
+          .set({ status: "paused" })
+          .where(eq(downloadQueue.id, queueItem.id));
+      }
+      // NOTE: Pause/resume logic is handled entirely by TorrentManagementService.
+      // It will detect pausedDL torrents, ensure tracking is consistent,
+      // and retry them when appropriate via retryPausedTorrents().
     } else if (
       (queueItem.status === "queued" || queueItem.status === "add_failed") &&
       torrent.state !== "pausedDL"
     ) {
       // Torrent is actively downloading, update status
-      // For add_failed: the torrent was actually added to qBittorrent but we didn't get the hash
-      // Now that we've matched it by title, update the status to reflect it's downloading
       await this.db
         .update(downloadQueue)
         .set({ status: "downloading" })
         .where(eq(downloadQueue.id, queueItem.id));
     }
-  }
-
-  private checkIfStalled(torrent: any): boolean {
-    // Consider stalled if:
-
-    // 1. Torrent is in stalledDL state (qBittorrent reports no activity)
-    // This state means the download is stalled - should pause immediately
-    if (torrent.state === "stalledDL") {
-      this.logger.debug(
-        { hash: torrent.hash, name: torrent.name, state: torrent.state },
-        "Torrent is in stalledDL state, will pause"
-      );
-      return true;
-    }
-
-    // 2. No seeders available
-    if (torrent.num_seeds === 0) {
-      return true;
-    }
-
-    // 3. Download speed is 0 for active torrents
-    if (
-      torrent.state === "downloading" &&
-      torrent.dlspeed === 0 &&
-      torrent.progress < 1.0
-    ) {
-      return true;
-    }
-
-    // 4. Very low seeders (< 2) and very low speed (< 10 KB/s)
-    if (torrent.num_seeds < 2 && torrent.dlspeed < 10240) {
-      return true;
-    }
-
-    // Note: metaDL (downloading metadata), checkingDL (checking data),
-    // and allocating (allocating disk space) states are handled by
-    // torrentManagementService.checkMetadataStuck() with proper timeout checks
-
-    return false;
   }
 
   private async applySpeedProfiles(): Promise<void> {
@@ -529,7 +476,7 @@ export class TorrentMonitorJob extends BaseJob {
   /**
    * Run automatic torrent management
    */
-  private async runAutoManagement(): Promise<void> {
+  private async runAutoManagement(torrents: any[]): Promise<void> {
     try {
       // Update settings from current app settings
       const settings = await this.settingsService.getSettings();
@@ -548,8 +495,8 @@ export class TorrentMonitorJob extends BaseJob {
         "Auto-management check completed"
       );
 
-      // Also update last activity for active torrents
-      await this.updateActivityTracking();
+      // Update last activity for active torrents (reuse torrent list)
+      await this.updateActivityTracking(torrents);
 
       // Try retrying paused torrents
       const retryResult =
@@ -571,17 +518,13 @@ export class TorrentMonitorJob extends BaseJob {
   /**
    * Update last activity timestamp for active torrents
    */
-  private async updateActivityTracking(): Promise<void> {
-    const torrentClient = this.getTorrentClient();
-    if (!torrentClient) return;
+  private async updateActivityTracking(torrents: any[]): Promise<void> {
+    const activeHashes = torrents
+      .filter((t) => t.downloadSpeed > 0 && t.state !== "pausedDL")
+      .map((t) => t.hash);
 
-    const torrents = await torrentClient.getTorrents();
-    const activeTorrents = torrents.filter(
-      (t) => t.downloadSpeed > 0 && t.state !== "pausedDL"
-    );
+    if (activeHashes.length === 0) return;
 
-    for (const torrent of activeTorrents) {
-      await this.downloadQueueRepository.updateLastActivity(torrent.hash);
-    }
+    await this.downloadQueueRepository.batchUpdateLastActivity(activeHashes);
   }
 }

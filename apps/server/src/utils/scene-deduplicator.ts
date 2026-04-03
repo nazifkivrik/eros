@@ -9,12 +9,6 @@
 import type { Logger } from "pino";
 import type { MetadataScene } from "../infrastructure/adapters/interfaces/metadata-provider.interface.js";
 
-let logger: Logger | null = null;
-
-export function setDeduplicatorLogger(log: Logger) {
-  logger = log;
-}
-
 interface MappedScene {
   id: string;
   title: string;
@@ -30,7 +24,10 @@ interface MappedScene {
  * Deduplicate scenes based on hash, performer+date, and studio code patterns
  * Also filters out trailers (videos shorter than 60 seconds)
  */
-export function deduplicateScenes<T extends MappedScene>(scenes: T[]): T[] {
+export function deduplicateScenes<T extends MappedScene>(
+  scenes: T[],
+  logger: Logger
+): T[] {
   if (scenes.length === 0) return scenes;
 
   const uniqueScenes: T[] = [];
@@ -43,38 +40,51 @@ export function deduplicateScenes<T extends MappedScene>(scenes: T[]): T[] {
 
     // Filter 0: Remove trailers (videos shorter than 60 seconds)
     if (scene.duration && scene.duration < 60) {
-      logger?.info({ title: scene.title, duration: scene.duration }, "[Deduplicator] Skipping trailer");
+      logger.info(
+        { title: scene.title, duration: scene.duration },
+        "[Deduplicator] Skipping trailer"
+      );
       continue;
     }
 
     // 1. Hash-based deduplication (highest priority)
     if (scene.hashes && scene.hashes.length > 0) {
-      const sceneHashKeys = scene.hashes.map(h => `${h.type}:${h.hash}`);
+      const sceneHashKeys = scene.hashes.map((h) => `${h.type}:${h.hash}`);
 
       // Check if any hash has been seen before
-      const hasSeenHash = sceneHashKeys.some(hashKey => seenHashes.has(hashKey));
+      const hasSeenHash = sceneHashKeys.some((hashKey) =>
+        seenHashes.has(hashKey)
+      );
 
       if (hasSeenHash) {
-        logger?.info({ title: scene.title }, "[Deduplicator] Duplicate by hash");
+        logger.info({ title: scene.title }, "[Deduplicator] Duplicate by hash");
         isDuplicate = true;
       } else {
         // Add all hashes to seen set
-        sceneHashKeys.forEach(hashKey => seenHashes.add(hashKey));
+        sceneHashKeys.forEach((hashKey) => seenHashes.add(hashKey));
       }
     }
 
     // 2. Performer + Date combination (if no hash or hash not duplicate)
-    if (!isDuplicate && scene.performers && scene.performers.length > 0 && scene.date) {
+    if (
+      !isDuplicate &&
+      scene.performers &&
+      scene.performers.length > 0 &&
+      scene.date
+    ) {
       // Sort performer IDs to ensure consistent comparison
       const performerIds = scene.performers
-        .map(p => p.id)
+        .map((p) => p.id)
         .sort()
-        .join(',');
+        .join(",");
 
       const comboKey = `${performerIds}:${scene.date}`;
 
       if (seenPerformerDateCombos.has(comboKey)) {
-        logger?.info({ title: scene.title, date: scene.date }, "[Deduplicator] Duplicate by performer+date");
+        logger.info(
+          { title: scene.title, date: scene.date },
+          "[Deduplicator] Duplicate by performer+date"
+        );
         isDuplicate = true;
       } else {
         seenPerformerDateCombos.add(comboKey);
@@ -83,7 +93,7 @@ export function deduplicateScenes<T extends MappedScene>(scenes: T[]): T[] {
 
     // 3. Studio code pattern matching for JAV content
     // Group scenes by base studio code and later filter
-    if (!isDuplicate && scene.contentType === 'jav' && scene.code) {
+    if (!isDuplicate && scene.contentType === "jav" && scene.code) {
       const baseCode = extractBaseStudioCode(scene.code);
 
       if (baseCode) {
@@ -109,20 +119,29 @@ export function deduplicateScenes<T extends MappedScene>(scenes: T[]): T[] {
       uniqueScenes.push(groupScenes[0]);
     } else {
       // Multiple scenes with similar codes - keep the shortest one (base pattern)
-      logger?.info({ baseCode, count: groupScenes.length }, "[Deduplicator] JAV code group variations found");
+      logger.info(
+        { baseCode, count: groupScenes.length },
+        "[Deduplicator] JAV code group variations found"
+      );
       const baseScene = groupScenes.reduce((shortest, current) => {
-        const shortestCode = shortest.code || '';
-        const currentCode = current.code || '';
+        const shortestCode = shortest.code || "";
+        const currentCode = current.code || "";
         return currentCode.length < shortestCode.length ? current : shortest;
       });
 
       // Log removed scenes
-      groupScenes.forEach(s => {
+      groupScenes.forEach((s) => {
         if (s.id !== baseScene.id) {
-          logger?.info({ title: s.title, code: s.code }, "[Deduplicator] Removing variant");
+          logger.info(
+            { title: s.title, code: s.code },
+            "[Deduplicator] Removing variant"
+          );
         }
       });
-      logger?.info({ title: baseScene.title, code: baseScene.code }, "[Deduplicator] Keeping");
+      logger.info(
+        { title: baseScene.title, code: baseScene.code },
+        "[Deduplicator] Keeping"
+      );
 
       uniqueScenes.push(baseScene);
     }
@@ -135,7 +154,10 @@ export function deduplicateScenes<T extends MappedScene>(scenes: T[]): T[] {
  * Convert MetadataScene to MappedScene for deduplication
  * Extracts nested performer data to flat structure
  */
-export function toMappedScene(scene: MetadataScene): MappedScene {
+export function toMappedScene(
+  scene: MetadataScene,
+  logger: Logger
+): MappedScene {
   // Handle performers - MetadataScene has nested structure: { performer: { id, name } }
   // Note: Some performers may not have an id field, use name as fallback
   const performers = scene.performers
@@ -143,23 +165,29 @@ export function toMappedScene(scene: MetadataScene): MappedScene {
       // Extract from nested structure: { performer: { id, name } }
       if ("performer" in p && p.performer) {
         const performerId = p.performer.id || p.performer.name;
-        logger?.debug({
-          sceneId: scene.id,
-          sceneTitle: scene.title,
-          performerId: p.performer.id,
-          performerName: p.performer.name,
-          mappedId: performerId,
-        }, "[Deduplicator] Mapping performer");
+        logger.debug(
+          {
+            sceneId: scene.id,
+            sceneTitle: scene.title,
+            performerId: p.performer.id,
+            performerName: p.performer.name,
+            mappedId: performerId,
+          },
+          "[Deduplicator] Mapping performer"
+        );
         return {
           id: performerId,
           name: p.performer.name,
         };
       }
       // Unknown structure - return null to filter out
-      logger?.warn({
-        sceneId: scene.id,
-        performerData: JSON.stringify(p).slice(0, 200),
-      }, "[Deduplicator] Unknown performer structure, filtering out");
+      logger.warn(
+        {
+          sceneId: scene.id,
+          performerData: JSON.stringify(p).slice(0, 200),
+        },
+        "[Deduplicator] Unknown performer structure, filtering out"
+      );
       return null;
     })
     .filter(Boolean) as Array<{ id: string; name: string }> | undefined;
@@ -176,15 +204,18 @@ export function toMappedScene(scene: MetadataScene): MappedScene {
   };
 
   // Log mapping result for first scene
-  if (logger && performers && performers.length > 0) {
-    logger.debug({
-      sceneId: scene.id,
-      title: scene.title,
-      date: scene.date,
-      performerCount: performers.length,
-      firstPerformerId: performers[0]?.id,
-      performerIds: performers.map(p => p.id).join(','),
-    }, "[Deduplicator] Mapped scene for deduplication");
+  if (performers && performers.length > 0) {
+    logger.debug(
+      {
+        sceneId: scene.id,
+        title: scene.title,
+        date: scene.date,
+        performerCount: performers.length,
+        firstPerformerId: performers[0]?.id,
+        performerIds: performers.map((p) => p.id).join(","),
+      },
+      "[Deduplicator] Mapped scene for deduplication"
+    );
   }
 
   return mapped;
@@ -194,20 +225,23 @@ export function toMappedScene(scene: MetadataScene): MappedScene {
  * Deduplicate MetadataScene array
  * Convenience function that handles the conversion
  */
-export function deduplicateMetadataScenes(scenes: MetadataScene[]): MetadataScene[] {
+export function deduplicateMetadataScenes(
+  scenes: MetadataScene[],
+  logger: Logger
+): MetadataScene[] {
   if (scenes.length === 0) return scenes;
 
   // Convert to mapped format
-  const mappedScenes = scenes.map(toMappedScene);
+  const mappedScenes = scenes.map((s) => toMappedScene(s, logger));
 
   // Deduplicate
-  const uniqueMapped = deduplicateScenes(mappedScenes);
+  const uniqueMapped = deduplicateScenes(mappedScenes, logger);
 
   // Get unique IDs
-  const uniqueIds = new Set(uniqueMapped.map(s => s.id));
+  const uniqueIds = new Set(uniqueMapped.map((s) => s.id));
 
   // Filter original scenes to keep only unique ones
-  return scenes.filter(s => uniqueIds.has(s.id));
+  return scenes.filter((s) => uniqueIds.has(s.id));
 }
 
 /**

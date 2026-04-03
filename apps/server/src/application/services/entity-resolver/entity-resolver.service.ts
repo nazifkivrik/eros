@@ -3,12 +3,50 @@
  * Eliminates code duplication in entity lookup and creation
  */
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Database } from "@repo/database";
 import { performers, studios, scenes } from "@repo/database";
 import type { MetadataProviderRegistry } from "@/infrastructure/registries/provider-registry.js";
 import { logger } from "@/utils/logger.js";
+
+/**
+ * Find performer by external ID using SQLite JSON extraction
+ * Avoids loading all performers into memory
+ */
+async function findPerformerByExternalId(
+  db: Database,
+  source: string,
+  externalId: string
+): Promise<typeof performers.$inferSelect | null> {
+  const result = await db.query.performers.findFirst({
+    where: sql`exists (
+      select 1 from json_each(${performers.externalIds}) 
+      where json_each.value->>'$.source' = ${source} 
+        and json_each.value->>'$.id' = ${externalId}
+    )`,
+  });
+  return result ?? null;
+}
+
+/**
+ * Find studio by external ID using SQLite JSON extraction
+ * Avoids loading all studios into memory
+ */
+async function findStudioByExternalId(
+  db: Database,
+  source: string,
+  externalId: string
+): Promise<typeof studios.$inferSelect | null> {
+  const result = await db.query.studios.findFirst({
+    where: sql`exists (
+      select 1 from json_each(${studios.externalIds}) 
+      where json_each.value->>'$.source' = ${source} 
+        and json_each.value->>'$.id' = ${externalId}
+    )`,
+  });
+  return result ?? null;
+}
 
 export class EntityResolverService {
   private db: Database;
@@ -38,10 +76,7 @@ export class EntityResolverService {
 
     // If not found by local ID, try by external ID (TPDB/StashDB)
     if (!performer) {
-      const allPerformers = await this.db.query.performers.findMany();
-      performer = allPerformers.find((p) =>
-        p.externalIds.some((ext) => ext.source === "tpdb" && ext.id === entityId)
-      );
+      performer = await findPerformerByExternalId(this.db, "tpdb", entityId);
     }
 
     // If still not found and metadata provider is available, try fetching from it
@@ -55,12 +90,7 @@ export class EntityResolverService {
 
         if (externalPerformer) {
           // Check once more if performer was created in the meantime (race condition)
-          const allPerformers = await this.db.query.performers.findMany();
-          performer = allPerformers.find((p) =>
-            p.externalIds.some(
-              (ext) => ext.source === "tpdb" && ext.id === externalPerformer.id
-            )
-          );
+          performer = await findPerformerByExternalId(this.db, "tpdb", externalPerformer.id);
 
           if (!performer) {
             // Create performer in local DB
@@ -123,10 +153,7 @@ export class EntityResolverService {
 
     // If not found by local ID, try by external ID (TPDB/StashDB)
     if (!studio) {
-      const allStudios = await this.db.query.studios.findMany();
-      studio = allStudios.find((s) =>
-        s.externalIds.some((ext) => ext.source === "tpdb" && ext.id === entityId)
-      );
+      studio = await findStudioByExternalId(this.db, "tpdb", entityId);
     }
 
     // If still not found and metadata provider is available, try fetching from it
@@ -140,12 +167,7 @@ export class EntityResolverService {
 
         if (externalStudio) {
           // Check once more if studio was created in the meantime (race condition)
-          const allStudios = await this.db.query.studios.findMany();
-          studio = allStudios.find((s) =>
-            s.externalIds.some(
-              (ext) => ext.source === "tpdb" && ext.id === externalStudio.id
-            )
-          );
+          studio = await findStudioByExternalId(this.db, "tpdb", externalStudio.id);
 
           if (!studio) {
             // Create studio in local DB

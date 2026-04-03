@@ -54,8 +54,8 @@ if [ $FORCE_REBUILD -eq 1 ]; then
   docker rmi eros:latest 2>/dev/null || true
 fi
 
-# Build command
-BUILD_CMD="docker compose build"
+# Build command - just build, don't use compose (which reads .env)
+BUILD_CMD="docker build -t eros:latest ."
 
 if [ $SKIP_CACHE -eq 1 ]; then
   BUILD_CMD="$BUILD_CMD --no-cache"
@@ -74,6 +74,7 @@ if [ $? -eq 0 ]; then
   echo -e "${GREEN}✅ Build completed successfully!${NC}"
   echo ""
   echo -e "${BLUE}Next steps:${NC}"
+  echo "  • Add your media paths to .env file (see .env.example)"
   echo "  • Start containers: ${GREEN}docker compose up -d${NC}"
   echo "  • View logs:        ${GREEN}docker compose logs -f app${NC}"
   echo "  • Stop containers:  ${GREEN}docker compose down${NC}"

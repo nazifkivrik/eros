@@ -7,12 +7,14 @@ import { useMutationWithToast } from "./useMutationWithToast";
 
 export type UnifiedDownloadStatus =
   | "queued"
+  | "pending"
   | "downloading"
   | "completed"
-  | "seeding"
-  | "paused"
   | "failed"
-  | "add_failed";
+  | "paused"
+  | "seeding"
+  | "add_failed"
+  | "move_failed";
 
 export interface UnifiedDownload {
   id: string;
@@ -51,7 +53,9 @@ export function useUnifiedDownloads() {
       if (!res.ok) {
         const errorText = await res.text();
         console.error("Downloads API error:", res.status, errorText);
-        throw new Error(`Failed to fetch unified downloads: ${res.status} ${errorText}`);
+        throw new Error(
+          `Failed to fetch unified downloads: ${res.status} ${errorText}`
+        );
       }
       const data = await res.json();
       console.log("Downloads API response:", data);

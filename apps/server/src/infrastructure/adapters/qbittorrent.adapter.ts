@@ -67,6 +67,7 @@ interface QBTorrentFile {
 export class QBittorrentAdapter implements ITorrentClient {
   readonly name = "qbittorrent";
   private baseUrl: string;
+  private apiBase: string;
   private username: string;
   private password: string;
   private cookie: string | null = null;
@@ -74,6 +75,7 @@ export class QBittorrentAdapter implements ITorrentClient {
 
   constructor(config: QBittorrentConfig, logger: Logger) {
     this.baseUrl = config.url.replace(/\/$/, "");
+    this.apiBase = `${this.baseUrl}/api/v2`;
     this.username = config.username;
     this.password = config.password;
     this.logger = logger;
@@ -88,7 +90,7 @@ export class QBittorrentAdapter implements ITorrentClient {
       await this.login();
     }
 
-    const url = `${this.baseUrl}${endpoint}`;
+    const url = `${this.apiBase}${endpoint}`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
@@ -111,11 +113,14 @@ export class QBittorrentAdapter implements ITorrentClient {
       }
 
       if (!response.ok) {
-        this.logger.error({
-          endpoint,
-          status: response.status,
-          statusText: response.statusText,
-        }, "[QBittorrent] API error response");
+        this.logger.error(
+          {
+            endpoint,
+            status: response.status,
+            statusText: response.statusText,
+          },
+          "[QBittorrent] API error response"
+        );
         throw new Error(
           `qBittorrent API error: ${response.status} ${response.statusText}`
         );
@@ -130,18 +135,21 @@ export class QBittorrentAdapter implements ITorrentClient {
 
       // Log for debugging setLocation endpoint
       if (endpoint.includes("setLocation")) {
-        this.logger.info({
-          endpoint,
-          result: text,
-          resultLength: text.length,
-          contentType,
-        }, "[QBittorrent] API response text");
+        this.logger.info(
+          {
+            endpoint,
+            result: text,
+            resultLength: text.length,
+            contentType,
+          },
+          "[QBittorrent] API response text"
+        );
       }
 
       return text as T;
     } catch (error) {
       clearTimeout(timeoutId);
-      if (error instanceof Error && error.name === 'AbortError') {
+      if (error instanceof Error && error.name === "AbortError") {
         this.logger.error({ endpoint }, "[QBittorrent] Request timeout");
         throw new Error(`qBittorrent API timeout: ${endpoint}`);
       }
@@ -158,7 +166,7 @@ export class QBittorrentAdapter implements ITorrentClient {
     const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout for login
 
     try {
-      const response = await fetch(`${this.baseUrl}/api/v2/auth/login`, {
+      const response = await fetch(`${this.apiBase}/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -182,20 +190,23 @@ export class QBittorrentAdapter implements ITorrentClient {
       this.logger.debug("qBittorrent login successful");
     } catch (error) {
       clearTimeout(timeoutId);
-      if (error instanceof Error && error.name === 'AbortError') {
+      if (error instanceof Error && error.name === "AbortError") {
         throw new Error("qBittorrent login timeout");
       }
       throw error;
     }
   }
 
-  async getTorrents(filter?: string, category?: string): Promise<TorrentInfo[]> {
+  async getTorrents(
+    filter?: string,
+    category?: string
+  ): Promise<TorrentInfo[]> {
     const params = new URLSearchParams();
     if (filter) params.append("filter", filter);
     if (category) params.append("category", category);
 
     const torrents = await this.request<QBTorrentInfo[]>(
-      `/api/v2/torrents/info?${params.toString()}`
+      `/torrents/info?${params.toString()}`
     );
 
     // Map QBittorrent format to interface format
@@ -220,7 +231,7 @@ export class QBittorrentAdapter implements ITorrentClient {
 
   async getTorrentProperties(hash: string): Promise<TorrentProperties> {
     const props = await this.request<QBTorrentProperties>(
-      `/api/v2/torrents/properties?hash=${hash}`
+      `/torrents/properties?hash=${hash}`
     );
 
     return {
@@ -267,7 +278,7 @@ export class QBittorrentAdapter implements ITorrentClient {
       formData.append("paused", options.paused.toString());
     }
 
-    const result = await this.request<string>("/api/v2/torrents/add", {
+    const result = await this.request<string>("/torrents/add", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -295,18 +306,26 @@ export class QBittorrentAdapter implements ITorrentClient {
   ): Promise<string | null> {
     // STEP 1: Get snapshot BEFORE adding (capture current state)
     const beforeTorrents = await this.getTorrents();
-    const beforeHashes = new Set(beforeTorrents.map((t) => t.hash.toLowerCase()));
+    const beforeHashes = new Set(
+      beforeTorrents.map((t) => t.hash.toLowerCase())
+    );
 
-    this.logger.debug({
-      beforeCount: beforeTorrents.length,
-      matchTitle: options.matchTitle,
-      category: options.category,
-    }, "addTorrentAndGetHash: captured BEFORE state");
+    this.logger.debug(
+      {
+        beforeCount: beforeTorrents.length,
+        matchTitle: options.matchTitle,
+        category: options.category,
+      },
+      "addTorrentAndGetHash: captured BEFORE state"
+    );
 
     // STEP 2: Add the torrent
     const success = await this.addTorrent(options);
     if (!success) {
-      this.logger.error({ matchTitle: options.matchTitle }, "addTorrentAndGetHash: addTorrent failed");
+      this.logger.error(
+        { matchTitle: options.matchTitle },
+        "addTorrentAndGetHash: addTorrent failed"
+      );
       return null;
     }
 
@@ -319,7 +338,9 @@ export class QBittorrentAdapter implements ITorrentClient {
 
       // Get snapshot AFTER adding (this becomes the new baseline for next call)
       const afterTorrents = await this.getTorrents();
-      const afterHashes = new Set(afterTorrents.map((t) => t.hash.toLowerCase()));
+      const afterHashes = new Set(
+        afterTorrents.map((t) => t.hash.toLowerCase())
+      );
       const elapsed = Date.now() - startTime;
 
       // Find the difference: hashes in AFTER but not in BEFORE
@@ -330,14 +351,17 @@ export class QBittorrentAdapter implements ITorrentClient {
         if (!beforeHashes.has(hash)) {
           newHashes.push(torrent.hash);
 
-          this.logger.info({
-            newHash: torrent.hash,
-            newTorrentName: torrent.name,
-            category: torrent.category,
-            beforeCount: beforeHashes.size,
-            afterCount: afterHashes.size,
-            elapsed,
-          }, "addTorrentAndGetHash: detected new torrent (differential)");
+          this.logger.info(
+            {
+              newHash: torrent.hash,
+              newTorrentName: torrent.name,
+              category: torrent.category,
+              beforeCount: beforeHashes.size,
+              afterCount: afterHashes.size,
+              elapsed,
+            },
+            "addTorrentAndGetHash: detected new torrent (differential)"
+          );
         }
       }
 
@@ -350,37 +374,46 @@ export class QBittorrentAdapter implements ITorrentClient {
         if (options.matchInfoHash) {
           const normalizedInfoHash = options.matchInfoHash.toLowerCase();
           if (newHash.toLowerCase() === normalizedInfoHash) {
-            this.logger.info({
-              matchInfoHash: options.matchInfoHash,
-              foundHash: newTorrent.hash,
-              elapsed,
-            }, "addTorrentAndGetHash: matched by infoHash");
+            this.logger.info(
+              {
+                matchInfoHash: options.matchInfoHash,
+                foundHash: newTorrent.hash,
+                elapsed,
+              },
+              "addTorrentAndGetHash: matched by infoHash"
+            );
             return newTorrent.hash;
           }
         }
 
         // Priority 2: Category match (if specified)
         if (options.category && newTorrent.category === options.category) {
-          this.logger.info({
-            matchTitle: options.matchTitle,
-            foundHash: newTorrent.hash,
-            foundName: newTorrent.name,
-            category: newTorrent.category,
-            elapsed,
-            reason: "new torrent in target category",
-          }, "addTorrentAndGetHash: matched by category");
+          this.logger.info(
+            {
+              matchTitle: options.matchTitle,
+              foundHash: newTorrent.hash,
+              foundName: newTorrent.name,
+              category: newTorrent.category,
+              elapsed,
+              reason: "new torrent in target category",
+            },
+            "addTorrentAndGetHash: matched by category"
+          );
           return newTorrent.hash;
         }
 
         // Priority 3: Only one new torrent appeared
         if (newHashes.length === 1) {
-          this.logger.info({
-            matchTitle: options.matchTitle,
-            foundHash: newTorrent.hash,
-            foundName: newTorrent.name,
-            elapsed,
-            reason: "sole new torrent",
-          }, "addTorrentAndGetHash: matched (single new torrent)");
+          this.logger.info(
+            {
+              matchTitle: options.matchTitle,
+              foundHash: newTorrent.hash,
+              foundName: newTorrent.name,
+              elapsed,
+              reason: "sole new torrent",
+            },
+            "addTorrentAndGetHash: matched (single new torrent)"
+          );
           return newTorrent.hash;
         }
       }
@@ -394,38 +427,50 @@ export class QBittorrentAdapter implements ITorrentClient {
           if (newTorrent) {
             const torrentNameLower = newTorrent.name.toLowerCase();
 
-            if (torrentNameLower.includes(matchTitleLower) || matchTitleLower.includes(torrentNameLower)) {
-              this.logger.info({
-                matchTitle: options.matchTitle,
-                foundHash: newTorrent.hash,
-                foundName: newTorrent.name,
-                elapsed,
-                reason: "title match among new torrents",
-              }, "addTorrentAndGetHash: matched by title");
+            if (
+              torrentNameLower.includes(matchTitleLower) ||
+              matchTitleLower.includes(torrentNameLower)
+            ) {
+              this.logger.info(
+                {
+                  matchTitle: options.matchTitle,
+                  foundHash: newTorrent.hash,
+                  foundName: newTorrent.name,
+                  elapsed,
+                  reason: "title match among new torrents",
+                },
+                "addTorrentAndGetHash: matched by title"
+              );
               return newTorrent.hash;
             }
           }
         }
       }
 
-      this.logger.debug({
-        elapsed,
-        beforeCount: beforeHashes.size,
-        afterCount: afterHashes.size,
-        newHashesCount: newHashes.length,
-        matchTitle: options.matchTitle,
-      }, "addTorrentAndGetHash: waiting for new torrent");
+      this.logger.debug(
+        {
+          elapsed,
+          beforeCount: beforeHashes.size,
+          afterCount: afterHashes.size,
+          newHashesCount: newHashes.length,
+          matchTitle: options.matchTitle,
+        },
+        "addTorrentAndGetHash: waiting for new torrent"
+      );
     }
 
     // Timeout reached
-    this.logger.warn({
-      matchTitle: options.matchTitle,
-      matchInfoHash: options.matchInfoHash,
-      category: options.category,
-      timeout,
-      elapsed: Date.now() - startTime,
-      beforeCount: beforeHashes.size,
-    }, "addTorrentAndGetHash: hash lookup timed out");
+    this.logger.warn(
+      {
+        matchTitle: options.matchTitle,
+        matchInfoHash: options.matchInfoHash,
+        category: options.category,
+        timeout,
+        elapsed: Date.now() - startTime,
+        beforeCount: beforeHashes.size,
+      },
+      "addTorrentAndGetHash: hash lookup timed out"
+    );
     return null;
   }
 
@@ -433,7 +478,7 @@ export class QBittorrentAdapter implements ITorrentClient {
     const formData = new URLSearchParams();
     formData.append("hashes", hash);
 
-    const result = await this.request<string>("/api/v2/torrents/pause", {
+    const result = await this.request<string>("/torrents/pause", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -448,7 +493,7 @@ export class QBittorrentAdapter implements ITorrentClient {
     const formData = new URLSearchParams();
     formData.append("hashes", hash);
 
-    const result = await this.request<string>("/api/v2/torrents/resume", {
+    const result = await this.request<string>("/torrents/resume", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -464,7 +509,7 @@ export class QBittorrentAdapter implements ITorrentClient {
     formData.append("hashes", hash);
     formData.append("deleteFiles", (deleteFiles ?? false).toString());
 
-    const result = await this.request<string>("/api/v2/torrents/delete", {
+    const result = await this.request<string>("/torrents/delete", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -485,7 +530,7 @@ export class QBittorrentAdapter implements ITorrentClient {
 
     if (downloadLimit !== undefined) {
       formData.append("limit", downloadLimit.toString());
-      await this.request<string>("/api/v2/torrents/setDownloadLimit", {
+      await this.request<string>("/torrents/setDownloadLimit", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -496,7 +541,7 @@ export class QBittorrentAdapter implements ITorrentClient {
 
     if (uploadLimit !== undefined) {
       formData.set("limit", uploadLimit.toString());
-      await this.request<string>("/api/v2/torrents/setUploadLimit", {
+      await this.request<string>("/torrents/setUploadLimit", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -518,7 +563,7 @@ export class QBittorrentAdapter implements ITorrentClient {
     if (priority === "top") {
       // qBittorrent uses priority: 1 = top, 7 = bottom
       formData.append("id", "1");
-      const result = await this.request<string>("/api/v2/torrents/setPriority", {
+      const result = await this.request<string>("/torrents/setPriority", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -528,7 +573,7 @@ export class QBittorrentAdapter implements ITorrentClient {
       return result === "Ok.";
     } else if (priority === "bottom") {
       formData.append("id", "7");
-      const result = await this.request<string>("/api/v2/torrents/setPriority", {
+      const result = await this.request<string>("/torrents/setPriority", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -540,7 +585,7 @@ export class QBittorrentAdapter implements ITorrentClient {
       // Priority is a number, map to qBittorrent's range (1-7)
       const qbPriority = Math.max(1, Math.min(7, Math.round(priority)));
       formData.append("id", qbPriority.toString());
-      const result = await this.request<string>("/api/v2/torrents/setPriority", {
+      const result = await this.request<string>("/torrents/setPriority", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -567,7 +612,7 @@ export class QBittorrentAdapter implements ITorrentClient {
       const formData = new URLSearchParams();
       // Set download limit (0 = unlimited)
       formData.append("limit", downloadLimit.toString());
-      await this.request<string>("/api/v2/transfer/setDownloadLimit", {
+      await this.request<string>("/transfer/setDownloadLimit", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -580,7 +625,7 @@ export class QBittorrentAdapter implements ITorrentClient {
       const formData = new URLSearchParams();
       // Set upload limit (0 = unlimited)
       formData.append("limit", uploadLimit.toString());
-      await this.request<string>("/api/v2/transfer/setUploadLimit", {
+      await this.request<string>("/transfer/setUploadLimit", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -607,22 +652,28 @@ export class QBittorrentAdapter implements ITorrentClient {
    * Note: setLocation returns empty string on success (HTTP 200), not "Ok."
    */
   async setLocation(hash: string, location: string): Promise<boolean> {
-    this.logger.info({
-      hash,
-      location,
-      apiEndpoint: "/api/v2/torrents/setLocation",
-    }, "[QBittorrent] setLocation API call");
+    this.logger.info(
+      {
+        hash,
+        location,
+        apiEndpoint: "/torrents/setLocation",
+      },
+      "[QBittorrent] setLocation API call"
+    );
 
     const formData = new URLSearchParams();
     formData.append("hashes", hash);
     formData.append("location", location);
 
-    this.logger.debug({
-      formDataBody: formData.toString(),
-    }, "[QBittorrent] Request body");
+    this.logger.debug(
+      {
+        formDataBody: formData.toString(),
+      },
+      "[QBittorrent] Request body"
+    );
 
     try {
-      const result = await this.request<string>("/api/v2/torrents/setLocation", {
+      const result = await this.request<string>("/torrents/setLocation", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -633,21 +684,27 @@ export class QBittorrentAdapter implements ITorrentClient {
       // setLocation returns empty string on success (HTTP 200 with no body)
       // If we get here without throwing, it means HTTP 200 was returned
       const success = true;
-      this.logger.info({
-        hash,
-        location,
-        result,
-        resultLength: result.length,
-        success,
-      }, "[QBittorrent] setLocation API response");
+      this.logger.info(
+        {
+          hash,
+          location,
+          result,
+          resultLength: result.length,
+          success,
+        },
+        "[QBittorrent] setLocation API response"
+      );
 
       return success;
     } catch (error) {
-      this.logger.error({
-        error,
-        hash,
-        location,
-      }, "[QBittorrent] setLocation API error");
+      this.logger.error(
+        {
+          error,
+          hash,
+          location,
+        },
+        "[QBittorrent] setLocation API error"
+      );
       throw error;
     }
   }
@@ -673,7 +730,7 @@ export class QBittorrentAdapter implements ITorrentClient {
    * Get files in a torrent
    */
   async getTorrentFiles(hash: string): Promise<QBTorrentFile[]> {
-    return this.request<QBTorrentFile[]>(`/api/v2/torrents/files?hash=${hash}`);
+    return this.request<QBTorrentFile[]>(`/torrents/files?hash=${hash}`);
   }
 
   /**
@@ -683,7 +740,7 @@ export class QBittorrentAdapter implements ITorrentClient {
     Record<string, { name: string; savePath: string }>
   > {
     return this.request<Record<string, { name: string; savePath: string }>>(
-      "/api/v2/torrents/categories"
+      "/torrents/categories"
     );
   }
 
@@ -695,16 +752,13 @@ export class QBittorrentAdapter implements ITorrentClient {
     formData.append("category", name);
     formData.append("savePath", savePath);
 
-    const result = await this.request<string>(
-      "/api/v2/torrents/createCategory",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: formData,
-      }
-    );
+    const result = await this.request<string>("/torrents/createCategory", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: formData,
+    });
 
     return result === "Ok.";
   }
@@ -713,10 +767,13 @@ export class QBittorrentAdapter implements ITorrentClient {
 /**
  * Factory function to create QBittorrentAdapter
  */
-export function createQBittorrentAdapter(config: {
-  url: string;
-  username: string;
-  password: string;
-}, logger: Logger): QBittorrentAdapter {
+export function createQBittorrentAdapter(
+  config: {
+    url: string;
+    username: string;
+    password: string;
+  },
+  logger: Logger
+): QBittorrentAdapter {
   return new QBittorrentAdapter(config, logger);
 }

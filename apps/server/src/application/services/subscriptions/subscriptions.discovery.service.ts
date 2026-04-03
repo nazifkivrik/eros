@@ -1,13 +1,19 @@
 import type { Logger } from "pino";
-import type { IMetadataProvider, MetadataScene } from "@/infrastructure/adapters/interfaces/metadata-provider.interface.js";
+import type {
+  IMetadataProvider,
+  MetadataScene,
+} from "@/infrastructure/adapters/interfaces/metadata-provider.interface.js";
 import type { MetadataProviderRegistry } from "@/infrastructure/registries/provider-registry.js";
 import { SubscriptionsScenesService } from "./subscriptions.scenes.service.js";
 import { SubscriptionsCoreService } from "./subscriptions.core.service.js";
-import type { SaveSceneDTO, LinkScenePerformersDTO } from "./subscriptions.scenes.service.js";
+import type {
+  SaveSceneDTO,
+  LinkScenePerformersDTO,
+} from "./subscriptions.scenes.service.js";
 import { eq } from "drizzle-orm";
 import { performers, studios } from "@repo/database";
 import type { Database } from "@repo/database";
-import { deduplicateMetadataScenes, setDeduplicatorLogger } from "@/utils/scene-deduplicator.js";
+import { deduplicateMetadataScenes } from "@/utils/scene-deduplicator.js";
 
 /**
  * Discovery Options
@@ -61,8 +67,6 @@ export class SubscriptionsDiscoveryService {
     this.subscriptionsCoreService = subscriptionsCoreService;
     this.db = db;
     this.logger = logger;
-    // Set logger for deduplicator utility
-    setDeduplicatorLogger(logger);
   }
 
   /**
@@ -79,12 +83,21 @@ export class SubscriptionsDiscoveryService {
     performerId: string,
     options: DiscoveryOptions = {}
   ): Promise<DiscoveryResult> {
-    this.logger.info({ performerId, options }, "Starting scene discovery for performer");
+    this.logger.info(
+      { performerId, options },
+      "Starting scene discovery for performer"
+    );
 
     const metadataProvider = this.getMetadataProvider();
     if (!metadataProvider) {
       this.logger.warn("No metadata provider configured");
-      return { totalFound: 0, totalSaved: 0, totalSkipped: 0, allSceneIds: [], errors: ["No metadata provider"] };
+      return {
+        totalFound: 0,
+        totalSaved: 0,
+        totalSkipped: 0,
+        allSceneIds: [],
+        errors: ["No metadata provider"],
+      };
     }
 
     const result: DiscoveryResult = {
@@ -103,35 +116,57 @@ export class SubscriptionsDiscoveryService {
         return result;
       }
 
-      this.logger.info({ performerId, tpdbId }, "Fetching scenes from metadata provider");
+      this.logger.info(
+        { performerId, tpdbId },
+        "Fetching scenes from metadata provider"
+      );
 
       // Fetch scenes from all content types
       const contentTypes = this.getContentTypes(options);
       const allScenes: any[] = [];
 
       for (const contentType of contentTypes) {
-        let scenesResponse: { scenes: unknown[]; pagination?: { total: number } } | null = null;
+        let scenesResponse: {
+          scenes: unknown[];
+          pagination?: { total: number };
+        } | null = null;
         try {
-          this.logger.info({ contentType, tpdbId }, `Fetching ${contentType} scenes`);
+          this.logger.info(
+            { contentType, tpdbId },
+            `Fetching ${contentType} scenes`
+          );
 
           let page = 1;
           let hasMore = true;
 
           while (hasMore) {
             scenesResponse = metadataProvider.getPerformerScenes
-              ? await metadataProvider.getPerformerScenes(tpdbId, contentType, page)
+              ? await metadataProvider.getPerformerScenes(
+                  tpdbId,
+                  contentType,
+                  page
+                )
               : null;
 
-            if (!scenesResponse || !scenesResponse.scenes || scenesResponse.scenes.length === 0) {
+            if (
+              !scenesResponse ||
+              !scenesResponse.scenes ||
+              scenesResponse.scenes.length === 0
+            ) {
               hasMore = false;
             } else {
               allScenes.push(...scenesResponse.scenes);
               result.totalFound += scenesResponse.scenes.length;
 
               // Check pagination
-              if (scenesResponse.pagination && scenesResponse.pagination.total !== undefined) {
+              if (
+                scenesResponse.pagination &&
+                scenesResponse.pagination.total !== undefined
+              ) {
                 const pageSize = 25;
-                const expectedPages = Math.ceil(scenesResponse.pagination.total / pageSize);
+                const expectedPages = Math.ceil(
+                  scenesResponse.pagination.total / pageSize
+                );
                 hasMore = page < expectedPages;
               } else {
                 // Fallback: stop if page wasn't full
@@ -142,7 +177,10 @@ export class SubscriptionsDiscoveryService {
             }
           }
 
-          this.logger.info({ contentType, count: scenesResponse?.scenes?.length || 0 }, "Fetched scenes");
+          this.logger.info(
+            { contentType, count: scenesResponse?.scenes?.length || 0 },
+            "Fetched scenes"
+          );
         } catch (error) {
           const errorMsg = `Failed to fetch ${contentType} scenes`;
           this.logger.error({ error }, errorMsg);
@@ -156,27 +194,38 @@ export class SubscriptionsDiscoveryService {
       // - Hash-based deduplication (ohash/phash)
       // - Performer + Date combination deduplication
       // - JAV code pattern matching
-      this.logger.info({ totalScenes: allScenes.length }, "Starting scene deduplication");
+      this.logger.info(
+        { totalScenes: allScenes.length },
+        "Starting scene deduplication"
+      );
 
       // Log sample scene data to debug structure
       if (allScenes.length > 0) {
         const sample = allScenes[0] as any;
-        this.logger.info({
-          sampleScene: {
-            id: sample.id,
-            title: sample.title,
-            contentType: sample.contentType,
-            duration: sample.duration,
-            hasHashes: !!sample.hashes,
-            hashesCount: sample.hashes?.length || 0,
-            hasPerformers: !!sample.performers,
-            performersCount: sample.performers?.length || 0,
-            performersStructure: sample.performers?.[0] ? JSON.stringify(sample.performers[0]).slice(0, 100) : 'none',
-          }
-        }, "Sample scene structure from TPDB");
+        this.logger.info(
+          {
+            sampleScene: {
+              id: sample.id,
+              title: sample.title,
+              contentType: sample.contentType,
+              duration: sample.duration,
+              hasHashes: !!sample.hashes,
+              hashesCount: sample.hashes?.length || 0,
+              hasPerformers: !!sample.performers,
+              performersCount: sample.performers?.length || 0,
+              performersStructure: sample.performers?.[0]
+                ? JSON.stringify(sample.performers[0]).slice(0, 100)
+                : "none",
+            },
+          },
+          "Sample scene structure from TPDB"
+        );
       }
 
-      const uniqueScenes = deduplicateMetadataScenes(allScenes as MetadataScene[]);
+      const uniqueScenes = deduplicateMetadataScenes(
+        allScenes as MetadataScene[],
+        this.logger
+      );
       const duplicateCount = allScenes.length - uniqueScenes.length;
       result.totalFound = uniqueScenes.length;
 
@@ -184,7 +233,7 @@ export class SubscriptionsDiscoveryService {
         {
           total: allScenes.length,
           unique: uniqueScenes.length,
-          duplicates: duplicateCount
+          duplicates: duplicateCount,
         },
         "Scene deduplication complete"
       );
@@ -193,7 +242,11 @@ export class SubscriptionsDiscoveryService {
       if (options.autoSave !== false) {
         for (const scene of uniqueScenes) {
           try {
-            const sceneId = await this.saveSceneFromMetadata(scene, "performer", performerId);
+            const sceneId = await this.saveSceneFromMetadata(
+              scene,
+              "performer",
+              performerId
+            );
             if (sceneId) {
               result.totalSaved++;
               // Track all processed scene IDs (both new and existing)
@@ -211,7 +264,10 @@ export class SubscriptionsDiscoveryService {
               result.totalSkipped++;
             }
           } catch (error) {
-            this.logger.error({ error, scene: scene.title }, "Failed to save scene");
+            this.logger.error(
+              { error, scene: scene.title },
+              "Failed to save scene"
+            );
             result.errors.push(`Failed to save scene: ${scene.title}`);
           }
         }
@@ -229,7 +285,10 @@ export class SubscriptionsDiscoveryService {
 
       return result;
     } catch (error) {
-      this.logger.error({ error, performerId }, "Failed to discover scenes for performer");
+      this.logger.error(
+        { error, performerId },
+        "Failed to discover scenes for performer"
+      );
       result.errors.push("Discovery failed: " + (error as Error).message);
       return result;
     }
@@ -242,12 +301,18 @@ export class SubscriptionsDiscoveryService {
     studioId: string,
     options: DiscoveryOptions = {}
   ): Promise<DiscoveryResult> {
-    this.logger.info({ studioId, options }, "Starting scene discovery for studio");
+    this.logger.info(
+      { studioId, options },
+      "Starting scene discovery for studio"
+    );
 
     // Note: TPDB doesn't have getSiteScenes, so we skip for now
     // This can be implemented later when StashDB or other providers support it
 
-    this.logger.info({ studioId }, "Studio scene discovery not yet implemented for TPDB");
+    this.logger.info(
+      { studioId },
+      "Studio scene discovery not yet implemented for TPDB"
+    );
     return {
       totalFound: 0,
       totalSaved: 0,
@@ -281,7 +346,10 @@ export class SubscriptionsDiscoveryService {
   /**
    * Search for scenes by query
    */
-  async searchScenes(query: string, _options: DiscoveryOptions = {}): Promise<any[]> {
+  async searchScenes(
+    query: string,
+    _options: DiscoveryOptions = {}
+  ): Promise<any[]> {
     this.logger.info({ query }, "Searching for scenes");
 
     const metadataProvider = this.getMetadataProvider();
@@ -302,10 +370,13 @@ export class SubscriptionsDiscoveryService {
   /**
    * Sync scenes for an existing subscription
    */
-  async syncScenesForSubscription(subscriptionId: string): Promise<DiscoveryResult> {
+  async syncScenesForSubscription(
+    subscriptionId: string
+  ): Promise<DiscoveryResult> {
     this.logger.info({ subscriptionId }, "Syncing scenes for subscription");
 
-    const subscription = await this.subscriptionsCoreService.getById(subscriptionId);
+    const subscription =
+      await this.subscriptionsCoreService.getById(subscriptionId);
 
     if (subscription.entityType === "performer") {
       return await this.discoverScenesForPerformer(subscription.entityId, {
@@ -340,7 +411,9 @@ export class SubscriptionsDiscoveryService {
         where: eq(performers.id, entityId),
       });
       // Use externalIds array to find TPDB ID
-      return performer?.externalIds?.find((e) => e.source === "tpdb")?.id || null;
+      return (
+        performer?.externalIds?.find((e) => e.source === "tpdb")?.id || null
+      );
     } else {
       const studio = await this.db.query.studios.findFirst({
         where: eq(studios.id, entityId),
@@ -380,7 +453,9 @@ export class SubscriptionsDiscoveryService {
   /**
    * Get content types to fetch based on options
    */
-  private getContentTypes(options: DiscoveryOptions): Array<"scene" | "jav" | "movie"> {
+  private getContentTypes(
+    options: DiscoveryOptions
+  ): Array<"scene" | "jav" | "movie"> {
     const types: Array<"scene" | "jav" | "movie"> = [];
 
     if (options.includeScene !== false) types.push("scene");

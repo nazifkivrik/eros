@@ -13,6 +13,7 @@ import {
 } from "./match-types.js";
 import { TitleNormalizer } from "./title-normalizer.js";
 import { DateExtractor } from "./date-extractor.js";
+import { levenshteinSimilarity } from "@/utils/levenshtein.js";
 
 export class SceneMatcher {
   private aiMatchingService: AIMatchingService;
@@ -29,7 +30,6 @@ export class SceneMatcher {
     this.logsService = logsService;
   }
   // ... (rest of class)
-
 
   /**
    * Find the best matching scene for a torrent title
@@ -86,7 +86,10 @@ export class SceneMatcher {
 
       // 3. Partial match
       if (!candidate) {
-        const partialMatch = this.matchPartial(normalizedTorrentTitle, normalizedSceneTitle);
+        const partialMatch = this.matchPartial(
+          normalizedTorrentTitle,
+          normalizedSceneTitle
+        );
         if (partialMatch.match) {
           candidate = {
             scene,
@@ -229,7 +232,10 @@ export class SceneMatcher {
     threshold: number
   ): Promise<number | null> {
     try {
-      const similarity = await this.aiMatchingService.calculateSimilarity(title1, title2);
+      const similarity = await this.aiMatchingService.calculateSimilarity(
+        title1,
+        title2
+      );
 
       if (similarity >= threshold) {
         return similarity;
@@ -251,60 +257,13 @@ export class SceneMatcher {
     title2: string,
     threshold: number
   ): number | null {
-    const similarity = this.calculateSimilarity(title1, title2);
+    const similarity = levenshteinSimilarity(title1, title2);
 
     if (similarity >= threshold) {
       return similarity;
     }
 
     return null;
-  }
-
-  /**
-   * Calculate similarity between two strings using Levenshtein distance
-   * Returns a value between 0 and 1 (1 = identical)
-   */
-  private calculateSimilarity(str1: string, str2: string): number {
-    const longer = str1.length > str2.length ? str1 : str2;
-    const shorter = str1.length > str2.length ? str2 : str1;
-
-    if (longer.length === 0) return 1.0;
-
-    const distance = this.levenshteinDistance(longer, shorter);
-    return (longer.length - distance) / longer.length;
-  }
-
-  /**
-   * Calculate Levenshtein distance between two strings
-   */
-  private levenshteinDistance(str1: string, str2: string): number {
-    const matrix: number[][] = [];
-
-    // Initialize matrix
-    for (let i = 0; i <= str2.length; i++) {
-      matrix[i] = [i];
-    }
-
-    for (let j = 0; j <= str1.length; j++) {
-      matrix[0][j] = j;
-    }
-
-    // Fill matrix
-    for (let i = 1; i <= str2.length; i++) {
-      for (let j = 1; j <= str1.length; j++) {
-        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-          matrix[i][j] = matrix[i - 1][j - 1];
-        } else {
-          matrix[i][j] = Math.min(
-            matrix[i - 1][j - 1] + 1, // substitution
-            matrix[i][j - 1] + 1, // insertion
-            matrix[i - 1][j] + 1 // deletion
-          );
-        }
-      }
-    }
-
-    return matrix[str2.length][str1.length];
   }
 }
 

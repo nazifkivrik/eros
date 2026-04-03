@@ -5,14 +5,22 @@
  */
 
 import type { Logger } from "pino";
-import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
+import type {
+  TorrentInfo,
+  ITorrentClient,
+} from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
 import type { TorrentClientRegistry } from "@/infrastructure/registries/provider-registry.js";
 import type { DownloadQueueRepository } from "@/infrastructure/repositories/download-queue.repository.js";
-import type {
-  TorrentAutoManagementSettings,
-  AutoPauseReason,
+import {
+  DEFAULT_TORRENT_AUTO_MANAGEMENT,
+  type TorrentAutoManagementSettings,
+  type AutoPauseReason,
 } from "@repo/shared-types";
-import { DEFAULT_TORRENT_AUTO_MANAGEMENT } from "@repo/shared-types";
+
+// Queue item type extracted from repository method return type
+type QueueItem = NonNullable<
+  Awaited<ReturnType<DownloadQueueRepository["findByQbitHash"]>>
+>;
 
 export class TorrentManagementService {
   private downloadQueueRepository: DownloadQueueRepository;
@@ -65,13 +73,25 @@ export class TorrentManagementService {
     const torrents = await torrentClient.getTorrents();
     const results = { checked: 0, paused: 0 };
 
+    // Pre-load all queue items in a single query to avoid N+1
+    const hashes = torrents.map((t) => t.hash.toLowerCase());
+    const queueItems = (await this.downloadQueueRepository.findByHashes(
+      hashes
+    )) as QueueItem[];
+    const queueMap: Map<string, QueueItem> = new Map(
+      queueItems.map((item): [string, QueueItem] => [
+        (item.qbitHash ?? "").toLowerCase(),
+        item,
+      ])
+    );
+
     for (const torrent of torrents) {
       results.checked++;
 
-      const shouldPause = await this.shouldPauseTorrent(torrent);
+      const shouldPause = await this.shouldPauseTorrent(torrent, queueMap);
 
       if (shouldPause.pause) {
-        await this.pauseTorrent(torrent, shouldPause.reason!);
+        await this.pauseTorrent(torrent, shouldPause.reason!, queueMap);
         results.paused++;
       }
     }
@@ -82,22 +102,31 @@ export class TorrentManagementService {
   /**
    * Evaluate if a torrent should be paused
    */
-  private async shouldPauseTorrent(torrent: any): Promise<{
+  private async shouldPauseTorrent(
+    torrent: TorrentInfo,
+    queueMap: Map<string, QueueItem>
+  ): Promise<{
     pause: boolean;
     reason?: AutoPauseReason;
   }> {
-    // Skip if already completed or manually paused
-    if (torrent.progress >= 1.0 || torrent.state === "pausedDL") {
+    // Skip completed torrents
+    if (torrent.progress >= 1.0) {
+      return { pause: false };
+    }
+
+    // If already paused in qBittorrent, ensure DB tracking is consistent
+    if (torrent.state === "pausedDL") {
+      await this.ensurePauseTracking(torrent, queueMap);
       return { pause: false };
     }
 
     // Check for metadata stuck
     if (this.settings.pauseOnMetadataStuck) {
-      const shouldPause = await this.checkMetadataStuck(torrent);
+      const shouldPause = await this.checkMetadataStuck(torrent, queueMap);
       if (shouldPause) return { pause: true, reason: "metadata" };
     }
 
-    // Check for stalled
+    // Check for stalled (includes stalledDL state check)
     if (this.settings.pauseOnStalled) {
       const shouldPause = this.checkStalled(torrent);
       if (shouldPause) return { pause: true, reason: "stalled" };
@@ -105,44 +134,83 @@ export class TorrentManagementService {
 
     // Check for slow speed
     if (this.settings.pauseOnSlowSpeed) {
-      const shouldPause = await this.checkSlowSpeed(torrent);
+      const shouldPause = await this.checkSlowSpeed(torrent, queueMap);
       if (shouldPause) return { pause: true, reason: "slow" };
     }
 
     // Check for no activity
     if (this.settings.pauseOnNoActivity) {
-      const shouldPause = await this.checkNoActivity(torrent);
+      const shouldPause = await this.checkNoActivity(torrent, queueMap);
       if (shouldPause) return { pause: true, reason: "no_activity" };
     }
 
     return { pause: false };
   }
 
-  private checkStalled(torrent: any): boolean {
+  /**
+   * Ensure DB tracking is consistent for already-paused torrents
+   * Fixes orphaned pauses where autoManagementPaused was never set
+   */
+  private async ensurePauseTracking(
+    torrent: TorrentInfo,
+    queueMap: Map<string, QueueItem>
+  ): Promise<void> {
+    const queueItem = queueMap.get(torrent.hash.toLowerCase());
+
+    if (queueItem && !queueItem.autoManagementPaused) {
+      // Torrent is paused in qBittorrent but not tracked — fix it
+      await this.downloadQueueRepository.updateAutoManagementTracking(
+        queueItem.id,
+        {
+          autoManagementPaused: true,
+          autoPauseReason: queueItem.autoPauseReason || "stalled",
+          autoPauseCount: (queueItem.autoPauseCount || 0) + 1,
+          lastAutoPauseAt: new Date().toISOString(),
+        }
+      );
+
+      this.logger.info(
+        {
+          hash: torrent.hash,
+          name: torrent.name,
+          queueItemId: queueItem.id,
+        },
+        "Fixed orphaned pause tracking for torrent"
+      );
+    }
+  }
+
+  private checkStalled(torrent: TorrentInfo): boolean {
     const { maxSeeders, minSpeed } = this.settings.stallThreshold;
 
-    // No seeders
-    if (torrent.num_seeds <= maxSeeders) {
+    // qBittorrent reports stalledDL when no data is being received
+    if (torrent.state === "stalledDL") {
       return true;
     }
 
-    // Low seeders AND low speed
-    if (torrent.num_seeds < 2 && torrent.dlspeed < minSpeed) {
+    // No seeders available
+    if (torrent.numSeeds <= maxSeeders) {
+      return true;
+    }
+
+    // Low seeders AND low speed (uses mapped field name from adapter)
+    if (torrent.numSeeds < 2 && torrent.downloadSpeed < minSpeed) {
       return true;
     }
 
     return false;
   }
 
-  private async checkMetadataStuck(torrent: any): Promise<boolean> {
+  private async checkMetadataStuck(
+    torrent: TorrentInfo,
+    queueMap: Map<string, QueueItem>
+  ): Promise<boolean> {
     if (torrent.state !== "metaDL") {
       return false;
     }
 
     // Get queue item to check how long it's been in metadata state
-    const queueItem = await this.downloadQueueRepository.findByQbitHash(
-      torrent.hash
-    );
+    const queueItem = queueMap.get(torrent.hash.toLowerCase());
 
     if (queueItem?.lastAutoPauseAt) {
       const pauseTime = new Date(queueItem.lastAutoPauseAt).getTime();
@@ -159,15 +227,16 @@ export class TorrentManagementService {
     return minutesInState > this.settings.metadataTimeoutMinutes;
   }
 
-  private async checkSlowSpeed(torrent: any): Promise<boolean> {
-    if (torrent.dlspeed >= this.settings.slowSpeedThreshold) {
+  private async checkSlowSpeed(
+    torrent: TorrentInfo,
+    queueMap: Map<string, QueueItem>
+  ): Promise<boolean> {
+    if (torrent.downloadSpeed >= this.settings.slowSpeedThreshold) {
       return false;
     }
 
     // Need to track how long it's been slow - check database
-    const queueItem = await this.downloadQueueRepository.findByQbitHash(
-      torrent.hash
-    );
+    const queueItem = queueMap.get(torrent.hash.toLowerCase());
 
     if (queueItem?.lastActivityAt) {
       const lastActivity = new Date(queueItem.lastActivityAt).getTime();
@@ -178,10 +247,11 @@ export class TorrentManagementService {
     return false;
   }
 
-  private async checkNoActivity(torrent: any): Promise<boolean> {
-    const queueItem = await this.downloadQueueRepository.findByQbitHash(
-      torrent.hash
-    );
+  private async checkNoActivity(
+    torrent: TorrentInfo,
+    queueMap: Map<string, QueueItem>
+  ): Promise<boolean> {
+    const queueItem = queueMap.get(torrent.hash.toLowerCase());
 
     if (!queueItem?.lastActivityAt) {
       return false;
@@ -194,8 +264,9 @@ export class TorrentManagementService {
   }
 
   private async pauseTorrent(
-    torrent: any,
-    reason: AutoPauseReason
+    torrent: TorrentInfo,
+    reason: AutoPauseReason,
+    queueMap: Map<string, QueueItem>
   ): Promise<void> {
     const torrentClient = this.getTorrentClient();
     if (!torrentClient) return;
@@ -207,10 +278,8 @@ export class TorrentManagementService {
       // Move to bottom of queue
       await torrentClient.setTorrentPriority(torrent.hash, "bottom");
 
-      // Update database
-      const queueItem = await this.downloadQueueRepository.findByQbitHash(
-        torrent.hash
-      );
+      // Update database using pre-loaded queue item
+      const queueItem = queueMap.get(torrent.hash.toLowerCase());
       if (queueItem) {
         await this.downloadQueueRepository.updateAutoManagementTracking(
           queueItem.id,
@@ -301,7 +370,7 @@ export class TorrentManagementService {
       try {
         await torrentClient.resumeTorrent(item.qbitHash);
 
-        // Update database
+        // Update database: clear pause tracking, reset activity
         await this.downloadQueueRepository.updateAutoManagementTracking(
           item.id,
           {
@@ -311,8 +380,15 @@ export class TorrentManagementService {
           }
         );
 
+        // Also reset lastActivityAt so slow-speed timer starts fresh
+        await this.downloadQueueRepository.updateLastActivity(item.qbitHash);
+
         this.logger.info(
-          { id: item.id, hash: item.qbitHash },
+          {
+            id: item.id,
+            hash: item.qbitHash,
+            attempt: (item.autoPauseCount || 0) + 1,
+          },
           "Retried auto-paused torrent"
         );
         retried++;
@@ -327,11 +403,11 @@ export class TorrentManagementService {
   private async getActiveDownloadCount(): Promise<number> {
     const items = await this.downloadQueueRepository.findAll();
     return items.filter(
-      (i) => i.status === "downloading" && !i.autoManagementPaused
+      (i: QueueItem) => i.status === "downloading" && !i.autoManagementPaused
     ).length;
   }
 
-  private sortByCombinedPriority(items: any[]): any[] {
+  private sortByCombinedPriority(items: QueueItem[]): QueueItem[] {
     return [...items].sort((a, b) => {
       // Priority = fewer retries = higher priority (lower number)
       // We use retry count as a penalty

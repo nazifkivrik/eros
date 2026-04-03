@@ -14,20 +14,21 @@ services:
       - NODE_ENV=production
       - SESSION_SECRET=${SESSION_SECRET:-change-this-secret-in-production}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
-      - MEDIA_PATH_1=${MEDIA_PATH_1}
-      - MEDIA_PATH_2=${MEDIA_PATH_2}
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
     volumes:
       - ./data:/data:rw
-      - ${MEDIA_PATH_1}:${MEDIA_PATH_1}:rw
-      - ${MEDIA_PATH_2}:${MEDIA_PATH_2}:rw
-
     networks:
       - eros-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "node", "-e", "Promise.all([fetch('http://localhost:3000'),fetch('http://localhost:3001/health')]).then(()=>process.exit(0)).catch(()=>process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "Promise.all([fetch('http://localhost:3000'),fetch('http://localhost:3001/health')]).then(()=>process.exit(0)).catch(()=>process.exit(1))",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -45,13 +46,12 @@ services:
     volumes:
       - ./jellyfin/config:/config
       - ./jellyfin/cache:/cache
-      - ${MEDIA_PATH_1}:${MEDIA_PATH_1}:ro
-      - ${MEDIA_PATH_2}:${MEDIA_PATH_2}:ro
     ports:
       - "8096:8096"
     networks:
       - eros-network
     restart: unless-stopped
+
   # qBittorrent
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
@@ -64,9 +64,6 @@ services:
       - TORRENTING_PORT=6881
     volumes:
       - ./qbittorrent/config:/config
-      # IMPORTANT: Must use same paths as Eros app for proper file sharing
-      - ${MEDIA_PATH_1}:${MEDIA_PATH_1}:rw
-      - ${MEDIA_PATH_2}:${MEDIA_PATH_2}:rw
     ports:
       - "8080:8080"
       - "6881:6881"
@@ -104,24 +101,25 @@ services:
       - eros-network
     restart: unless-stopped
     profiles:
-      - flaresolverr  # Only start with: docker-compose --profile flaresolverr up
+      - flaresolverr
 
 networks:
   eros-network:
     driver: bridge
 
-# Directory structure:
-# Add your disk mount paths in .env as MEDIA_PATH_1, MEDIA_PATH_2, etc.
-# Example:
-#   MEDIA_PATH_1=/data/500gb/media
-#   MEDIA_PATH_2=/data/1tb/media
+# =============================================================================
+# MEDIA PATHS - Add your media paths below
+# =============================================================================
+# To add media paths, uncomment and edit the volumes sections for each service.
+# Your .env file is automatically read by docker compose.
 #
-# Container paths match host paths (no translation):
-# - Host: /data/500gb/media → Container: /data/500gb/media
-# - Host: /data/1tb/media   → Container: /data/1tb/media
+# Example (.env):
+#   MEDIA_PATH_1=/mnt/pve/DATA1000/media
+#   MEDIA_PATH_2=/mnt/pve/SSD500/media
 #
-# In Eros UI, add download paths that match:
-# - /data/500gb/media/scenes
-# - /data/1tb/media/scenes
-#
-# IMPORTANT: All containers (app, qbittorrent, jellyfin) see the same paths
+# Then uncomment volumes like:
+#   volumes:
+#     - ./data:/data:rw
+#     - ${MEDIA_PATH_1}:${MEDIA_PATH_1}:rw
+#     - ${MEDIA_PATH_2}:${MEDIA_PATH_2}:rw
+# =============================================================================

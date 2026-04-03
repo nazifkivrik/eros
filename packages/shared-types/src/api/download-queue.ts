@@ -2,8 +2,9 @@ import { z } from "zod";
 import { ImageSchema } from "./entities.js";
 
 export const DownloadStatusSchema = z.enum([
-  "queued",
-  "downloading",
+  "queued", // DB'de oluşturuldu, client'a henüz gönderilmedi
+  "pending", // Client'a gönderildi, client kendi kuyruğunda bekliyor (metadata çekiyor vs.)
+  "downloading", // Aktif indiriyor
   "completed",
   "failed",
   "paused",
@@ -103,7 +104,13 @@ export const EnhancedDownloadsResponseSchema = z.object({
 export type DownloadStatus = z.infer<typeof DownloadStatusSchema>;
 export type SceneFile = z.infer<typeof SceneFileSchema>;
 export type DownloadQueueItem = z.infer<typeof DownloadQueueItemSchema>;
-export type DownloadQueueItemResponse = z.infer<typeof DownloadQueueItemResponseSchema>;
+export type DownloadQueueItemResponse = z.infer<
+  typeof DownloadQueueItemResponseSchema
+>;
 export type EnhancedDownloadItem = z.infer<typeof EnhancedDownloadItemSchema>;
-export type DownloadQueueListResponse = z.infer<typeof DownloadQueueListResponseSchema>;
-export type EnhancedDownloadsResponse = z.infer<typeof EnhancedDownloadsResponseSchema>;
+export type DownloadQueueListResponse = z.infer<
+  typeof DownloadQueueListResponseSchema
+>;
+export type EnhancedDownloadsResponse = z.infer<
+  typeof EnhancedDownloadsResponseSchema
+>;

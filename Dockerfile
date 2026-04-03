@@ -40,7 +40,7 @@ RUN pnpm install --frozen-lockfile
 FROM base AS builder
 WORKDIR /app
 
-# Tüm node_modules'u deps stage'den kopyala
+# Tüm node_modules'u deps stage'den kopyala (build için dev dependencies gerekli)
 COPY --from=deps /app /app
 
 # Kaynak kodlarını üzerine kopyala (sadece src dosyaları)

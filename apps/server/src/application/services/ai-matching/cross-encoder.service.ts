@@ -1,5 +1,11 @@
-import { AutoTokenizer, AutoModelForSequenceClassification, env, type Tensor } from "@xenova/transformers";
+import {
+  AutoTokenizer,
+  AutoModelForSequenceClassification,
+  env,
+  type Tensor,
+} from "@xenova/transformers";
 import { logger } from "@/utils/logger.js";
+import { levenshteinSimilarity } from "@/utils/levenshtein.js";
 import { mkdirSync, existsSync, readdirSync } from "fs";
 import { join, dirname } from "path";
 
@@ -12,26 +18,8 @@ env.cacheDir = modelPath;
 env.localModelPath = modelPath;
 env.allowLocalModels = true;
 
-// Ensure the model directory exists
+// Model directory path (used throughout class)
 const modelDir = modelPath;
-if (!existsSync(modelDir)) {
-  try {
-    mkdirSync(modelDir, { recursive: true });
-    logger.info(`Created AI model directory: ${modelDir}`);
-  } catch (error) {
-    logger.warn({ error }, `Failed to create AI model directory: ${modelDir}`);
-  }
-} else {
-  logger.info(`AI model directory exists: ${modelDir}`);
-}
-
-// Log the cache configuration
-logger.info({
-  cacheDir: env.cacheDir,
-  localModelPath: env.localModelPath,
-  allowLocalModels: env.allowLocalModels,
-  modelDir,
-}, "AI Model Cache Configuration:");
 
 /**
  * Query structure for cross-encoder matching
@@ -78,8 +66,45 @@ export class CrossEncoderService {
   private isInitialized = false;
   private initializationPromise: Promise<void> | null = null;
   private readonly modelName = "Xenova/ms-marco-MiniLM-L-6-v2";
-  private readonly modelLoadTimeout = parseInt(process.env.AI_MODEL_TIMEOUT || "600000"); // 10 minutes default
+  private readonly modelLoadTimeout = parseInt(
+    process.env.AI_MODEL_TIMEOUT || "600000"
+  ); // 10 minutes default
   private loadError: Error | null = null;
+  private modelDirEnsured = false;
+
+  /**
+   * Ensure the model directory exists (creates if needed)
+   * Called once at initialization to avoid blocking the event loop at module import time
+   */
+  private ensureModelDir(): void {
+    if (this.modelDirEnsured) {
+      return;
+    }
+
+    if (!existsSync(modelDir)) {
+      try {
+        mkdirSync(modelDir, { recursive: true });
+        logger.info(`Created AI model directory: ${modelDir}`);
+      } catch (error) {
+        logger.warn(
+          { error },
+          `Failed to create AI model directory: ${modelDir}`
+        );
+      }
+    } else {
+      logger.info(`AI model directory exists: ${modelDir}`);
+    }
+
+    // Log cache contents for debugging
+    try {
+      const files = readdirSync(modelDir, { recursive: true });
+      logger.debug({ files, count: files.length }, `Cache contents:`);
+    } catch (e) {
+      logger.debug({ error: e }, `Could not list cache files:`);
+    }
+
+    this.modelDirEnsured = true;
+  }
 
   /**
    * Initialize the Cross-Encoder model and tokenizer
@@ -87,6 +112,9 @@ export class CrossEncoderService {
    * Timeout is set to 5 minutes to allow for large model downloads
    */
   async initialize(): Promise<void> {
+    // Ensure model directory exists before loading
+    this.ensureModelDir();
+
     if (this.isInitialized) {
       return;
     }
@@ -100,27 +128,32 @@ export class CrossEncoderService {
       try {
         logger.info(`🔄 Loading Cross-Encoder model: ${this.modelName}`);
         logger.info(`📁 Model cache path: ${modelPath}`);
-        logger.info(`⏱️ Timeout: ${this.modelLoadTimeout}ms (${this.modelLoadTimeout / 1000}s)`);
+        logger.info(
+          `⏱️ Timeout: ${this.modelLoadTimeout}ms (${this.modelLoadTimeout / 1000}s)`
+        );
 
         // Check if model directory exists and has files
         const cacheExists = existsSync(modelDir);
 
         if (cacheExists) {
           logger.info(`✅ Model cache directory exists: ${modelDir}`);
-          // List files in cache for debugging
-          try {
-            const files = readdirSync(modelDir, { recursive: true });
-            logger.debug({ files, count: files.length }, `Cache contents:`);
-          } catch (e) {
-            logger.debug({ error: e }, `Could not list cache files:`);
-          }
         } else {
-          logger.warn(`⚠️ Model cache directory NOT found, will download: ${modelDir}`);
+          logger.warn(
+            `⚠️ Model cache directory NOT found, will download: ${modelDir}`
+          );
         }
 
         // Set timeout for model loading
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`Model loading timeout after ${this.modelLoadTimeout}ms`)), this.modelLoadTimeout)
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `Model loading timeout after ${this.modelLoadTimeout}ms`
+                )
+              ),
+            this.modelLoadTimeout
+          )
         );
 
         // Track whether we're downloading or loading from cache
@@ -133,10 +166,14 @@ export class CrossEncoderService {
             progress_callback: (progress: any) => {
               if (progress.status === "progress") {
                 hasDownloaded = true;
-                logger.debug(`Model download: ${(progress.progress * 100).toFixed(1)}%`);
+                logger.debug(
+                  `Model download: ${(progress.progress * 100).toFixed(1)}%`
+                );
               } else if (progress.status === "done") {
                 hasDownloaded = true;
-                logger.info(`✅ Model component saved to cache: ${progress.file}`);
+                logger.info(
+                  `✅ Model component saved to cache: ${progress.file}`
+                );
               } else if (progress.status === "initiate") {
                 if (!progress.file?.includes("onnx/model_quantized.onnx")) {
                   // Only log non-ONNX files to reduce noise (model is the big one)
@@ -148,16 +185,23 @@ export class CrossEncoderService {
           AutoTokenizer.from_pretrained(this.modelName),
         ]);
 
-        [this.model, this.tokenizer] = await Promise.race([loadPromise, timeoutPromise]);
+        [this.model, this.tokenizer] = await Promise.race([
+          loadPromise,
+          timeoutPromise,
+        ]);
 
         this.isInitialized = true;
         this.loadError = null;
         const loadTime = ((Date.now() - startTime) / 1000).toFixed(2);
 
         if (hasDownloaded) {
-          logger.info(`✅ Cross-Encoder model DOWNLOADED and loaded in ${loadTime}s`);
+          logger.info(
+            `✅ Cross-Encoder model DOWNLOADED and loaded in ${loadTime}s`
+          );
         } else {
-          logger.info(`✅ Cross-Encoder model loaded from CACHE in ${loadTime}s`);
+          logger.info(
+            `✅ Cross-Encoder model loaded from CACHE in ${loadTime}s`
+          );
         }
         logger.info(`🎯 Model is ready for matching`);
       } catch (error) {
@@ -256,14 +300,17 @@ export class CrossEncoderService {
    *
    * INCREASED PENALTY: With strict first-name matching, penalties are higher for mismatches
    */
-  private calculatePerformerPenalty(queryPerformer: string, candidatePerformers: string[]): number {
+  private calculatePerformerPenalty(
+    queryPerformer: string,
+    candidatePerformers: string[]
+  ): number {
     // Extract the main performer name (first word) from query
     // Query may be like "Jade Harper Jade Hutchison Jadehub" - we want just "Jade Harper"
     const normalizedQuery = this.normalizePerformerName(queryPerformer);
-    const queryWords = normalizedQuery.split(' ').filter(w => w.length > 2);
+    const queryWords = normalizedQuery.split(" ").filter((w) => w.length > 2);
 
     // Use first 2 words as main performer name (typically "First Last")
-    let mainQueryName = queryWords.slice(0, 2).join(' ');
+    let mainQueryName = queryWords.slice(0, 2).join(" ");
     if (mainQueryName.length < 3) {
       mainQueryName = queryWords[0] || normalizedQuery;
     }
@@ -272,8 +319,12 @@ export class CrossEncoderService {
     let bestMatchScore = 0;
 
     for (const candidatePerformer of candidatePerformers) {
-      const normalizedCandidate = this.normalizePerformerName(candidatePerformer);
-      const matchScore = this.calculatePerformerSimilarity(mainQueryName, normalizedCandidate);
+      const normalizedCandidate =
+        this.normalizePerformerName(candidatePerformer);
+      const matchScore = this.calculatePerformerSimilarity(
+        mainQueryName,
+        normalizedCandidate
+      );
       bestMatchScore = Math.max(bestMatchScore, matchScore);
     }
 
@@ -299,15 +350,17 @@ export class CrossEncoderService {
    * Removes common suffixes/prefixes and normalizes spacing
    */
   private normalizePerformerName(name: string): string {
-    return name
-      .toLowerCase()
-      .trim()
-      // Remove common suffixes
-      .replace(/\s+(aka|aka\.|also known as)\s.*$/i, "")
-      // Remove special characters but keep spaces
-      .replace(/[^\w\s]/g, "")
-      // Normalize multiple spaces
-      .replace(/\s+/g, " ");
+    return (
+      name
+        .toLowerCase()
+        .trim()
+        // Remove common suffixes
+        .replace(/\s+(aka|aka\.|also known as)\s.*$/i, "")
+        // Remove special characters but keep spaces
+        .replace(/[^\w\s]/g, "")
+        // Normalize multiple spaces
+        .replace(/\s+/g, " ")
+    );
   }
 
   /**
@@ -328,7 +381,7 @@ export class CrossEncoderService {
     const words2 = name2.split(" ").filter((w) => w.length > 0);
 
     if (words1.length === 0 || words2.length === 0) {
-      return this.levenshteinSimilarity(name1, name2);
+      return levenshteinSimilarity(name1, name2);
     }
 
     // STRICT CHECK: First names (first word) must match EXACTLY (case-insensitive)
@@ -339,10 +392,13 @@ export class CrossEncoderService {
     if (firstName1 !== firstName2) {
       // First names don't match - return LOW similarity
       // Still allow some similarity for edge cases (typos, slight variations)
-      const stringSim = this.levenshteinSimilarity(name1, name2);
+      const stringSim = levenshteinSimilarity(name1, name2);
 
       // If first names are very similar (e.g., "Jade" vs "Jade" with special chars), allow moderate score
-      if (firstName1.length > 3 && this.levenshteinSimilarity(firstName1, firstName2) > 0.9) {
+      if (
+        firstName1.length > 3 &&
+        levenshteinSimilarity(firstName1, firstName2) > 0.9
+      ) {
         return stringSim * 0.5; // Max 0.5 similarity if first names are close but not exact
       }
 
@@ -374,56 +430,12 @@ export class CrossEncoderService {
 
     // If we have significant word overlap, check if the FULL names match well
     if (wordOverlap > 0) {
-      const stringSim = this.levenshteinSimilarity(name1, name2);
+      const stringSim = levenshteinSimilarity(name1, name2);
       // Both word overlap AND string similarity must be high for a good match
-      return (wordOverlap * 0.6) + (stringSim * 0.4);
+      return wordOverlap * 0.6 + stringSim * 0.4;
     }
 
-    return this.levenshteinSimilarity(name1, name2);
-  }
-
-  /**
-   * Calculate Levenshtein-based string similarity
-   */
-  private levenshteinSimilarity(str1: string, str2: string): number {
-    const longer = str1.length > str2.length ? str1 : str2;
-    const shorter = str1.length > str2.length ? str2 : str1;
-
-    if (longer.length === 0) return 1.0;
-
-    const editDistance = this.levenshteinDistance(longer, shorter);
-    return (longer.length - editDistance) / longer.length;
-  }
-
-  /**
-   * Calculate Levenshtein distance between two strings
-   */
-  private levenshteinDistance(str1: string, str2: string): number {
-    const matrix: number[][] = [];
-
-    for (let i = 0; i <= str2.length; i++) {
-      matrix[i] = [i];
-    }
-
-    for (let j = 0; j <= str1.length; j++) {
-      matrix[0][j] = j;
-    }
-
-    for (let i = 1; i <= str2.length; i++) {
-      for (let j = 1; j <= str1.length; j++) {
-        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-          matrix[i][j] = matrix[i - 1][j - 1];
-        } else {
-          matrix[i][j] = Math.min(
-            matrix[i - 1][j - 1] + 1,
-            matrix[i][j - 1] + 1,
-            matrix[i - 1][j] + 1
-          );
-        }
-      }
-    }
-
-    return matrix[str2.length][str1.length];
+    return levenshteinSimilarity(name1, name2);
   }
 
   /**
@@ -464,23 +476,36 @@ export class CrossEncoderService {
 
       // Apply performer name validation penalty
       // If query has a performer but candidate performers don't contain it, heavily penalize
-      if (query.performer && candidate.performers && candidate.performers.length > 0) {
-        const performerPenalty = this.calculatePerformerPenalty(query.performer, candidate.performers);
+      if (
+        query.performer &&
+        candidate.performers &&
+        candidate.performers.length > 0
+      ) {
+        const performerPenalty = this.calculatePerformerPenalty(
+          query.performer,
+          candidate.performers
+        );
         if (performerPenalty > 0) {
           score = score * (1 - performerPenalty);
-          logger.info({
-            queryPerformer: query.performer,
-            candidatePerformers: candidate.performers,
-            originalScore: this.sigmoid(logitValue),
-            penalty: performerPenalty,
-            finalScore: score,
-          }, "🎯 Performer penalty applied - names don't match well");
+          logger.info(
+            {
+              queryPerformer: query.performer,
+              candidatePerformers: candidate.performers,
+              originalScore: this.sigmoid(logitValue),
+              penalty: performerPenalty,
+              finalScore: score,
+            },
+            "🎯 Performer penalty applied - names don't match well"
+          );
         }
       }
 
       return score;
     } catch (error) {
-      logger.error({ error, query, candidate: candidate.id }, "Failed to score pair:");
+      logger.error(
+        { error, query, candidate: candidate.id },
+        "Failed to score pair:"
+      );
       throw error;
     }
   }
@@ -531,12 +556,15 @@ export class CrossEncoderService {
 
       // Debug: log first query/candidate to see structure
       if (queries.length > 0 && candidates.length > 0) {
-        logger.info({
-          sampleQuery: queries[0],
-          sampleCandidate: candidates[0],
-          totalQueries: queries.length,
-          totalCandidates: candidates.length,
-        }, "🔍 Batch scoring input structure");
+        logger.info(
+          {
+            sampleQuery: queries[0],
+            sampleCandidate: candidates[0],
+            totalQueries: queries.length,
+            totalCandidates: candidates.length,
+          },
+          "🔍 Batch scoring input structure"
+        );
       }
 
       for (let i = 0; i < queries.length; i++) {
@@ -548,24 +576,37 @@ export class CrossEncoderService {
           let score = this.sigmoid(logitValue);
 
           // Apply performer name validation penalty (same logic as scorePair)
-          if (query.performer && candidate.performers && candidate.performers.length > 0) {
-            const performerPenalty = this.calculatePerformerPenalty(query.performer, candidate.performers);
+          if (
+            query.performer &&
+            candidate.performers &&
+            candidate.performers.length > 0
+          ) {
+            const performerPenalty = this.calculatePerformerPenalty(
+              query.performer,
+              candidate.performers
+            );
 
             // Also apply title similarity penalty - if titles are very different, reduce score
             // Use Levenshtein similarity for titles (NOT calculatePerformerSimilarity which is for names)
             let titlePenalty = 0;
             if (query.title && candidate.title) {
               // Use levenshteinSimilarity for general string comparison
-              const titleSim = this.levenshteinSimilarity(query.title, candidate.title);
+              const titleSim = levenshteinSimilarity(
+                query.title,
+                candidate.title
+              );
               // If title similarity is very low (<0.3), apply penalty
               if (titleSim < 0.3) {
                 titlePenalty = 0.5 * (1 - titleSim);
-                logger.info({
-                  queryTitle: query.title,
-                  candidateTitle: candidate.title,
-                  titleSimilarity: titleSim,
-                  titlePenalty,
-                }, "🔍 Title penalty applied - titles don't match");
+                logger.info(
+                  {
+                    queryTitle: query.title,
+                    candidateTitle: candidate.title,
+                    titleSimilarity: titleSim,
+                    titlePenalty,
+                  },
+                  "🔍 Title penalty applied - titles don't match"
+                );
               }
             }
 
@@ -574,17 +615,20 @@ export class CrossEncoderService {
             if (totalPenalty > 0) {
               const originalScore = score;
               score = score * (1 - totalPenalty);
-              logger.info({
-                queryPerformer: query.performer,
-                candidatePerformers: candidate.performers,
-                queryTitle: query.title,
-                candidateTitle: candidate.title,
-                originalScore,
-                performerPenalty,
-                titlePenalty,
-                totalPenalty,
-                finalScore: score,
-              }, "🎯 Penalty applied - performers or titles don't match");
+              logger.info(
+                {
+                  queryPerformer: query.performer,
+                  candidatePerformers: candidate.performers,
+                  queryTitle: query.title,
+                  candidateTitle: candidate.title,
+                  originalScore,
+                  performerPenalty,
+                  titlePenalty,
+                  totalPenalty,
+                  finalScore: score,
+                },
+                "🎯 Penalty applied - performers or titles don't match"
+              );
             }
           }
 
@@ -636,27 +680,39 @@ export class CrossEncoderService {
       }
 
       // Sort candidates by score to get top 3
-      const sortedCandidates = candidates.map((c, i) => ({ candidate: c, score: scores[i], index: i }))
+      const sortedCandidates = candidates
+        .map((c, i) => ({ candidate: c, score: scores[i], index: i }))
         .sort((a, b) => b.score - a.score);
 
       // Check threshold
       if (bestScore < threshold) {
-        logger.info({
-          query: query.title,
-          bestScore,
-          threshold,
-          top3: sortedCandidates.slice(0, 3).map(({ candidate, score }) => ({ title: candidate.title, score })),
-        }, "✗ No match above threshold");
+        logger.info(
+          {
+            query: query.title,
+            bestScore,
+            threshold,
+            top3: sortedCandidates.slice(0, 3).map(({ candidate, score }) => ({
+              title: candidate.title,
+              score,
+            })),
+          },
+          "✗ No match above threshold"
+        );
         return null;
       }
 
-      logger.info({
-        query: query.title,
-        matchedTitle: candidates[bestIdx].title,
-        score: bestScore,
-        threshold,
-        top3: sortedCandidates.slice(0, 3).map(({ candidate, score }) => ({ title: candidate.title, score })),
-      }, "✓ Best match found");
+      logger.info(
+        {
+          query: query.title,
+          matchedTitle: candidates[bestIdx].title,
+          score: bestScore,
+          threshold,
+          top3: sortedCandidates
+            .slice(0, 3)
+            .map(({ candidate, score }) => ({ title: candidate.title, score })),
+        },
+        "✓ Best match found"
+      );
 
       return {
         candidate: candidates[bestIdx],
@@ -725,7 +781,10 @@ export class CrossEncoderService {
         };
       });
     } catch (error) {
-      logger.error({ error, queryCount: queries.length }, "Failed to batch find matches:");
+      logger.error(
+        { error, queryCount: queries.length },
+        "Failed to batch find matches:"
+      );
       throw error;
     }
   }
@@ -738,14 +797,23 @@ export class CrossEncoderService {
     candidates: Candidate[],
     threshold: number
   ): Promise<Array<MatchResult | null>> {
-    const queriesPerChunk = Math.max(1, Math.floor(this.BATCH_SIZE / candidates.length));
+    const queriesPerChunk = Math.max(
+      1,
+      Math.floor(this.BATCH_SIZE / candidates.length)
+    );
     const results: Array<MatchResult | null> = [];
 
-    logger.info(`Chunking ${queries.length} queries into batches of ${queriesPerChunk}`);
+    logger.info(
+      `Chunking ${queries.length} queries into batches of ${queriesPerChunk}`
+    );
 
     for (let i = 0; i < queries.length; i += queriesPerChunk) {
       const chunkQueries = queries.slice(i, i + queriesPerChunk);
-      const chunkResults = await this.findBestMatchBatch(chunkQueries, candidates, threshold);
+      const chunkResults = await this.findBestMatchBatch(
+        chunkQueries,
+        candidates,
+        threshold
+      );
       results.push(...chunkResults);
     }
 
@@ -758,7 +826,11 @@ export class CrossEncoderService {
    * - uncertain: 0.35 <= score < 0.65 (auto-download as metadata-less if indexer count >= 3)
    * - unknown: score < 0.35 (auto-download as metadata-less if indexer count >= 3)
    */
-  classifyMatch(score: number, matchThreshold = 0.65, unknownThreshold = 0.35): "matched" | "uncertain" | "unknown" {
+  classifyMatch(
+    score: number,
+    matchThreshold = 0.65,
+    unknownThreshold = 0.35
+  ): "matched" | "uncertain" | "unknown" {
     if (score >= matchThreshold) return "matched";
     if (score >= unknownThreshold) return "uncertain";
     return "unknown";
@@ -828,9 +900,7 @@ export class CrossEncoderService {
    * Loads model before matching, unloads after completion
    * This is the recommended way to use the service for memory efficiency
    */
-  async withAutoLoad<T>(
-    matchingFn: () => Promise<T>
-  ): Promise<T> {
+  async withAutoLoad<T>(matchingFn: () => Promise<T>): Promise<T> {
     try {
       // Model will be auto-loaded on first use (lazy load in scorePair/scoreBatch)
       const result = await matchingFn();

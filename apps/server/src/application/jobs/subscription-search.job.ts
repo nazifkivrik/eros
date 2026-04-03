@@ -11,22 +11,77 @@ import type { SubscriptionsRepository } from "@/infrastructure/repositories/subs
 import type { DownloadQueueRepository } from "@/infrastructure/repositories/download-queue.repository.js";
 import type { LogsService } from "../../application/services/logs.service.js";
 import type { TorrentSearchService } from "../../application/services/torrent-search/index.js";
-import type { TorrentClientRegistry, IndexerRegistry } from "@/infrastructure/registries/provider-registry.js";
+import type {
+  TorrentClientRegistry,
+  IndexerRegistry,
+} from "@/infrastructure/registries/provider-registry.js";
 import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
 import type { FileManagerService } from "../../application/services/file-management/file-manager.service.js";
 import type { SettingsService } from "../../application/services/settings.service.js";
 import type { DownloadQueueService } from "../../application/services/download-queue.service.js";
 import type { CrossEncoderService } from "../../application/services/ai-matching/cross-encoder.service.js";
 import type { Database } from "@repo/database";
-import { eq, and } from "drizzle-orm";
-import { subscriptions, performers, studios, scenes, downloadQueue, performersScenes, sceneFiles } from "@repo/database";
+import { eq, and, inArray } from "drizzle-orm";
+import {
+  subscriptions,
+  performers,
+  studios,
+  scenes,
+  downloadQueue,
+  performersScenes,
+  sceneFiles,
+} from "@repo/database";
 import { nanoid } from "nanoid";
+
+// Type aliases - derived from actual database query results
+type SubscriptionRow = NonNullable<
+  Awaited<ReturnType<Database["query"]["subscriptions"]["findFirst"]>>
+>;
+type PerformerRow = NonNullable<
+  Awaited<ReturnType<Database["query"]["performers"]["findFirst"]>>
+>;
+type StudioRow = NonNullable<
+  Awaited<ReturnType<Database["query"]["studios"]["findFirst"]>>
+>;
+type SceneRow = NonNullable<
+  Awaited<ReturnType<Database["query"]["scenes"]["findFirst"]>>
+>;
+type PerformersScenesRow = Awaited<
+  ReturnType<Database["query"]["performersScenes"]["findMany"]>
+>[number];
+type SceneFindManyRow = Awaited<
+  ReturnType<Database["query"]["scenes"]["findMany"]>
+>[number];
+
+interface TorrentMatch {
+  sceneId?: string;
+  title: string;
+  size: number;
+  seeders: number;
+  quality: string;
+  infoHash?: string;
+  downloadUrl?: string;
+  indexerId?: string;
+  magnetLink?: string;
+}
+
+interface EntityResult {
+  id: string;
+  name: string;
+  aliases?: string[] | string | null;
+}
+
+interface SceneSubscriptionPayload {
+  subscription: SubscriptionRow;
+  scene: SceneRow;
+}
 
 const MAX_TORRENTS_PER_RUN = 50;
 
 export class SubscriptionSearchJob extends BaseJob {
   readonly name = "subscription-search";
-  readonly description = "Search for new content from subscribed performers and studios";
+  readonly description =
+    "Search for new content from subscribed performers and studios";
 
   private subscriptionsRepository: SubscriptionsRepository;
   private downloadQueueRepository: DownloadQueueRepository;
@@ -104,9 +159,15 @@ export class SubscriptionSearchJob extends BaseJob {
       );
 
       // Separate subscriptions by type
-      const performerSubscriptions = activeSubscriptions.filter(s => s.entityType === "performer");
-      const studioSubscriptions = activeSubscriptions.filter(s => s.entityType === "studio");
-      const sceneSubscriptions = activeSubscriptions.filter(s => s.entityType === "scene");
+      const performerSubscriptions = activeSubscriptions.filter(
+        (s: SubscriptionRow) => s.entityType === "performer"
+      );
+      const studioSubscriptions = activeSubscriptions.filter(
+        (s: SubscriptionRow) => s.entityType === "studio"
+      );
+      const sceneSubscriptions = activeSubscriptions.filter(
+        (s: SubscriptionRow) => s.entityType === "scene"
+      );
 
       this.logger.info(
         `Processing ${performerSubscriptions.length} performers, ${studioSubscriptions.length} studios, ${sceneSubscriptions.length} scene subscriptions`
@@ -117,16 +178,20 @@ export class SubscriptionSearchJob extends BaseJob {
       for (let i = 0; i < performerSubscriptions.length; i++) {
         const subscription = performerSubscriptions[i];
         try {
-          const foundIds = await this.processPerformerSubscription(
+          const foundIds = await this.processEntitySubscription(
+            "performer",
             subscription,
             i + 1,
             performerSubscriptions.length
           );
-          foundIds.forEach(id => foundSceneIds.add(id));
+          foundIds.forEach((id) => foundSceneIds.add(id));
         } catch (error) {
           this.logger.error(
             {
-              error: error instanceof Error ? { message: error.message, stack: error.stack } : String(error),
+              error:
+                error instanceof Error
+                  ? { message: error.message, stack: error.stack }
+                  : String(error),
               subscriptionId: subscription.id,
               performerId: subscription.entityId,
             },
@@ -139,16 +204,20 @@ export class SubscriptionSearchJob extends BaseJob {
       for (let i = 0; i < studioSubscriptions.length; i++) {
         const subscription = studioSubscriptions[i];
         try {
-          const foundIds = await this.processStudioSubscription(
+          const foundIds = await this.processEntitySubscription(
+            "studio",
             subscription,
             i + 1,
             studioSubscriptions.length
           );
-          foundIds.forEach(id => foundSceneIds.add(id));
+          foundIds.forEach((id) => foundSceneIds.add(id));
         } catch (error) {
           this.logger.error(
             {
-              error: error instanceof Error ? { message: error.message, stack: error.stack } : String(error),
+              error:
+                error instanceof Error
+                  ? { message: error.message, stack: error.stack }
+                  : String(error),
               subscriptionId: subscription.id,
               studioId: subscription.entityId,
             },
@@ -187,60 +256,79 @@ export class SubscriptionSearchJob extends BaseJob {
     }
   }
 
-  private async getActiveSubscriptions() {
+  private async getActiveSubscriptions(): Promise<SubscriptionRow[]> {
     return await this.db.query.subscriptions.findMany({
       where: eq(subscriptions.isSubscribed, true),
     });
   }
 
-  private async processPerformerSubscription(
-    subscription: any,
+  private async processEntitySubscription(
+    entityType: "performer" | "studio",
+    subscription: SubscriptionRow,
     current: number,
     total: number
   ): Promise<string[]> {
-    const entity = await this.db.query.performers.findFirst({
-      where: eq(performers.id, subscription.entityId),
-    });
+    const entity =
+      entityType === "performer"
+        ? await this.db.query.performers.findFirst({
+            where: eq(performers.id, subscription.entityId),
+          })
+        : await this.db.query.studios.findFirst({
+            where: eq(studios.id, subscription.entityId),
+          });
 
     if (!entity) {
-      await this.logsService.warning("subscription", "Performer not found", {
-        subscriptionId: subscription.id,
-        performerId: subscription.entityId,
-      });
+      await this.logsService.warning(
+        "subscription",
+        `${entityType === "performer" ? "Performer" : "Studio"} not found`,
+        {
+          subscriptionId: subscription.id,
+          [entityType === "performer" ? "performerId" : "studioId"]:
+            subscription.entityId,
+        }
+      );
       return [];
     }
 
-    this.logger.info(`Processing performer: ${entity.name} (${current}/${total})`);
+    this.logger.info(
+      `Processing ${entityType}: ${entity.name} (${current}/${total})`
+    );
 
     this.emitProgress(
-      `Processing performer ${entity.name} (${current}/${total})`,
+      `Processing ${entityType} ${entity.name} (${current}/${total})`,
       current,
       total
     );
 
-    const selectedTorrents = await this.torrentSearchService.searchForSubscription(
-      "performer",
-      subscription.entityId,
-      subscription.qualityProfileId,
-      subscription.includeMetadataMissing,
-      subscription.includeAliases,
-      []
-    );
+    const selectedTorrents =
+      await this.torrentSearchService.searchForSubscription(
+        entityType,
+        subscription.entityId,
+        subscription.qualityProfileId,
+        subscription.includeMetadataMissing,
+        subscription.includeAliases,
+        []
+      );
 
-    this.logger.info(`Found ${selectedTorrents.length} torrents for ${entity.name}`);
+    this.logger.info(
+      `Found ${selectedTorrents.length} torrents for ${entity.name}`
+    );
 
     const foundSceneIds = new Set<string>();
 
     if (subscription.autoDownload && selectedTorrents.length > 0) {
       // Deduplicate: Only take one torrent per scene (first/best match for each scene)
-      const uniqueTorrents = new Map<string, any>();
+      const uniqueTorrents = new Map<string, TorrentMatch>();
       for (const torrent of selectedTorrents) {
         if (torrent.sceneId && !uniqueTorrents.has(torrent.sceneId)) {
           uniqueTorrents.set(torrent.sceneId, torrent);
         }
       }
 
-      const torrentsToAdd = Array.from(uniqueTorrents.values()).slice(0, MAX_TORRENTS_PER_RUN);
+      const torrentsToAdd = Array.from(uniqueTorrents.values()).slice(
+        0,
+        MAX_TORRENTS_PER_RUN
+      );
 
       this.logger.info(
         `Deduplicated to ${torrentsToAdd.length} unique scenes (from ${selectedTorrents.length} torrents)`
@@ -255,90 +343,24 @@ export class SubscriptionSearchJob extends BaseJob {
       }
     }
 
-    await this.logsService.info("subscription", `Performer search completed: ${entity.name}`, {
-      performerId: subscription.entityId,
-      torrentsFound: selectedTorrents.length,
-      scenesFound: foundSceneIds.size,
-    });
-
-    return Array.from(foundSceneIds);
-  }
-
-  private async processStudioSubscription(
-    subscription: any,
-    current: number,
-    total: number
-  ): Promise<string[]> {
-    const entity = await this.db.query.studios.findFirst({
-      where: eq(studios.id, subscription.entityId),
-    });
-
-    if (!entity) {
-      await this.logsService.warning("subscription", "Studio not found", {
-        subscriptionId: subscription.id,
-        studioId: subscription.entityId,
-      });
-      return [];
-    }
-
-    this.logger.info(`Processing studio: ${entity.name} (${current}/${total})`);
-
-    this.emitProgress(
-      `Processing studio ${entity.name} (${current}/${total})`,
-      current,
-      total
-    );
-
-    const selectedTorrents = await this.torrentSearchService.searchForSubscription(
-      "studio",
-      subscription.entityId,
-      subscription.qualityProfileId,
-      subscription.includeMetadataMissing,
-      subscription.includeAliases,
-      []
-    );
-
-    this.logger.info(`Found ${selectedTorrents.length} torrents for ${entity.name}`);
-
-    const foundSceneIds = new Set<string>();
-
-    if (subscription.autoDownload && selectedTorrents.length > 0) {
-      // Deduplicate: Only take one torrent per scene (first/best match for each scene)
-      const uniqueTorrents = new Map<string, any>();
-      for (const torrent of selectedTorrents) {
-        if (torrent.sceneId && !uniqueTorrents.has(torrent.sceneId)) {
-          uniqueTorrents.set(torrent.sceneId, torrent);
-        }
+    await this.logsService.info(
+      "subscription",
+      `${entityType === "performer" ? "Performer" : "Studio"} search completed: ${entity.name}`,
+      {
+        [entityType === "performer" ? "performerId" : "studioId"]:
+          subscription.entityId,
+        torrentsFound: selectedTorrents.length,
+        scenesFound: foundSceneIds.size,
       }
-
-      const torrentsToAdd = Array.from(uniqueTorrents.values()).slice(0, MAX_TORRENTS_PER_RUN);
-
-      this.logger.info(
-        `Deduplicated to ${torrentsToAdd.length} unique scenes (from ${selectedTorrents.length} torrents)`
-      );
-
-      for (const torrent of torrentsToAdd) {
-        if (torrent.sceneId) {
-          foundSceneIds.add(torrent.sceneId);
-        }
-
-        await this.addToDownloadQueue(torrent, subscription, entity.name);
-      }
-    }
-
-    await this.logsService.info("subscription", `Studio search completed: ${entity.name}`, {
-      studioId: subscription.entityId,
-      torrentsFound: selectedTorrents.length,
-      scenesFound: foundSceneIds.size,
-    });
+    );
 
     return Array.from(foundSceneIds);
   }
 
   private async processSceneSubscriptions(
-    sceneSubscriptions: any[],
-    performerSubscriptions: any[],
-    studioSubscriptions: any[],
+    sceneSubscriptions: SubscriptionRow[],
+    performerSubscriptions: SubscriptionRow[],
+    studioSubscriptions: SubscriptionRow[],
     foundSceneIds: Set<string>
   ): Promise<void> {
     // Collect remaining scenes for bulk search
@@ -359,35 +381,49 @@ export class SubscriptionSearchJob extends BaseJob {
   }
 
   private async collectRemainingScenesForBulkSearch(
-    performerSubscriptions: any[],
-    studioSubscriptions: any[],
-    sceneSubscriptions: any[],
+    performerSubscriptions: SubscriptionRow[],
+    studioSubscriptions: SubscriptionRow[],
+    sceneSubscriptions: SubscriptionRow[],
     _foundSceneIds: Set<string>
-  ): Promise<Array<{ subscription: any; scene: any }>> {
-    const bulkScenes: Array<{ subscription: any; scene: any }> = [];
+  ): Promise<SceneSubscriptionPayload[]> {
+    const bulkScenes: SceneSubscriptionPayload[] = [];
+
+    // Collect all performer IDs and studio IDs
+    const performerIds = performerSubscriptions.map((sub) => sub.entityId);
+    const studioIds = studioSubscriptions.map((sub) => sub.entityId);
+
+    // Batch query: Get all performer-scene relations in a single query
+    const performerSceneRelations =
+      performerIds.length > 0
+        ? await this.db.query.performersScenes.findMany({
+            where: inArray(performersScenes.performerId, performerIds),
+          })
+        : [];
+
+    // Batch query: Get all studio scenes in a single query
+    const studioScenes =
+      studioIds.length > 0
+        ? await this.db.query.scenes.findMany({
+            where: inArray(scenes.siteId, studioIds),
+          })
+        : [];
 
     // Collect all scene IDs from performer subscriptions
     const performerSceneIds = new Set<string>();
-    for (const sub of performerSubscriptions) {
-      const performerSceneRelations = await this.db.query.performersScenes.findMany({
-        where: eq(performersScenes.performerId, sub.entityId),
-      });
-      performerSceneRelations.forEach(relation => performerSceneIds.add(relation.sceneId));
-    }
+    performerSceneRelations.forEach((relation: PerformersScenesRow) =>
+      performerSceneIds.add(relation.sceneId)
+    );
 
     // Collect all scene IDs from studio subscriptions
     const studioSceneIds = new Set<string>();
-    for (const sub of studioSubscriptions) {
-      const studioScenes = await this.db.query.scenes.findMany({
-        where: eq(scenes.siteId, sub.entityId),
-      });
-      studioScenes.forEach(scene => studioSceneIds.add(scene.id));
-    }
+    studioScenes.forEach((scene: SceneFindManyRow) =>
+      studioSceneIds.add(scene.id)
+    );
 
     // All scene IDs that are covered by performer/studio subscriptions
     const coveredSceneIds = new Set<string>();
-    performerSceneIds.forEach(id => coveredSceneIds.add(id));
-    studioSceneIds.forEach(id => coveredSceneIds.add(id));
+    performerSceneIds.forEach((id) => coveredSceneIds.add(id));
+    studioSceneIds.forEach((id) => coveredSceneIds.add(id));
 
     this.logger.info(
       `Performer/Studios cover ${coveredSceneIds.size} scenes, will NOT search these individually`
@@ -419,7 +455,7 @@ export class SubscriptionSearchJob extends BaseJob {
   }
 
   private async processBulkSceneSearch(
-    sceneSubscriptions: Array<{ subscription: any; scene: any }>
+    sceneSubscriptions: SceneSubscriptionPayload[]
   ): Promise<void> {
     const validScenes = sceneSubscriptions.filter((sd) => sd.scene !== null);
 
@@ -432,7 +468,11 @@ export class SubscriptionSearchJob extends BaseJob {
     const settings = await this.settingsService.getSettings();
     const prowlarrConfig = settings.prowlarr;
 
-    if (!prowlarrConfig.enabled || !prowlarrConfig.apiUrl || !prowlarrConfig.apiKey) {
+    if (
+      !prowlarrConfig.enabled ||
+      !prowlarrConfig.apiUrl ||
+      !prowlarrConfig.apiKey
+    ) {
       this.logger.warn("Prowlarr not configured, skipping bulk scene search");
       return;
     }
@@ -440,14 +480,15 @@ export class SubscriptionSearchJob extends BaseJob {
     // For each scene, search for torrents using TorrentSearchService
     for (const { subscription, scene } of validScenes) {
       try {
-        const selectedTorrents = await this.torrentSearchService.searchForSubscription(
-          "scene",
-          scene.id,
-          subscription.qualityProfileId,
-          false,
-          false,
-          []
-        );
+        const selectedTorrents =
+          await this.torrentSearchService.searchForSubscription(
+            "scene",
+            scene.id,
+            subscription.qualityProfileId,
+            false,
+            false,
+            []
+          );
 
         if (selectedTorrents.length > 0 && subscription.autoDownload) {
           const torrent = selectedTorrents[0]; // Take the first/best match
@@ -463,27 +504,37 @@ export class SubscriptionSearchJob extends BaseJob {
   }
 
   private async addToDownloadQueue(
-    torrent: any,
-    subscription: any,
+    torrent: TorrentMatch,
+    subscription: SubscriptionRow,
     entityName: string
   ): Promise<void> {
     // Check if subscription is still active before adding
     if (!subscription.isSubscribed) {
-      this.logger.info(`Subscription ${subscription.id} is unsubscribed, skipping queue`);
+      this.logger.info(
+        `Subscription ${subscription.id} is unsubscribed, skipping queue`
+      );
       return;
     }
 
     // Get or create scene ID
     let sceneId = torrent.sceneId;
     if (!sceneId) {
-      sceneId = await this.createPlaceholderScene(torrent, entityName, subscription);
+      sceneId = await this.createPlaceholderScene(
+        torrent,
+        entityName,
+        subscription
+      );
     }
 
     // For scene subscriptions, verify the scene subscription is still active
     if (subscription.entityType === "scene") {
-      const currentSub = await this.subscriptionsRepository.findById(subscription.id);
+      const currentSub = await this.subscriptionsRepository.findById(
+        subscription.id
+      );
       if (!currentSub || !currentSub.isSubscribed) {
-        this.logger.info(`Scene subscription ${subscription.id} is unsubscribed, skipping queue`);
+        this.logger.info(
+          `Scene subscription ${subscription.id} is unsubscribed, skipping queue`
+        );
         return;
       }
     }
@@ -515,7 +566,9 @@ export class SubscriptionSearchJob extends BaseJob {
       });
 
       if (existingByHash) {
-        this.logger.info(`Torrent already in queue, skipping: ${torrent.title}`);
+        this.logger.info(
+          `Torrent already in queue, skipping: ${torrent.title}`
+        );
         return;
       }
     }
@@ -525,7 +578,9 @@ export class SubscriptionSearchJob extends BaseJob {
     try {
       const result = await this.fileManager.setupSceneFilesSimplified(sceneId);
       sceneFolderPath = result.folderPath;
-      this.logger.info(`Created scene folder for ${torrent.title}: ${sceneFolderPath}`);
+      this.logger.info(
+        `Created scene folder for ${torrent.title}: ${sceneFolderPath}`
+      );
     } catch (error) {
       this.logger.error(
         { error, sceneId },
@@ -552,25 +607,32 @@ export class SubscriptionSearchJob extends BaseJob {
             // Extract the base path by removing the scene name portion
             // /data/500gb/media/scenes/SceneName -> /data/500gb/media
             // /data/1tb/media/scenes/Studio/Scene -> /data/1tb/media
-            const scenesIndex = sceneFolderPath.indexOf('/scenes');
+            const scenesIndex = sceneFolderPath.indexOf("/scenes");
             if (scenesIndex !== -1) {
               const basePath = sceneFolderPath.substring(0, scenesIndex);
               downloadPath = `${basePath}/incomplete`;
-              this.logger.info({
-                sceneFolder: sceneFolderPath,
-                incompletePath: downloadPath,
-                basePath
-              }, "Dynamically calculated incomplete path from scene folder");
+              this.logger.info(
+                {
+                  sceneFolder: sceneFolderPath,
+                  incompletePath: downloadPath,
+                  basePath,
+                },
+                "Dynamically calculated incomplete path from scene folder"
+              );
             } else {
               // Fallback: Use scene folder parent as incomplete location
-              const lastSlash = sceneFolderPath.lastIndexOf('/');
-              downloadPath = lastSlash !== -1
-                ? sceneFolderPath.substring(0, lastSlash + 1) + 'incomplete'
-                : settings.general.incompletePath || '/incomplete';
-              this.logger.warn({
-                sceneFolder: sceneFolderPath,
-                incompletePath: downloadPath
-              }, "Could not find /scenes in path, using fallback");
+              const lastSlash = sceneFolderPath.lastIndexOf("/");
+              downloadPath =
+                lastSlash !== -1
+                  ? sceneFolderPath.substring(0, lastSlash + 1) + "incomplete"
+                  : settings.general.incompletePath || "/incomplete";
+              this.logger.warn(
+                {
+                  sceneFolder: sceneFolderPath,
+                  incompletePath: downloadPath,
+                },
+                "Could not find /scenes in path, using fallback"
+              );
             }
           } else {
             // No scene folder specified - use first download path's incomplete
@@ -578,12 +640,15 @@ export class SubscriptionSearchJob extends BaseJob {
             if (firstPath) {
               downloadPath = `${firstPath}/incomplete`;
             } else {
-              downloadPath = settings.general.incompletePath || '/incomplete';
+              downloadPath = settings.general.incompletePath || "/incomplete";
             }
-            this.logger.info({
-              incompletePath: downloadPath,
-              firstPath
-            }, "No scene folder, using default incomplete path");
+            this.logger.info(
+              {
+                incompletePath: downloadPath,
+                firstPath,
+              },
+              "No scene folder, using default incomplete path"
+            );
           }
 
           let magnetLink: string | undefined;
@@ -603,24 +668,33 @@ export class SubscriptionSearchJob extends BaseJob {
             if (!magnetLink && !torrent.infoHash) {
               try {
                 // Try to get Prowlarr indexer
-                const prowlarrIndexers = this.indexerRegistry.getAll().filter(
-                  i => i.id.includes('prowlarr') && i.provider.getMagnetLink
-                );
+                const prowlarrIndexers = this.indexerRegistry
+                  .getAll()
+                  .filter(
+                    (i) => i.id.includes("prowlarr") && i.provider.getMagnetLink
+                  );
 
                 if (prowlarrIndexers.length > 0) {
                   const prowlarr = prowlarrIndexers[0].provider;
                   // Extract indexer ID from torrent.indexerId (format: "prowlarr-123")
-                  const indexerId = torrent.indexerId?.includes('prowlarr')
-                    ? parseInt(torrent.indexerId.replace('prowlarr-', '')) || undefined
+                  const indexerId = torrent.indexerId?.includes("prowlarr")
+                    ? parseInt(torrent.indexerId.replace("prowlarr-", "")) ||
+                      undefined
                     : undefined;
 
-                  this.logger.debug({
-                    title: torrent.title,
-                    downloadUrl: torrent.downloadUrl,
-                    indexerId,
-                  }, "Attempting to get magnet link from Prowlarr proxy");
+                  this.logger.debug(
+                    {
+                      title: torrent.title,
+                      downloadUrl: torrent.downloadUrl,
+                      indexerId,
+                    },
+                    "Attempting to get magnet link from Prowlarr proxy"
+                  );
 
-                  magnetLink = await prowlarr.getMagnetLink(torrent.downloadUrl, indexerId);
+                  magnetLink = await prowlarr.getMagnetLink(
+                    torrent.downloadUrl,
+                    indexerId
+                  );
 
                   if (magnetLink) {
                     this.logger.info(
@@ -630,7 +704,10 @@ export class SubscriptionSearchJob extends BaseJob {
                   }
                 }
               } catch (error) {
-                this.logger.warn({ error }, "Failed to get magnet link from Prowlarr proxy");
+                this.logger.warn(
+                  { error },
+                  "Failed to get magnet link from Prowlarr proxy"
+                );
               }
             }
 
@@ -640,12 +717,15 @@ export class SubscriptionSearchJob extends BaseJob {
             }
           }
 
-          this.logger.info({
-            title: torrent.title,
-            hasMagnetLink: !!magnetLink,
-            hasTorrentUrl: !!torrentUrl,
-            hasInfoHash: !!torrent.infoHash,
-          }, "Attempting to add torrent to client");
+          this.logger.info(
+            {
+              title: torrent.title,
+              hasMagnetLink: !!magnetLink,
+              hasTorrentUrl: !!torrentUrl,
+              hasInfoHash: !!torrent.infoHash,
+            },
+            "Attempting to add torrent to client"
+          );
 
           qbitHash = await torrentClient.addTorrentAndGetHash({
             magnetLinks: magnetLink ? [magnetLink] : undefined,
@@ -659,22 +739,32 @@ export class SubscriptionSearchJob extends BaseJob {
 
           if (qbitHash) {
             dbStatus = "downloading";
-            this.logger.info(`Added to qBittorrent: ${torrent.title} (qbitHash: ${qbitHash})`);
+            this.logger.info(
+              `Added to qBittorrent: ${torrent.title} (qbitHash: ${qbitHash})`
+            );
           } else {
             dbStatus = "add_failed";
-            this.logger.error(`Failed to add to qBittorrent: ${torrent.title} (addTorrentAndGetHash returned null)`);
+            this.logger.error(
+              `Failed to add to qBittorrent: ${torrent.title} (addTorrentAndGetHash returned null)`
+            );
           }
         } catch (error) {
           dbStatus = "add_failed";
-          this.logger.error({ error }, `Failed to add to qBittorrent: ${torrent.title}`);
+          this.logger.error(
+            { error },
+            `Failed to add to qBittorrent: ${torrent.title}`
+          );
         }
       } else {
-        this.logger.warn({
-          title: torrent.title,
-          hasTorrentClient: !!torrentClient,
-          hasDownloadUrl: !!torrent.downloadUrl,
-          hasInfoHash: !!torrent.infoHash,
-        }, "Skipping torrent client addition - no torrent client configured or no magnet/infoHash available");
+        this.logger.warn(
+          {
+            title: torrent.title,
+            hasTorrentClient: !!torrentClient,
+            hasDownloadUrl: !!torrent.downloadUrl,
+            hasInfoHash: !!torrent.infoHash,
+          },
+          "Skipping torrent client addition - no torrent client configured or no magnet/infoHash available"
+        );
       }
     }
 
@@ -696,17 +786,26 @@ export class SubscriptionSearchJob extends BaseJob {
     this.logger.info(`Added to database queue: ${torrent.title}`);
   }
 
-  private async createPlaceholderScene(torrent: any, entityName: string, subscription: any): Promise<string> {
+  private async createPlaceholderScene(
+    torrent: TorrentMatch,
+    entityName: string,
+    subscription: SubscriptionRow
+  ): Promise<string> {
     // Import parser service dynamically
-    const { createTorrentParserService } = await import("../../application/services/torrent-quality/parser.service.js");
+    const { createTorrentParserService } =
+      await import("../../application/services/torrent-quality/parser.service.js");
     const parserService = createTorrentParserService();
     const cleanedTitle = parserService.parseTorrent(torrent.title).title;
 
     // Remove entity name from title if present
     let finalTitle = cleanedTitle;
     if (entityName) {
-      const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const startPattern = new RegExp(`^${escapeRegex(entityName)}\\s*[-–—:,]?\\s*`, "i");
+      const escapeRegex = (str: string) =>
+        str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const startPattern = new RegExp(
+        `^${escapeRegex(entityName)}\\s*[-–—:,]?\\s*`,
+        "i"
+      );
       finalTitle = cleanedTitle.replace(startPattern, "").trim();
     }
 
@@ -796,7 +895,10 @@ export class SubscriptionSearchJob extends BaseJob {
       retryAfterMinutes
     );
 
-    this.logger.info({ count: failedItems.length }, "Found failed torrents to retry");
+    this.logger.info(
+      { count: failedItems.length },
+      "Found failed torrents to retry"
+    );
 
     let successCount = 0;
     let permanentFailures = 0;
@@ -819,7 +921,10 @@ export class SubscriptionSearchJob extends BaseJob {
       });
 
       if (!scene || !scene.isSubscribed) {
-        this.logger.info({ sceneId: item.sceneId }, "Scene unsubscribed, skipping retry");
+        this.logger.info(
+          { sceneId: item.sceneId },
+          "Scene unsubscribed, skipping retry"
+        );
         continue;
       }
 
@@ -828,7 +933,9 @@ export class SubscriptionSearchJob extends BaseJob {
         ? `magnet:?xt=urn:btih:${item.torrentHash}&dn=${encodeURIComponent(item.title)}`
         : undefined;
 
-      const success = await this.downloadQueueService.retrySingleTorrent(item.id);
+      const success = await this.downloadQueueService.retrySingleTorrent(
+        item.id
+      );
 
       if (success.success) {
         successCount++;

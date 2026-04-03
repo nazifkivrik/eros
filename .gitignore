@@ -67,3 +67,6 @@ media/
 data/
 
 docker-compose.override.yml
+.tmp/
+.playwright-mcp/
+.opencode/

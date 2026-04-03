@@ -500,6 +500,36 @@ export const entityMetaSources = sqliteTable(
   })
 );
 
+// External ID Lookup Table - normalized index for external ID queries
+// This provides O(1) lookups by (source, externalId) instead of scanning JSON arrays
+export const externalIdLookup = sqliteTable(
+  "external_id_lookup",
+  {
+    id: text("id").primaryKey(),
+    entityType: text("entity_type")
+      .$type<"performer" | "studio" | "scene">()
+      .notNull(),
+    entityId: text("entity_id").notNull(), // References performers.id, studios.id, or scenes.id
+    source: text("source").notNull(), // 'tpdb', 'stashdb', etc.
+    externalId: text("external_id").notNull(),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    // Index for looking up entity by source + external ID (the main query pattern)
+    sourceExternalIdx: index("external_id_lookup_source_ext_idx").on(
+      table.source,
+      table.externalId
+    ),
+    // Index for looking up external IDs by entity (for sync/cleanup)
+    entityIdx: index("external_id_lookup_entity_idx").on(
+      table.entityType,
+      table.entityId
+    ),
+  })
+);
+
 // Tags Table
 export const tags = sqliteTable("tags", {
   id: text("id").primaryKey(),

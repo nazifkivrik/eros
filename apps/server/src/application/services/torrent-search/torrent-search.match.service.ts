@@ -9,13 +9,21 @@
  * - Levenshtein distance calculation
  */
 
-import type { TorrentsRepository, SceneMetadata } from "@/infrastructure/repositories/torrents.repository.js";
+import type {
+  TorrentsRepository,
+  SceneMetadata,
+} from "@/infrastructure/repositories/torrents.repository.js";
+import { levenshteinSimilarity } from "@/utils/levenshtein.js";
 import type { AIMatchingService } from "@/application/services/ai-matching/ai-matching.service.js";
 import type { CrossEncoderService } from "@/application/services/ai-matching/cross-encoder.service.js";
 import type { AIMatchScoresRepository } from "@/infrastructure/repositories/ai-match-scores.repository.js";
 import type { LogsService } from "@/application/services/logs.service.js";
 import type { SettingsService } from "@/application/services/settings.service.js";
-import type { SceneGroup, MatchResult, TorrentResult } from "@/application/services/torrent-search/index.js";
+import type {
+  SceneGroup,
+  MatchResult,
+  TorrentResult,
+} from "@/application/services/torrent-search/index.js";
 import { eq, and } from "drizzle-orm";
 import { performersScenes, subscriptions } from "@repo/database";
 import { logger } from "@/utils/logger.js";
@@ -69,7 +77,12 @@ export class TorrentSearchMatchService {
       }
     );
 
-    return await this.matchWithCrossEncoderOnly(groups, entity, entityType, threshold);
+    return await this.matchWithCrossEncoderOnly(
+      groups,
+      entity,
+      entityType,
+      threshold
+    );
   }
 
   /**
@@ -81,7 +94,8 @@ export class TorrentSearchMatchService {
     entityId: string
   ): Promise<MatchResult> {
     // Import SceneMatcher dynamically
-    const { SceneMatcher } = await import("@/application/services/matching/scene-matcher.service.js");
+    const { SceneMatcher } =
+      await import("@/application/services/matching/scene-matcher.service.js");
 
     // Get match settings
     const matchSettings = {
@@ -103,7 +117,8 @@ export class TorrentSearchMatchService {
       entityId
     );
 
-    const matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }> = [];
+    const matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }> =
+      [];
     const unmatched: SceneGroup[] = [];
     const matchedSceneIds = new Set<string>();
 
@@ -174,10 +189,14 @@ export class TorrentSearchMatchService {
     threshold: number
   ): Promise<MatchResult> {
     // Get candidate scenes from database
-    const candidateScenes = await this.getCandidateScenes(entityType, entity.id);
+    const candidateScenes = await this.getCandidateScenes(
+      entityType,
+      entity.id
+    );
 
     // Get performer with aliases for cleaning
-    let performerWithAliases: { name: string; aliases?: string[] } | null = null;
+    let performerWithAliases: { name: string; aliases?: string[] } | null =
+      null;
     if (entityType === "performer") {
       const performer = await this.repository.findPerformerById(entity.id);
       if (performer) {
@@ -186,13 +205,14 @@ export class TorrentSearchMatchService {
           aliases: Array.isArray(performer.aliases)
             ? performer.aliases
             : performer.aliases
-            ? JSON.parse(performer.aliases as string)
-            : undefined,
+              ? JSON.parse(performer.aliases as string)
+              : undefined,
         };
       }
     }
 
-    const matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }> = [];
+    const matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }> =
+      [];
     const unmatched: SceneGroup[] = [];
     const matchedSceneIds = new Set<string>();
 
@@ -267,14 +287,17 @@ export class TorrentSearchMatchService {
         );
 
         if (crossEncoderMatch) {
-          const scene = availableScenes.find((s) => s.id === crossEncoderMatch.candidate.id)!;
+          const scene = availableScenes.find(
+            (s) => s.id === crossEncoderMatch.candidate.id
+          )!;
 
           // Additional validation: Check title length similarity
           // Prevent matching very long titles to very short titles
           const torrentTitleLength = cleanedTitle.length;
           const sceneTitleLength = scene.title.length;
-          const lengthRatio = Math.min(torrentTitleLength, sceneTitleLength) /
-                               Math.max(torrentTitleLength, sceneTitleLength);
+          const lengthRatio =
+            Math.min(torrentTitleLength, sceneTitleLength) /
+            Math.max(torrentTitleLength, sceneTitleLength);
 
           // Reject if length ratio is too extreme (< 0.3 means one is 3x longer than the other)
           if (lengthRatio < 0.3) {
@@ -298,7 +321,9 @@ export class TorrentSearchMatchService {
           matchedSceneIds.add(scene.id);
 
           // Get performer IDs for this scene
-          const performerIds = await this.repository.findPerformersBySceneId(scene.id);
+          const performerIds = await this.repository.findPerformersBySceneId(
+            scene.id
+          );
 
           matched.push({
             scene: {
@@ -422,8 +447,7 @@ export class TorrentSearchMatchService {
     }
 
     // Remove any remaining "aka" patterns without names
-    cleaned = cleaned
-      .replace(/\s+(aka|a\.k\.a\.|also known as)\s+/gi, " ");
+    cleaned = cleaned.replace(/\s+(aka|a\.k\.a\.|also known as)\s+/gi, " ");
 
     // Clean up extra spaces and trim
     cleaned = cleaned.replace(/\s+/g, " ").trim();
@@ -436,7 +460,10 @@ export class TorrentSearchMatchService {
     // Remove common file extensions and site suffixes
     cleaned = cleaned
       .replace(/\.(mp4|mkv|avi|mov|wmv|flv|webm|mp4)$/gi, "")
-      .replace(/\s+[-–—:,]?\s*(XXX|xxx|1080p|720p|480p|2160p|4K|P2P|XC|Leech|XLeech)?\s*$/g, "")
+      .replace(
+        /\s+[-–—:,]?\s*(XXX|xxx|1080p|720p|480p|2160p|4K|P2P|XC|Leech|XLeech)?\s*$/g,
+        ""
+      )
       .trim();
 
     return cleaned;
@@ -466,14 +493,18 @@ export class TorrentSearchMatchService {
       const uniqueIndexers = new Set(group.torrents.map((t) => t.indexerId));
 
       if (uniqueIndexers.size >= minIndexers) {
-        await this.logsService.info("torrent", `Discovered: "${group.sceneTitle}"`, {
-          groupTitle: group.sceneTitle,
-          torrentCount: group.torrents.length,
-          indexerCount: uniqueIndexers.size,
-          entityType,
-          entityId: entity.id,
-          entityName: entity.name,
-        });
+        await this.logsService.info(
+          "torrent",
+          `Discovered: "${group.sceneTitle}"`,
+          {
+            groupTitle: group.sceneTitle,
+            torrentCount: group.torrents.length,
+            indexerCount: uniqueIndexers.size,
+            entityType,
+            entityId: entity.id,
+            entityName: entity.name,
+          }
+        );
 
         discoveredCount++;
       }
@@ -518,44 +549,7 @@ export class TorrentSearchMatchService {
    * Calculate similarity between two strings using Levenshtein distance
    */
   calculateSimilarity(str1: string, str2: string): number {
-    const longer = str1.length > str2.length ? str1 : str2;
-    const shorter = str1.length > str2.length ? str2 : str1;
-
-    if (longer.length === 0) return 1.0;
-
-    const editDistance = this.levenshteinDistance(longer, shorter);
-    return (longer.length - editDistance) / longer.length;
-  }
-
-  /**
-   * Calculate Levenshtein distance between two strings
-   */
-  private levenshteinDistance(str1: string, str2: string): number {
-    const matrix: number[][] = [];
-
-    for (let i = 0; i <= str2.length; i++) {
-      matrix[i] = [i];
-    }
-
-    for (let j = 0; j <= str1.length; j++) {
-      matrix[0][j] = j;
-    }
-
-    for (let i = 1; i <= str2.length; i++) {
-      for (let j = 1; j <= str1.length; j++) {
-        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-          matrix[i][j] = matrix[i - 1][j - 1];
-        } else {
-          matrix[i][j] = Math.min(
-            matrix[i - 1][j - 1] + 1,
-            matrix[i][j - 1] + 1,
-            matrix[i - 1][j] + 1
-          );
-        }
-      }
-    }
-
-    return matrix[str2.length][str1.length];
+    return levenshteinSimilarity(str1, str2);
   }
 
   /**
@@ -582,7 +576,8 @@ export class TorrentSearchMatchService {
       { sceneId: scene.id, threshold: minThreshold }
     );
 
-    const matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }> = [];
+    const matched: Array<{ scene: SceneMetadata; torrents: TorrentResult[] }> =
+      [];
     const unmatched: SceneGroup[] = [];
 
     // Load Cross-Encoder once for all torrents
@@ -604,13 +599,15 @@ export class TorrentSearchMatchService {
             studio: undefined,
             title: scene.title,
           },
-          [{
-            id: scene.id,
-            title: cleanedTitle,
-            date: scene.date,
-            studio: scene.studioName,
-            performers: scene.performerNames,
-          }],
+          [
+            {
+              id: scene.id,
+              title: cleanedTitle,
+              date: scene.date,
+              studio: scene.studioName,
+              performers: scene.performerNames,
+            },
+          ],
           minThreshold
         );
 

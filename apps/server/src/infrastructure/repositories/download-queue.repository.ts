@@ -101,11 +101,11 @@ export class DownloadQueueRepository {
   /**
    * Update download queue item
    */
-  async update(
-    id: string,
-    data: Partial<typeof downloadQueue.$inferInsert>
-  ) {
-    await this.db.update(downloadQueue).set(data).where(eq(downloadQueue.id, id));
+  async update(id: string, data: Partial<typeof downloadQueue.$inferInsert>) {
+    await this.db
+      .update(downloadQueue)
+      .set(data)
+      .where(eq(downloadQueue.id, id));
     return await this.findById(id);
   }
 
@@ -157,7 +157,9 @@ export class DownloadQueueRepository {
    * @param retryAfterMinutes - Minimum minutes to wait before retrying
    */
   async findAddFailedItems(maxAttempts: number, retryAfterMinutes: number) {
-    const cutoffTime = new Date(Date.now() - retryAfterMinutes * 60 * 1000).toISOString();
+    const cutoffTime = new Date(
+      Date.now() - retryAfterMinutes * 60 * 1000
+    ).toISOString();
 
     return await this.db.query.downloadQueue.findMany({
       where: and(
@@ -193,7 +195,10 @@ export class DownloadQueueRepository {
       qbitHash?: string | null;
     }
   ) {
-    await this.db.update(downloadQueue).set(data).where(eq(downloadQueue.id, id));
+    await this.db
+      .update(downloadQueue)
+      .set(data)
+      .where(eq(downloadQueue.id, id));
     return await this.findById(id);
   }
 
@@ -244,7 +249,10 @@ export class DownloadQueueRepository {
       where: and(
         eq(downloadQueue.autoManagementPaused, true),
         lt(downloadQueue.autoPauseCount, maxRetries),
-        inArray(downloadQueue.status, ["paused", "downloading"] as DownloadStatus[])
+        inArray(downloadQueue.status, [
+          "paused",
+          "downloading",
+        ] as DownloadStatus[])
       ),
       with: {
         scene: {
@@ -269,7 +277,10 @@ export class DownloadQueueRepository {
       lastAutoPauseAt?: string;
     }
   ) {
-    await this.db.update(downloadQueue).set(data).where(eq(downloadQueue.id, id));
+    await this.db
+      .update(downloadQueue)
+      .set(data)
+      .where(eq(downloadQueue.id, id));
     return await this.findById(id);
   }
 
@@ -281,5 +292,31 @@ export class DownloadQueueRepository {
       .update(downloadQueue)
       .set({ lastActivityAt: new Date().toISOString() })
       .where(eq(downloadQueue.qbitHash, qbitHash));
+  }
+
+  /**
+   * Find all queue items matching any of the given qbitHash values
+   */
+  async findByHashes(hashes: string[]) {
+    if (hashes.length === 0) return [];
+    return await this.db.query.downloadQueue.findMany({
+      where: inArray(downloadQueue.qbitHash, hashes),
+      with: {
+        scene: {
+          columns: { id: true, title: true, images: true },
+        },
+      },
+    });
+  }
+
+  /**
+   * Update lastActivityAt for all items matching given qbitHash values in a single query
+   */
+  async batchUpdateLastActivity(hashes: string[]): Promise<void> {
+    if (hashes.length === 0) return;
+    await this.db
+      .update(downloadQueue)
+      .set({ lastActivityAt: new Date().toISOString() })
+      .where(inArray(downloadQueue.qbitHash, hashes));
   }
 }

@@ -4,6 +4,7 @@ import type { DownloadStatus } from "@repo/shared-types";
 import { DownloadQueueRepository } from "@/infrastructure/repositories/download-queue.repository.js";
 import type { TorrentClientRegistry } from "@/infrastructure/registries/provider-registry.js";
 import type { ITorrentClient } from "@/infrastructure/adapters/interfaces/torrent-client.interface.js";
+import { ETA } from "./constants.js";
 
 /**
  * DTOs for Download Queue Service
@@ -91,7 +92,10 @@ export class DownloadQueueService {
 
     const items = await this.downloadQueueRepository.findAll(statusFilter);
 
-    this.logger.info({ count: items.length, statusFilter }, "Fetched queue items");
+    this.logger.info(
+      { count: items.length, statusFilter },
+      "Fetched queue items"
+    );
 
     return items;
   }
@@ -121,22 +125,33 @@ export class DownloadQueueService {
    * - Optionally start download in torrent client
    */
   async addToQueue(dto: CreateDownloadQueueDTO) {
-    this.logger.info({ sceneId: dto.sceneId, title: dto.title }, "Adding to queue");
+    this.logger.info(
+      { sceneId: dto.sceneId, title: dto.title },
+      "Adding to queue"
+    );
 
     // Business rule: Scene must exist
-    const sceneExists = await this.downloadQueueRepository.sceneExists(dto.sceneId);
+    const sceneExists = await this.downloadQueueRepository.sceneExists(
+      dto.sceneId
+    );
     if (!sceneExists) {
       throw new Error("Scene not found");
     }
 
     // Business rule: Cannot add same scene if already in queue (any status)
-    const existingInQueue = await this.downloadQueueRepository.findBySceneId(dto.sceneId);
+    const existingInQueue = await this.downloadQueueRepository.findBySceneId(
+      dto.sceneId
+    );
     if (existingInQueue) {
-      throw new Error(`Scene already in download queue with status: ${existingInQueue.status}`);
+      throw new Error(
+        `Scene already in download queue with status: ${existingInQueue.status}`
+      );
     }
 
     // Business rule: Cannot add if scene already has downloaded files
-    const hasFiles = await this.downloadQueueRepository.sceneHasFiles(dto.sceneId);
+    const hasFiles = await this.downloadQueueRepository.sceneHasFiles(
+      dto.sceneId
+    );
     if (hasFiles) {
       throw new Error("Scene already downloaded");
     }
@@ -171,7 +186,9 @@ export class DownloadQueueService {
               magnetLinks: [dto.magnetLink],
               category: "eros",
               paused: false,
-              matchInfoHash: dto.magnetLink.match(/btih:([a-fA-F0-9]{40})/)?.[1],
+              matchInfoHash: dto.magnetLink.match(
+                /btih:([a-fA-F0-9]{40})/
+              )?.[1],
               matchTitle: dto.title,
             },
             10000 // 10 second timeout
@@ -274,7 +291,10 @@ export class DownloadQueueService {
       if (torrentClient) {
         try {
           await torrentClient.pauseTorrent(item.torrentHash);
-          this.logger.info({ id, torrentHash: item.torrentHash }, "Paused torrent in client");
+          this.logger.info(
+            { id, torrentHash: item.torrentHash },
+            "Paused torrent in client"
+          );
         } catch (error) {
           this.logger.error({ error, id }, "Failed to pause torrent");
         }
@@ -302,7 +322,10 @@ export class DownloadQueueService {
       if (torrentClient) {
         try {
           await torrentClient.resumeTorrent(item.torrentHash);
-          this.logger.info({ id, torrentHash: item.torrentHash }, "Resumed torrent in client");
+          this.logger.info(
+            { id, torrentHash: item.torrentHash },
+            "Resumed torrent in client"
+          );
         } catch (error) {
           this.logger.error({ error, id }, "Failed to resume torrent");
         }
@@ -323,7 +346,8 @@ export class DownloadQueueService {
     this.logger.debug("Fetching unified downloads");
 
     // Get all queue items with full details
-    const queueItems = await this.downloadQueueRepository.findAllWithFullDetails();
+    const queueItems =
+      await this.downloadQueueRepository.findAllWithFullDetails();
 
     // Get torrents from torrent client if available
     let torrentsMap = new Map<string, unknown>();
@@ -335,105 +359,170 @@ export class DownloadQueueService {
         torrentsList = torrents as any[];
         // Normalize hashes to lowercase for consistent matching
         torrentsMap = new Map(torrents.map((t) => [t.hash.toLowerCase(), t]));
-        this.logger.debug({ torrentsCount: torrents.length }, "Fetched torrents from client");
+        this.logger.debug(
+          { torrentsCount: torrents.length },
+          "Fetched torrents from client"
+        );
       } catch (error: unknown) {
         this.logger.error({ error }, "Failed to fetch torrents from client");
       }
     } else {
-      this.logger.warn("Torrent client not available - download status will be based on database only");
+      this.logger.warn(
+        "Torrent client not available - download status will be based on database only"
+      );
+    }
+
+    // Pre-build title-to-torrents map for O(1) lookups (avoids O(n²) in loop)
+    const titleToTorrentsMap = new Map<string, typeof torrentsList>();
+    for (const t of torrentsList) {
+      const normalizedTitle = (t.name as string)?.toLowerCase() || "";
+      const existing = titleToTorrentsMap.get(normalizedTitle) || [];
+      existing.push(t);
+      titleToTorrentsMap.set(normalizedTitle, existing);
     }
 
     // Business logic: Merge data and determine unified status
-    const unifiedDownloads = await Promise.all(queueItems.map(async (item) => {
-      // Normalize qbitHash to lowercase for matching with torrentsMap keys
-      let torrent: any = item.qbitHash
-        ? (torrentsMap.get(item.qbitHash.toLowerCase()))
-        : undefined;
+    const unifiedDownloads = await Promise.all(
+      queueItems.map(async (item) => {
+        // Normalize qbitHash to lowercase for matching with torrentsMap keys
+        let torrent: any = item.qbitHash
+          ? torrentsMap.get(item.qbitHash.toLowerCase())
+          : undefined;
 
-      // Fallback: If no hash match, try to match by title
-      if (!torrent && torrentsList.length > 0) {
-        const itemTitle = (item.scene?.title || item.title).toLowerCase();
-        // Try exact match first
-        torrent = torrentsList.find(t => {
-          const torrentName = (t.name as string)?.toLowerCase() || '';
-          return torrentName === itemTitle || torrentName.includes(itemTitle) || itemTitle.includes(torrentName);
-        }) as Record<string, unknown> | undefined;
+        // Fallback: If no hash match, try to match by title using pre-built map
+        if (!torrent && torrentsList.length > 0) {
+          const itemTitle = (item.scene?.title || item.title).toLowerCase();
 
-        // If found by title, update qbitHash in database for future matches
-        if (torrent && torrent.hash && item.qbitHash !== torrent.hash) {
-          this.logger.info(
-            { itemId: item.id, oldHash: item.qbitHash, newHash: torrent.hash, title: itemTitle },
-            "Found torrent by title match, updating qbitHash"
-          );
-          try {
-            await this.downloadQueueRepository.update(item.id, { qbitHash: torrent.hash as string });
-          } catch (error) {
-            this.logger.error({ error, itemId: item.id }, "Failed to update qbitHash");
+          // Try exact title match first using map (O(1))
+          let matchedTorrents = titleToTorrentsMap.get(itemTitle);
+
+          // If no exact match, try partial matching (iterate through map keys - fewer than torrentsList)
+          if (!matchedTorrents || matchedTorrents.length === 0) {
+            for (const [titleKey, torrents] of titleToTorrentsMap) {
+              if (
+                titleKey === itemTitle ||
+                titleKey.includes(itemTitle) ||
+                itemTitle.includes(titleKey)
+              ) {
+                matchedTorrents = torrents;
+                break;
+              }
+            }
+          }
+
+          if (matchedTorrents && matchedTorrents.length > 0) {
+            torrent = matchedTorrents[0] as Record<string, unknown>;
+
+            // If found by title, update qbitHash in database for future matches
+            if (torrent && torrent.hash && item.qbitHash !== torrent.hash) {
+              this.logger.info(
+                {
+                  itemId: item.id,
+                  oldHash: item.qbitHash,
+                  newHash: torrent.hash,
+                  title: itemTitle,
+                },
+                "Found torrent by title match, updating qbitHash"
+              );
+              try {
+                await this.downloadQueueRepository.update(item.id, {
+                  qbitHash: torrent.hash as string,
+                });
+              } catch (error) {
+                this.logger.error(
+                  { error, itemId: item.id },
+                  "Failed to update qbitHash"
+                );
+              }
+            }
           }
         }
-      }
 
-      const scene = item.scene;
-      const studio = scene?.site;
+        const scene = item.scene;
+        const studio = scene?.site;
 
-      // Determine unified status based on torrent state
-      let status: DownloadStatus = item.status as DownloadStatus;
-      if (torrent) {
-        const torrentState = torrent.state as string | undefined;
-        const torrentProgress = torrent.progress as number | undefined;
+        // Determine unified status based on torrent state
+        let status: DownloadStatus = item.status as DownloadStatus;
+        if (torrent) {
+          const torrentState = torrent.state as string | undefined;
+          const torrentProgress = torrent.progress as number | undefined;
 
-        // Business rule: Map torrent client states to our status
-        if (torrentState === "pausedDL" || torrentState === "pausedUP") {
-          status = "paused";
-        } else if (torrentState === "queuedDL" || torrentState === "queuedUP") {
-          status = "queued";
-        } else if (torrentState === "stalledDL") {
-          status = "downloading"; // Still downloading but no seeds/peers
-        } else if (torrentState === "stalledUP") {
-          status = "seeding"; // Still seeding but no leechers
-        } else if (torrentState === "checkingDL" || torrentState === "checkingUP") {
-          status = "downloading"; // Checking data
-        } else if (torrentState?.includes("DL") || torrentState === "metaDL") {
-          status = "downloading";
-        } else if (torrentState?.includes("UP") || torrentState === "uploading") {
-          status = "seeding";
-        } else if (torrentProgress !== undefined && torrentProgress >= 1.0) {
-          status = "completed";
+          // Business rule: Map torrent client states to our status
+          if (torrentState === "pausedDL" || torrentState === "pausedUP") {
+            status = "paused";
+          } else if (
+            torrentState === "queuedDL" ||
+            torrentState === "queuedUP" ||
+            torrentState === "metaDL"
+          ) {
+            // qBittorrent kuyruğunda veya metadata bekliyor
+            status = "pending";
+          } else if (torrentState === "stalledDL") {
+            status = "downloading"; // Still downloading but no seeds/peers
+          } else if (torrentState === "stalledUP") {
+            status = "seeding"; // Still seeding but no leechers
+          } else if (
+            torrentState === "checkingDL" ||
+            torrentState === "checkingUP"
+          ) {
+            status = "downloading"; // Checking data
+          } else if (
+            torrentState?.includes("DL") ||
+            torrentState === "metaDL"
+          ) {
+            status = "downloading";
+          } else if (
+            torrentState?.includes("UP") ||
+            torrentState === "uploading"
+          ) {
+            status = "seeding";
+          } else if (torrentProgress !== undefined && torrentProgress >= 1.0) {
+            status = "completed";
+          }
         }
-      }
 
-      return {
-        id: item.id,
-        sceneId: item.sceneId,
-        sceneTitle: scene?.title || item.title,
-        scenePoster: scene?.images?.[0]?.url || null,
-        sceneStudio: studio?.name || null,
-        qbitHash: item.qbitHash,
-        status,
-        progress: torrent
-          ? (torrent.progress as number | undefined) ?? null
-          : item.status === "completed"
-            ? 1
+        return {
+          id: item.id,
+          sceneId: item.sceneId,
+          sceneTitle: scene?.title || item.title,
+          scenePoster: scene?.images?.[0]?.url || null,
+          sceneStudio: studio?.name || null,
+          qbitHash: item.qbitHash,
+          status,
+          progress: torrent
+            ? ((torrent.progress as number | undefined) ?? null)
+            : item.status === "completed"
+              ? 1
+              : null,
+          downloadSpeed: torrent
+            ? ((torrent.dlspeed as number | undefined) ?? null)
             : null,
-        downloadSpeed: torrent ? (torrent.dlspeed as number | undefined) ?? null : null,
-        uploadSpeed: torrent ? (torrent.upspeed as number | undefined) ?? null : null,
-        eta: this.calculateEta(torrent, item),
-        ratio: torrent ? (torrent.ratio as number | undefined) ?? null : null,
-        size: item.size,
-        seeders: (torrent?.num_seeds as number | undefined) || item.seeders,
-        leechers: (torrent?.num_leechs as number | undefined) || 0,
-        quality: item.quality,
-        priority: (torrent?.priority as number | undefined) || null,
-        addedAt: item.addedAt,
-        completedAt: item.completedAt,
-        // Retry tracking for failed torrents
-        addToClientAttempts: item.addToClientAttempts ?? null,
-        addToClientLastAttempt: item.addToClientLastAttempt ?? null,
-        addToClientError: item.addToClientError ?? null,
-      };
-    }));
+          uploadSpeed: torrent
+            ? ((torrent.upspeed as number | undefined) ?? null)
+            : null,
+          eta: this.calculateEta(torrent, item),
+          ratio: torrent
+            ? ((torrent.ratio as number | undefined) ?? null)
+            : null,
+          size: item.size,
+          seeders: (torrent?.num_seeds as number | undefined) || item.seeders,
+          leechers: (torrent?.num_leechs as number | undefined) || 0,
+          quality: item.quality,
+          priority: (torrent?.priority as number | undefined) || null,
+          addedAt: item.addedAt,
+          completedAt: item.completedAt,
+          // Retry tracking for failed torrents
+          addToClientAttempts: item.addToClientAttempts ?? null,
+          addToClientLastAttempt: item.addToClientLastAttempt ?? null,
+          addToClientError: item.addToClientError ?? null,
+        };
+      })
+    );
 
-    this.logger.info({ count: unifiedDownloads.length }, "Generated unified downloads");
+    this.logger.info(
+      { count: unifiedDownloads.length },
+      "Generated unified downloads"
+    );
 
     return unifiedDownloads;
   }
@@ -508,7 +597,8 @@ export class DownloadQueueService {
       }
     } catch (error) {
       // FAILURE: Exception thrown
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.logger.error(
         {
           queueItemId,
@@ -545,7 +635,10 @@ export class DownloadQueueService {
       retryAfterMinutes
     );
 
-    this.logger.info({ count: failedItems.length }, "Found failed torrents to retry");
+    this.logger.info(
+      { count: failedItems.length },
+      "Found failed torrents to retry"
+    );
 
     let successCount = 0;
     let permanentFailures = 0;
@@ -564,14 +657,15 @@ export class DownloadQueueService {
 
       // Reconstruct magnet link if torrentHash is a valid hash (40 char hex)
       // Don't create magnet link if torrentHash is a URL
-      const isValidHash = item.torrentHash && /^[a-fA-F0-9]{40}$/.test(item.torrentHash);
+      const isValidHash =
+        item.torrentHash && /^[a-fA-F0-9]{40}$/.test(item.torrentHash);
       const magnetLink = isValidHash
         ? `magnet:?xt=urn:btih:${item.torrentHash}&dn=${encodeURIComponent(item.title)}`
         : undefined;
 
       const success = await this.tryAddToQbittorrent(item.id, {
         magnetLink,
-        torrentHash: isValidHash ? (item.torrentHash || undefined) : undefined,
+        torrentHash: isValidHash ? item.torrentHash || undefined : undefined,
       });
 
       if (success) {
@@ -614,14 +708,15 @@ export class DownloadQueueService {
 
     // Only create magnet link if torrentHash is a valid hash (40 char hex)
     // Don't create magnet link if torrentHash is a URL
-    const isValidHash = item.torrentHash && /^[a-fA-F0-9]{40}$/.test(item.torrentHash);
+    const isValidHash =
+      item.torrentHash && /^[a-fA-F0-9]{40}$/.test(item.torrentHash);
     const magnetLink = isValidHash
       ? `magnet:?xt=urn:btih:${item.torrentHash}&dn=${encodeURIComponent(item.title)}`
       : undefined;
 
     const success = await this.tryAddToQbittorrent(id, {
       magnetLink,
-      torrentHash: isValidHash ? (item.torrentHash || undefined) : undefined,
+      torrentHash: isValidHash ? item.torrentHash || undefined : undefined,
     });
 
     return {
@@ -655,7 +750,7 @@ export class DownloadQueueService {
     const progress = torrent.progress as number | undefined;
 
     // Use qBittorrent's ETA if valid
-    if (eta !== undefined && eta > 0 && eta < 8640000) {
+    if (eta !== undefined && eta > 0 && eta < ETA.MAX_VALUE) {
       return eta;
     }
 
@@ -665,7 +760,7 @@ export class DownloadQueueService {
       const calculatedEta = remainingBytes / downloadSpeed;
 
       // Cap at 7 days to avoid ridiculous values
-      if (calculatedEta < 604800) {
+      if (calculatedEta < ETA.SEVEN_DAYS) {
         return calculatedEta;
       }
     }
